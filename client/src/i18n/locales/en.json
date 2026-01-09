@@ -1,0 +1,605 @@
+{
+  "common": {
+    "book": "Book Transfer",
+    "search": "Search",
+    "continue": "Continue",
+    "back": "Back",
+    "passengers": "Passengers",
+    "luggage": "Luggage",
+    "date": "Date",
+    "time": "Time",
+    "from": "From",
+    "to": "To",
+    "price": "Price",
+    "total": "Total",
+    "loading": "Loading...",
+    "yes": "Yes",
+    "no": "No"
+  },
+  "header": {
+    "title": "Lulini Transfers",
+    "subtitle": "Premium Airport & City Transfers",
+    "nav": {
+      "home": "Home",
+      "transfers": "Transfers",
+      "carRentals": "Car Rentals",
+      "contact": "Contact",
+      "signIn": "Sign In"
+    }
+  },
+  "hero": {
+    "title": "Book Your Private Transfer",
+    "subtitle": "Safe, reliable and comfortable rides to any destination",
+    "cta": "Get Started"
+  },
+  "home": {
+    "hero": {
+      "title": "Your Travel Partner in Georgia",
+      "subtitle": "Premium car rentals, airport transfers, and guided tours. Experience Georgia with comfort and style."
+    },
+    "services": {
+      "title": "Our Services",
+      "subtitle": "We offer a range of transportation services to meet all your travel needs",
+      "learnMore": "Learn More",
+      "comingSoon": "Coming Soon",
+      "carRentals": {
+        "title": "Car Rentals",
+        "description": "Rent a car without a driver and explore Georgia at your own pace. Wide selection of vehicles from economy to luxury."
+      },
+      "transfers": {
+        "title": "Airport Transfers",
+        "description": "Reliable and comfortable airport transfers with professional drivers. Meet & greet service included."
+      },
+      "tours": {
+        "title": "Guided Tours",
+        "description": "Discover Georgia's beauty with our expertly guided tours. From wine regions to mountain adventures."
+      }
+    },
+    "whyChooseUs": {
+      "title": "Why Choose Us",
+      "subtitle": "We're committed to providing the best travel experience in Georgia",
+      "items": {
+        "safety": {
+          "title": "Safety First",
+          "description": "All vehicles are regularly inspected and drivers are fully licensed"
+        },
+        "availability": {
+          "title": "24/7 Availability",
+          "description": "Book anytime, travel anytime. We're always here for you"
+        },
+        "quality": {
+          "title": "Premium Quality",
+          "description": "Modern fleet with top-notch amenities for your comfort"
+        },
+        "experience": {
+          "title": "Local Expertise",
+          "description": "Our team knows Georgia inside out to enhance your journey"
+        }
+      }
+    },
+    "destinations": {
+      "title": "Popular Destinations",
+      "subtitle": "Explore the most beautiful places in Georgia with our services",
+      "places": {
+        "tbilisi": {
+          "name": "Tbilisi",
+          "distance": "Capital City"
+        },
+        "batumi": {
+          "name": "Batumi",
+          "distance": "380 km from Tbilisi"
+        },
+        "kazbegi": {
+          "name": "Kazbegi",
+          "distance": "150 km from Tbilisi"
+        },
+        "kakheti": {
+          "name": "Kakheti Wine Region",
+          "distance": "100 km from Tbilisi"
+        },
+        "borjomi": {
+          "name": "Borjomi",
+          "distance": "160 km from Tbilisi"
+        },
+        "svaneti": {
+          "name": "Svaneti",
+          "distance": "450 km from Tbilisi"
+        }
+      }
+    },
+    "testimonials": {
+      "title": "What Our Customers Say",
+      "subtitle": "Read reviews from travelers who experienced our services",
+      "reviews": {
+        "review1": {
+          "text": "Excellent service! The driver was punctual and very professional. The car was clean and comfortable. Highly recommend!",
+          "name": "John Smith",
+          "location": "United States"
+        },
+        "review2": {
+          "text": "We rented a car for a week to explore Georgia. Great vehicle, fair price, and the staff was incredibly helpful.",
+          "name": "Maria Garcia",
+          "location": "Spain"
+        },
+        "review3": {
+          "text": "Best transfer service in Georgia. They tracked our flight and were waiting for us despite the delay. Amazing!",
+          "name": "Thomas Mueller",
+          "location": "Germany"
+        }
+      }
+    },
+    "transferSection": {
+      "label": "Airport Transfers",
+      "title": "Reliable Airport Pickup & Drop-off",
+      "description": "Start your journey stress-free with our premium airport transfer service. Professional drivers, flight tracking, and guaranteed punctuality.",
+      "features": {
+        "meetGreet": "Meet & Greet service with name sign",
+        "flightTracking": "Real-time flight tracking",
+        "fixedPrices": "Fixed prices with no hidden fees",
+        "professional": "Professional, English-speaking drivers"
+      },
+      "cta": "Book Airport Transfer",
+      "available": "Service Available"
+    },
+    "rentalSection": {
+      "label": "Car Rentals",
+      "title": "Explore Georgia at Your Own Pace",
+      "description": "Freedom to discover hidden gems and scenic routes. Choose from our diverse fleet of well-maintained vehicles for the ultimate road trip experience.",
+      "features": {
+        "wideSelection": "Wide selection from economy to luxury",
+        "flexibleRental": "Flexible rental periods",
+        "insurance": "Full insurance coverage included",
+        "support": "24/7 roadside assistance"
+      },
+      "cta": "Browse Our Fleet",
+      "cars": "Vehicles Available"
+    },
+    "cta": {
+      "title": "Ready to Start Your Journey?",
+      "subtitle": "Book your transfer or rent a car today and discover the beauty of Georgia",
+      "bookTransfer": "Book Transfer",
+      "rentCar": "Rent a Car",
+      "phone": "+995 555 123 456"
+    }
+  },
+  "transfers": {
+    "hero": {
+      "title": "Book Your Transfer",
+      "subtitle": "Safe, reliable and comfortable rides to any destination"
+    },
+    "howItWorks": {
+      "title": "How It Works",
+      "subtitle": "Book your transfer in 4 simple steps",
+      "steps": {
+        "book": {
+          "title": "Book Online",
+          "description": "Fill out the booking form with your trip details"
+        },
+        "confirm": {
+          "title": "Get Confirmation",
+          "description": "Receive instant confirmation via email"
+        },
+        "pickup": {
+          "title": "Meet Your Driver",
+          "description": "Driver waits at pickup location with your name sign"
+        },
+        "ride": {
+          "title": "Enjoy Your Ride",
+          "description": "Relax and enjoy a comfortable journey"
+        }
+      }
+    },
+    "fleet": {
+      "title": "Our Vehicle Fleet",
+      "subtitle": "Choose from a variety of comfortable and well-maintained vehicles"
+    },
+    "included": {
+      "title": "What's Included",
+      "subtitle": "All our transfers include these services at no extra cost",
+      "items": {
+        "flightTracking": "Flight Tracking",
+        "freeWaiting": "60 min Free Waiting",
+        "meetGreet": "Meet & Greet",
+        "wifi": "Free WiFi",
+        "water": "Bottled Water",
+        "noHidden": "No Hidden Fees"
+      }
+    },
+    "routes": {
+      "title": "Popular Routes",
+      "subtitle": "Fixed prices for the most requested destinations",
+      "from": "from"
+    },
+    "stats": {
+      "transfers": "Completed Transfers",
+      "rating": "Customer Rating",
+      "drivers": "Professional Drivers",
+      "support": "Customer Support"
+    }
+  },
+  "booking": {
+    "title": "Book Your Transfer",
+    "pickupLocation": "Pickup Location",
+    "pickupPlaceholder": "Enter pickup address or airport",
+    "dropoffLocation": "Drop-off Location",
+    "dropoffPlaceholder": "Enter destination address",
+    "selectDate": "Select Date",
+    "selectTime": "Select Time",
+    "selectVehicle": "Select Vehicle",
+    "passengers": "Passengers",
+    "luggage": "Luggage pieces",
+    "roundTrip": "Round Trip",
+    "oneWay": "One Way",
+    "returnDate": "Return Date",
+    "returnTime": "Return Time",
+    "additionalInfo": "Additional Information",
+    "flightNumber": "Flight Number (optional)",
+    "specialRequests": "Special Requests",
+    "getQuote": "Get Quote",
+    "bookNow": "Book Now"
+  },
+  "vehicles": {
+    "title": "Choose Your Vehicle",
+    "economy": {
+      "name": "Economy",
+      "description": "Comfortable sedan for up to 3 passengers",
+      "features": ["3 passengers", "2 luggage", "Free WiFi", "Water included"]
+    },
+    "business": {
+      "name": "Business",
+      "description": "Premium sedan for business travelers",
+      "features": ["3 passengers", "3 luggage", "Free WiFi", "Water & snacks", "Leather seats"]
+    },
+    "firstClass": {
+      "name": "First Class",
+      "description": "Luxury vehicle for the ultimate comfort",
+      "features": ["3 passengers", "3 luggage", "Free WiFi", "Champagne", "Premium amenities"]
+    },
+    "van": {
+      "name": "Van",
+      "description": "Spacious van for groups and families",
+      "features": ["7 passengers", "7 luggage", "Free WiFi", "Water included"]
+    },
+    "minibus": {
+      "name": "Minibus",
+      "description": "Perfect for larger groups",
+      "features": ["16 passengers", "16 luggage", "Free WiFi", "Air conditioning"]
+    }
+  },
+  "quote": {
+    "title": "Your Quote",
+    "distance": "Distance",
+    "duration": "Estimated Duration",
+    "basePrice": "Base Price",
+    "total": "Total",
+    "included": "Included in price",
+    "meetGreet": "Meet & Greet",
+    "flightTracking": "Flight Tracking",
+    "freeWaiting": "60 min free waiting",
+    "freeCancellation": "Free cancellation"
+  },
+  "contact": {
+    "title": "Contact Information",
+    "name": "Full Name",
+    "email": "Email Address",
+    "phone": "Phone Number",
+    "notes": "Additional Notes"
+  },
+  "confirmation": {
+    "title": "Booking Confirmed",
+    "message": "Thank you for your booking. You will receive a confirmation email shortly.",
+    "bookingRef": "Booking Reference",
+    "newBooking": "Make Another Booking"
+  },
+  "footer": {
+    "rights": "All rights reserved",
+    "privacy": "Privacy Policy",
+    "terms": "Terms of Service",
+    "contact": "Contact Us"
+  },
+  "features": {
+    "safeRides": {
+      "title": "Safe Rides",
+      "description": "All drivers are verified and vehicles are regularly inspected"
+    },
+    "bestPrices": {
+      "title": "Best Prices",
+      "description": "Competitive prices with no hidden fees"
+    },
+    "support": {
+      "title": "24/7 Support",
+      "description": "Our team is available around the clock"
+    },
+    "professional": {
+      "title": "Professional Drivers",
+      "description": "Experienced, multilingual chauffeurs"
+    }
+  },
+  "contactPage": {
+    "hero": {
+      "title": "Get in Touch",
+      "subtitle": "Have questions or need assistance? We're here to help you plan your perfect trip."
+    },
+    "info": {
+      "title": "Contact Information",
+      "description": "Reach out to us through any of these channels. We typically respond within 24 hours.",
+      "email": "Email",
+      "phone": "Phone",
+      "address": "Address",
+      "hours": "Working Hours",
+      "hoursValue": "24/7 - Always available"
+    },
+    "form": {
+      "title": "Send us a Message",
+      "name": "Full Name",
+      "namePlaceholder": "Enter your full name",
+      "email": "Email Address",
+      "emailPlaceholder": "Enter your email",
+      "phone": "Phone Number",
+      "phonePlaceholder": "Enter your phone number",
+      "subject": "Subject",
+      "subjectPlaceholder": "What is this regarding?",
+      "message": "Message",
+      "messagePlaceholder": "Tell us how we can help you...",
+      "submit": "Send Message",
+      "sending": "Sending...",
+      "successTitle": "Message Sent!",
+      "successMessage": "Thank you for contacting us. We'll get back to you as soon as possible.",
+      "sendAnother": "Send Another Message"
+    }
+  },
+  "carRentals": {
+    "title": "Car Rentals",
+    "subtitle": "Rent a car without a driver and explore at your own pace",
+    "perDay": "per day",
+    "day": "day",
+    "viewDetails": "View Details",
+    "bookNow": "Book Now",
+    "backToList": "Back to Car Rentals",
+    "notFound": "Car not found",
+    "noCars": "No cars available in this category",
+    "searchPlaceholder": "Search by brand, model, or feature...",
+    "pickupLocations": "Pickup Locations",
+    "allLocations": "All Locations",
+    "carsFound": "cars found",
+    "clearFilters": "Clear filters",
+    "pickupLocation": "Pickup Location",
+    "available": "Available for Rent",
+    "unavailable": "Currently Unavailable",
+    "specifications": "Specifications",
+    "features": "Features",
+    "rentalInfo": "Rental Information",
+    "unlimited": "Unlimited",
+    "contactInfo": "Need help? Contact us at +1 (555) 123-4567",
+    "categories": {
+      "all": "All Cars",
+      "economy": "Economy",
+      "business": "Business",
+      "luxury": "Luxury",
+      "suv": "SUV",
+      "sports": "Sports"
+    },
+    "transmission": {
+      "automatic": "Automatic",
+      "manual": "Manual"
+    },
+    "fuel": {
+      "petrol": "Petrol",
+      "diesel": "Diesel",
+      "hybrid": "Hybrid",
+      "electric": "Electric"
+    },
+    "specs": {
+      "passengers": "Passengers",
+      "luggage": "Luggage",
+      "doors": "Doors",
+      "transmission": "Transmission",
+      "fuel": "Fuel Type",
+      "ac": "Air Conditioning"
+    },
+    "info": {
+      "pricePerDay": "Price per Day",
+      "deposit": "Security Deposit",
+      "mileage": "Mileage Limit",
+      "minAge": "Minimum Age"
+    }
+  },
+  "profile": {
+    "title": "Profile",
+    "signInToView": "Sign in to view your profile",
+    "signInDescription": "Access your bookings, track orders, and manage your account",
+    "signIn": "Sign In",
+    "createAccount": "Create Account",
+    "memberSince": "Member since",
+    "editProfile": "Edit Profile",
+    "signOut": "Sign Out",
+    "tabs": {
+      "overview": "Overview",
+      "transfers": "Transfer Orders",
+      "rentals": "Rental Orders",
+      "settings": "Profile Settings"
+    },
+    "stats": {
+      "totalOrders": "Total Orders",
+      "completed": "Completed",
+      "pending": "Pending",
+      "totalSpent": "Total Spent"
+    },
+    "recentTransfers": "Recent Transfers",
+    "recentRentals": "Recent Rentals",
+    "viewAll": "View All",
+    "noTransferOrders": "No transfer orders yet",
+    "noRentalOrders": "No rental orders yet",
+    "quickActions": "Quick Actions",
+    "bookTransfer": "Book Transfer",
+    "rentACar": "Rent a Car",
+    "contactSupport": "Contact Support",
+    "noTransfers": {
+      "title": "No Transfer Orders",
+      "description": "You haven't booked any transfers yet",
+      "cta": "Book Your First Transfer"
+    },
+    "noRentals": {
+      "title": "No Rental Orders",
+      "description": "You haven't rented any cars yet",
+      "cta": "Browse Cars"
+    },
+    "tripDetails": "Trip Details",
+    "pickup": "Pickup",
+    "dropoff": "Drop-off",
+    "bookingInfo": "Booking Info",
+    "orderId": "Order ID",
+    "vehicle": "Vehicle",
+    "passengers": "Passengers",
+    "roundTrip": "Round Trip",
+    "oneWay": "One Way",
+    "rentalDetails": "Rental Details",
+    "pickupLocation": "Pickup Location",
+    "rentalPeriod": "Rental Period",
+    "pricing": "Pricing",
+    "dailyRate": "Daily Rate",
+    "duration": "Duration",
+    "days": "days",
+    "notes": "Notes",
+    "settings": {
+      "title": "Profile Settings",
+      "fullName": "Full Name",
+      "namePlaceholder": "Enter your name",
+      "email": "Email Address",
+      "emailPlaceholder": "Enter your email",
+      "phone": "Phone Number",
+      "phonePlaceholder": "Enter your phone number",
+      "saveChanges": "Save Changes",
+      "reset": "Reset"
+    },
+    "status": {
+      "pending": "Pending",
+      "confirmed": "Confirmed",
+      "active": "Active",
+      "completed": "Completed",
+      "cancelled": "Cancelled"
+    }
+  },
+  "admin": {
+    "title": "Admin Panel",
+    "sidebar": {
+      "dashboard": "Dashboard",
+      "transferOrders": "Transfer Orders",
+      "rentalOrders": "Rental Orders",
+      "carRentals": "Car Rentals",
+      "transferPricing": "Transfer Pricing",
+      "backToSite": "Back to Site"
+    },
+    "dashboard": {
+      "title": "Dashboard",
+      "welcome": "Welcome to the Admin Panel",
+      "totalTransfers": "Total Transfers",
+      "totalRentals": "Total Rentals",
+      "pendingOrders": "Pending Orders",
+      "revenue": "Revenue"
+    },
+    "orders": {
+      "title": "Orders",
+      "orderId": "Order ID",
+      "customer": "Customer",
+      "date": "Date",
+      "status": "Status",
+      "total": "Total",
+      "actions": "Actions",
+      "view": "View",
+      "edit": "Edit",
+      "delete": "Delete",
+      "confirm": "Confirm",
+      "cancel": "Cancel",
+      "complete": "Complete"
+    },
+    "cars": {
+      "title": "Cars",
+      "addCar": "Add Car",
+      "editCar": "Edit Car",
+      "brand": "Brand",
+      "model": "Model",
+      "year": "Year",
+      "price": "Price per Day",
+      "category": "Category",
+      "available": "Available",
+      "unavailable": "Unavailable"
+    },
+    "pricing": {
+      "title": "Pricing Management",
+      "route": "Route",
+      "basePrice": "Base Price",
+      "addRoute": "Add Route",
+      "editRoute": "Edit Route"
+    },
+    "common": {
+      "save": "Save",
+      "cancel": "Cancel",
+      "delete": "Delete",
+      "edit": "Edit",
+      "add": "Add",
+      "search": "Search",
+      "filter": "Filter",
+      "noResults": "No results found",
+      "loading": "Loading...",
+      "confirmDelete": "Are you sure you want to delete?"
+    }
+  },
+  "auth": {
+    "signIn": {
+      "title": "Welcome back",
+      "subtitle": "Sign in to your account to continue",
+      "email": "Email Address",
+      "emailPlaceholder": "Enter your email",
+      "password": "Password",
+      "passwordPlaceholder": "Enter your password",
+      "forgotPassword": "Forgot password?",
+      "signInButton": "Sign In",
+      "signingIn": "Signing in...",
+      "orContinueWith": "or continue with",
+      "noAccount": "Don't have an account?",
+      "signUp": "Sign up",
+      "heroTitle": "Your Journey Starts Here",
+      "heroSubtitle": "Access your bookings, manage reservations, and enjoy exclusive member benefits with Lulini Transfers.",
+      "feature1": "Track your bookings in real-time",
+      "feature2": "Exclusive member discounts",
+      "feature3": "Priority customer support"
+    },
+    "signUp": {
+      "title": "Create an account",
+      "subtitle": "Join Lulini to book transfers and rentals easily",
+      "firstName": "First Name",
+      "firstNamePlaceholder": "John",
+      "lastName": "Last Name",
+      "lastNamePlaceholder": "Doe",
+      "email": "Email Address",
+      "emailPlaceholder": "john@example.com",
+      "phone": "Phone Number",
+      "phonePlaceholder": "+1 (555) 000-0000",
+      "password": "Password",
+      "passwordPlaceholder": "Create a password",
+      "passwordHint": "Must be at least 8 characters with a number and symbol",
+      "confirmPassword": "Confirm Password",
+      "confirmPasswordPlaceholder": "Confirm your password",
+      "agreeToTerms": "I agree to the",
+      "termsLink": "Terms of Service",
+      "and": "and",
+      "privacyLink": "Privacy Policy",
+      "createAccount": "Create Account",
+      "creatingAccount": "Creating account...",
+      "orContinueWith": "or continue with",
+      "haveAccount": "Already have an account?",
+      "signIn": "Sign in",
+      "heroTitle": "Start Your Journey Today",
+      "heroSubtitle": "Join thousands of travelers who trust Lulini for their transportation needs in Georgia.",
+      "benefit1Title": "Safe & Reliable",
+      "benefit1Desc": "All our drivers are vetted and vehicles regularly inspected",
+      "benefit2Title": "24/7 Availability",
+      "benefit2Desc": "Book anytime, travel anytime with round-the-clock support",
+      "benefit3Title": "Best Prices",
+      "benefit3Desc": "Competitive rates with no hidden fees or surprises",
+      "benefit4Title": "Wide Selection",
+      "benefit4Desc": "From economy to luxury, find the perfect ride for any occasion"
+    }
+  }
+}
