@@ -18,7 +18,7 @@ const app = express();
 connectDB();
 
 // Middleware
-const allowedOrigins = ['http://localhost:5173', 'https://gotours.ge'];
+const allowedOrigins = ['http://localhost:5173', 'https://gotours.ge', 'https://www.gotours.ge'];
 app.use(cors({
     origin: allowedOrigins,
     credentials: true
