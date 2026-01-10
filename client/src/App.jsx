@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import { LoadScript } from '@react-google-maps/api';
+import { useJsApiLoader } from '@react-google-maps/api';
 import { Home } from './pages/Home';
 import { Transfers } from './pages/Transfers';
 import { CarRentals } from './pages/CarRentals';
@@ -55,27 +55,27 @@ function AppContent() {
 }
 
 function App() {
-  // Note: Replace with your own Google Maps API key
   const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
+
+  const { isLoaded } = useJsApiLoader({
+    googleMapsApiKey,
+    libraries,
+  });
 
   if (!googleMapsApiKey) {
     console.warn('Google Maps API key is not set. Location autocomplete will not work.');
     return <AppContent />;
   }
 
-  return (
-    <LoadScript
-      googleMapsApiKey={googleMapsApiKey}
-      libraries={libraries}
-      loadingElement={
-        <div className="min-h-screen flex items-center justify-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-2 border-foreground border-t-transparent" />
-        </div>
-      }
-    >
-      <AppContent />
-    </LoadScript>
-  );
+  if (!isLoaded) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-2 border-foreground border-t-transparent" />
+      </div>
+    );
+  }
+
+  return <AppContent />;
 }
 
 export default App;
