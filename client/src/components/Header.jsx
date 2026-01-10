@@ -43,7 +43,7 @@ export function Header() {
           {/* Logo */}
           <a href="/" className="flex items-center gap-2">
             <div className="w-8 h-8 bg-foreground rounded-md flex items-center justify-center">
-              <span className="text-background font-bold text-lg">L</span>
+              <span className="text-background font-bold text-lg">G</span>
             </div>
             <span className="font-semibold text-lg hidden sm:block">
               {t('header.title')}

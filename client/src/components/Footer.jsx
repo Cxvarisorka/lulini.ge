@@ -14,7 +14,7 @@ export function Footer() {
           <div className="space-y-4">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 bg-background rounded-md flex items-center justify-center">
-                <span className="text-foreground font-bold text-lg">L</span>
+                <span className="text-foreground font-bold text-lg">G</span>
               </div>
               <span className="font-semibold text-lg">{t('header.title')}</span>
             </div>
@@ -60,8 +60,8 @@ export function Footer() {
             <ul className="space-y-3 text-sm opacity-80">
               <li className="flex items-center gap-2">
                 <Mail className="h-4 w-4" />
-                <a href="mailto:info@lulini.com" className="hover:opacity-100 transition-opacity">
-                  info@lulini.com
+                <a href="mailto:info@gotours.ge" className="hover:opacity-100 transition-opacity">
+                  info@gotours.ge
                 </a>
               </li>
               <li className="flex items-center gap-2">
@@ -81,7 +81,7 @@ export function Footer() {
         {/* Bottom */}
         <div className="border-t border-background/20 mt-8 pt-8 flex flex-col sm:flex-row items-center justify-between gap-4">
           <p className="text-sm opacity-60">
-            © {currentYear} Lulini Transfers. {t('footer.rights')}.
+            © {currentYear} GoTours Georgia. {t('footer.rights')}.
           </p>
           <div className="flex items-center gap-6 text-sm opacity-60">
             <a href="#" className="hover:opacity-100 transition-opacity">

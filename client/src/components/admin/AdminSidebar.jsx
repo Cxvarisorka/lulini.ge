@@ -37,10 +37,10 @@ export function AdminSidebar() {
       <div className="lg:hidden fixed top-0 left-0 right-0 z-50 bg-foreground text-background h-16 flex items-center justify-between px-4">
         <Link to="/admin" className="flex items-center gap-3">
           <div className="w-8 h-8 bg-background rounded-lg flex items-center justify-center">
-            <span className="text-foreground font-bold text-lg">L</span>
+            <span className="text-foreground font-bold text-lg">G</span>
           </div>
           <div>
-            <span className="font-semibold block">Lulini</span>
+            <span className="font-semibold block">GoTours</span>
             <span className="text-xs text-background/60">Admin</span>
           </div>
         </Link>
@@ -76,7 +76,7 @@ export function AdminSidebar() {
               <span className="text-foreground font-bold text-xl">L</span>
             </div>
             <div>
-              <span className="font-semibold text-lg block">Lulini</span>
+              <span className="font-semibold text-lg block">GoTours</span>
               <span className="text-xs text-background/60">Admin Panel</span>
             </div>
           </Link>

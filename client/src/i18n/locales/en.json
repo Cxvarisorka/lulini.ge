@@ -17,7 +17,7 @@
     "no": "No"
   },
   "header": {
-    "title": "Lulini Transfers",
+    "title": "GoTours Georgia",
     "subtitle": "Premium Airport & City Transfers",
     "nav": {
       "home": "Home",
@@ -560,14 +560,14 @@
       "noAccount": "Don't have an account?",
       "signUp": "Sign up",
       "heroTitle": "Your Journey Starts Here",
-      "heroSubtitle": "Access your bookings, manage reservations, and enjoy exclusive member benefits with Lulini Transfers.",
+      "heroSubtitle": "Access your bookings, manage reservations, and enjoy exclusive member benefits with GoTours Georgia.",
       "feature1": "Track your bookings in real-time",
       "feature2": "Exclusive member discounts",
       "feature3": "Priority customer support"
     },
     "signUp": {
       "title": "Create an account",
-      "subtitle": "Join Lulini to book transfers and rentals easily",
+      "subtitle": "Join GoTours to book transfers and rentals easily",
       "firstName": "First Name",
       "firstNamePlaceholder": "John",
       "lastName": "Last Name",
@@ -591,7 +591,7 @@
       "haveAccount": "Already have an account?",
       "signIn": "Sign in",
       "heroTitle": "Start Your Journey Today",
-      "heroSubtitle": "Join thousands of travelers who trust Lulini for their transportation needs in Georgia.",
+      "heroSubtitle": "Join thousands of travelers who trust GoTours for their transportation needs in Georgia.",
       "benefit1Title": "Safe & Reliable",
       "benefit1Desc": "All our drivers are vetted and vehicles regularly inspected",
       "benefit2Title": "24/7 Availability",

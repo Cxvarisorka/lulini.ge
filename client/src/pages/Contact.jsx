@@ -40,8 +40,8 @@ export function Contact() {
     {
       icon: Mail,
       title: t('contactPage.info.email'),
-      value: 'info@lulini.com',
-      link: 'mailto:info@lulini.com'
+      value: 'info@gotours.ge',
+      link: 'mailto:info@gotours.ge'
     },
     {
       icon: Phone,
