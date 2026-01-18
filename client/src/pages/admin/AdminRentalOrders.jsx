@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Calendar, Clock, User, Phone, Mail, Car, Trash2, Check, X, MapPin, ChevronDown } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Calendar, Clock, User, Phone, Mail, Car, Trash2, Check, X, MapPin, ChevronDown, Loader2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { useAdmin } from '../../context/AdminContext';
@@ -21,22 +21,51 @@ const statusLabels = {
 };
 
 export function AdminRentalOrders() {
-  const { rentalOrders, updateRentalOrder, deleteRentalOrder, getCarById, cityLocations } = useAdmin();
+  const { rentalOrders, updateRentalOrderStatus, deleteRentalOrder, getCarById, cityLocations, fetchRentalOrders } = useAdmin();
   const [filterStatus, setFilterStatus] = useState('all');
   const [expandedOrder, setExpandedOrder] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [actionLoading, setActionLoading] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  // Fetch rental orders on mount
+  useEffect(() => {
+    const loadOrders = async () => {
+      setLoading(true);
+      try {
+        await fetchRentalOrders();
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadOrders();
+  }, []);
 
   const filteredOrders = filterStatus === 'all'
     ? rentalOrders
     : rentalOrders.filter(order => order.status === filterStatus);
 
-  const handleStatusChange = (orderId, newStatus) => {
-    updateRentalOrder(orderId, { status: newStatus });
+  const handleStatusChange = async (orderId, newStatus) => {
+    setActionLoading(orderId);
+    try {
+      await updateRentalOrderStatus(orderId, newStatus);
+    } catch (error) {
+      console.error('Failed to update order status:', error);
+    } finally {
+      setActionLoading(null);
+    }
   };
 
-  const handleDelete = (orderId) => {
-    deleteRentalOrder(orderId);
-    setDeleteConfirm(null);
+  const handleDelete = async (orderId) => {
+    setActionLoading(orderId);
+    try {
+      await deleteRentalOrder(orderId);
+      setDeleteConfirm(null);
+    } catch (error) {
+      console.error('Failed to delete order:', error);
+    } finally {
+      setActionLoading(null);
+    }
   };
 
   const formatDate = (dateString) => {
@@ -97,7 +126,13 @@ export function AdminRentalOrders() {
 
       {/* Orders List */}
       <div className="space-y-4">
-        {filteredOrders.length === 0 ? (
+        {loading ? (
+          <Card>
+            <CardContent className="py-12 flex items-center justify-center">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </CardContent>
+          </Card>
+        ) : filteredOrders.length === 0 ? (
           <Card>
             <CardContent className="py-12 text-center text-muted-foreground">
               {filterStatus === 'all'
@@ -107,14 +142,21 @@ export function AdminRentalOrders() {
           </Card>
         ) : (
           filteredOrders.map(order => {
-            const car = order.carId ? getCarById(order.carId) : null;
+            const orderId = order._id || order.id;
+            const carSnapshot = order.carSnapshot || {};
+            const car = order.car || getCarById(order.carId);
+            const carImage = carSnapshot.image || car?.image;
+            const carName = carSnapshot.brand && carSnapshot.model
+              ? `${carSnapshot.brand} ${carSnapshot.model}`
+              : car ? `${car.brand} ${car.model}` : order.carName || 'N/A';
+            const isLoading = actionLoading === orderId;
 
             return (
-              <Card key={order.id} className="overflow-hidden">
+              <Card key={orderId} className="overflow-hidden">
                 <CardHeader className="pb-3">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
-                      <CardTitle className="text-lg">{order.id}</CardTitle>
+                      <CardTitle className="text-lg font-mono text-sm">{orderId.slice(-8).toUpperCase()}</CardTitle>
                       <span className={`px-2 py-1 text-xs font-medium rounded-full ${statusColors[order.status]}`}>
                         {statusLabels[order.status]}
                       </span>
@@ -126,9 +168,9 @@ export function AdminRentalOrders() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => setExpandedOrder(expandedOrder === order.id ? null : order.id)}
+                        onClick={() => setExpandedOrder(expandedOrder === orderId ? null : orderId)}
                       >
-                        <ChevronDown className={`h-4 w-4 transition-transform ${expandedOrder === order.id ? 'rotate-180' : ''}`} />
+                        <ChevronDown className={`h-4 w-4 transition-transform ${expandedOrder === orderId ? 'rotate-180' : ''}`} />
                       </Button>
                     </div>
                   </div>
@@ -138,10 +180,10 @@ export function AdminRentalOrders() {
                   {/* Quick Info */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                     <div className="flex items-start gap-3">
-                      {car?.image && (
+                      {carImage && (
                         <img
-                          src={car.image}
-                          alt={`${car.brand} ${car.model}`}
+                          src={carImage}
+                          alt={carName}
                           className="w-16 h-12 object-cover rounded-lg"
                           onError={(e) => {
                             e.target.style.display = 'none';
@@ -150,9 +192,7 @@ export function AdminRentalOrders() {
                       )}
                       <div className="text-sm">
                         <p className="text-muted-foreground">Vehicle</p>
-                        <p className="font-medium">
-                          {car ? `${car.brand} ${car.model}` : order.carName || 'N/A'}
-                        </p>
+                        <p className="font-medium">{carName}</p>
                       </div>
                     </div>
                     <div className="flex items-start gap-2">
@@ -166,13 +206,13 @@ export function AdminRentalOrders() {
                       <MapPin className="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
                       <div className="text-sm">
                         <p className="text-muted-foreground">Pickup Location</p>
-                        <p className="font-medium">{getLocationName(order.locationId)}</p>
+                        <p className="font-medium">{order.pickupLocation || getLocationName(order.locationId)}</p>
                       </div>
                     </div>
                   </div>
 
                   {/* Expanded Details */}
-                  {expandedOrder === order.id && (
+                  {expandedOrder === orderId && (
                     <div className="border-t pt-4 mt-4 space-y-4">
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {/* Customer Info */}
@@ -206,18 +246,18 @@ export function AdminRentalOrders() {
                               <Calendar className="h-4 w-4 text-muted-foreground" />
                               <span>{order.days} days rental</span>
                             </div>
-                            {car && (
-                              <>
-                                <div className="flex items-center gap-2">
-                                  <span className="text-muted-foreground">Daily Rate:</span>
-                                  <span>${car.pricePerDay}</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <span className="text-muted-foreground">Deposit:</span>
-                                  <span>${car.deposit}</span>
-                                </div>
-                              </>
-                            )}
+                            <div className="flex items-center gap-2">
+                              <Clock className="h-4 w-4 text-muted-foreground" />
+                              <span>Pickup: {order.pickupTime || '10:00'} | Return: {order.returnTime || '10:00'}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-muted-foreground">Daily Rate:</span>
+                              <span>${order.pricePerDay || carSnapshot.pricePerDay || car?.pricePerDay || 0}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-muted-foreground">Deposit:</span>
+                              <span>${order.deposit || car?.deposit || 0}</span>
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -228,7 +268,7 @@ export function AdminRentalOrders() {
                         <div className="grid grid-cols-3 gap-4 text-sm">
                           <div>
                             <p className="text-muted-foreground">Daily Rate</p>
-                            <p className="font-medium">${order.pricePerDay || car?.pricePerDay || 0}</p>
+                            <p className="font-medium">${order.pricePerDay || carSnapshot.pricePerDay || 0}</p>
                           </div>
                           <div>
                             <p className="text-muted-foreground">Duration</p>
@@ -257,17 +297,19 @@ export function AdminRentalOrders() {
                           <>
                             <Button
                               size="sm"
-                              onClick={() => handleStatusChange(order.id, 'confirmed')}
+                              onClick={() => handleStatusChange(orderId, 'confirmed')}
+                              disabled={isLoading}
                             >
-                              <Check className="h-4 w-4 mr-1" />
+                              {isLoading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Check className="h-4 w-4 mr-1" />}
                               Confirm
                             </Button>
                             <Button
                               size="sm"
                               variant="outline"
-                              onClick={() => handleStatusChange(order.id, 'cancelled')}
+                              onClick={() => handleStatusChange(orderId, 'cancelled')}
+                              disabled={isLoading}
                             >
-                              <X className="h-4 w-4 mr-1" />
+                              {isLoading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <X className="h-4 w-4 mr-1" />}
                               Cancel
                             </Button>
                           </>
@@ -275,34 +317,39 @@ export function AdminRentalOrders() {
                         {order.status === 'confirmed' && (
                           <Button
                             size="sm"
-                            onClick={() => handleStatusChange(order.id, 'active')}
+                            onClick={() => handleStatusChange(orderId, 'active')}
+                            disabled={isLoading}
                           >
-                            <Car className="h-4 w-4 mr-1" />
+                            {isLoading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Car className="h-4 w-4 mr-1" />}
                             Mark Active
                           </Button>
                         )}
                         {order.status === 'active' && (
                           <Button
                             size="sm"
-                            onClick={() => handleStatusChange(order.id, 'completed')}
+                            onClick={() => handleStatusChange(orderId, 'completed')}
+                            disabled={isLoading}
                           >
-                            <Check className="h-4 w-4 mr-1" />
+                            {isLoading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Check className="h-4 w-4 mr-1" />}
                             Mark Completed
                           </Button>
                         )}
-                        {deleteConfirm === order.id ? (
+                        {deleteConfirm === orderId ? (
                           <div className="flex items-center gap-2">
                             <Button
                               size="sm"
                               variant="destructive"
-                              onClick={() => handleDelete(order.id)}
+                              onClick={() => handleDelete(orderId)}
+                              disabled={isLoading}
                             >
+                              {isLoading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
                               Confirm Delete
                             </Button>
                             <Button
                               size="sm"
                               variant="ghost"
                               onClick={() => setDeleteConfirm(null)}
+                              disabled={isLoading}
                             >
                               Cancel
                             </Button>
@@ -312,7 +359,8 @@ export function AdminRentalOrders() {
                             size="sm"
                             variant="ghost"
                             className="text-destructive hover:text-destructive"
-                            onClick={() => setDeleteConfirm(order.id)}
+                            onClick={() => setDeleteConfirm(orderId)}
+                            disabled={isLoading}
                           >
                             <Trash2 className="h-4 w-4 mr-1" />
                             Delete

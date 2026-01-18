@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { MapPin, Calendar, Clock, User, Phone, Mail, Car, Trash2, Check, X, Eye, ChevronDown } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { MapPin, Calendar, Clock, User, Phone, Mail, Car, Trash2, Check, X, Eye, ChevronDown, Loader2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { useAdmin } from '../../context/AdminContext';
@@ -19,22 +19,42 @@ const statusLabels = {
 };
 
 export function AdminTransferOrders() {
-  const { transferOrders, updateTransferOrder, deleteTransferOrder } = useAdmin();
+  const { transferOrders, updateTransferOrderStatus, deleteTransferOrder, fetchTransferOrders, loadingTransfers } = useAdmin();
   const [filterStatus, setFilterStatus] = useState('all');
   const [expandedOrder, setExpandedOrder] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [actionLoading, setActionLoading] = useState(null);
+
+  // Refresh transfers on mount
+  useEffect(() => {
+    fetchTransferOrders();
+  }, []);
 
   const filteredOrders = filterStatus === 'all'
     ? transferOrders
     : transferOrders.filter(order => order.status === filterStatus);
 
-  const handleStatusChange = (orderId, newStatus) => {
-    updateTransferOrder(orderId, { status: newStatus });
+  const handleStatusChange = async (orderId, newStatus) => {
+    setActionLoading(orderId);
+    try {
+      await updateTransferOrderStatus(orderId, newStatus);
+    } catch (error) {
+      console.error('Failed to update status:', error);
+    } finally {
+      setActionLoading(null);
+    }
   };
 
-  const handleDelete = (orderId) => {
-    deleteTransferOrder(orderId);
-    setDeleteConfirm(null);
+  const handleDelete = async (orderId) => {
+    setActionLoading(orderId);
+    try {
+      await deleteTransferOrder(orderId);
+      setDeleteConfirm(null);
+    } catch (error) {
+      console.error('Failed to delete order:', error);
+    } finally {
+      setActionLoading(null);
+    }
   };
 
   const formatDate = (dateString) => {
@@ -90,7 +110,14 @@ export function AdminTransferOrders() {
 
       {/* Orders List */}
       <div className="space-y-4">
-        {filteredOrders.length === 0 ? (
+        {loadingTransfers ? (
+          <Card>
+            <CardContent className="py-12 text-center text-muted-foreground">
+              <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2" />
+              Loading transfers...
+            </CardContent>
+          </Card>
+        ) : filteredOrders.length === 0 ? (
           <Card>
             <CardContent className="py-12 text-center text-muted-foreground">
               {filterStatus === 'all'
@@ -100,11 +127,11 @@ export function AdminTransferOrders() {
           </Card>
         ) : (
           filteredOrders.map(order => (
-            <Card key={order.id} className="overflow-hidden">
+            <Card key={order._id} className="overflow-hidden">
               <CardHeader className="pb-3">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div className="flex items-center gap-3">
-                    <CardTitle className="text-lg">{order.id}</CardTitle>
+                    <CardTitle className="text-lg">TR-{order._id.slice(-8).toUpperCase()}</CardTitle>
                     <span className={`px-2 py-1 text-xs font-medium rounded-full ${statusColors[order.status]}`}>
                       {statusLabels[order.status]}
                     </span>
@@ -116,9 +143,9 @@ export function AdminTransferOrders() {
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => setExpandedOrder(expandedOrder === order.id ? null : order.id)}
+                      onClick={() => setExpandedOrder(expandedOrder === order._id ? null : order._id)}
                     >
-                      <ChevronDown className={`h-4 w-4 transition-transform ${expandedOrder === order.id ? 'rotate-180' : ''}`} />
+                      <ChevronDown className={`h-4 w-4 transition-transform ${expandedOrder === order._id ? 'rotate-180' : ''}`} />
                     </Button>
                   </div>
                 </div>
@@ -151,7 +178,7 @@ export function AdminTransferOrders() {
                 </div>
 
                 {/* Expanded Details */}
-                {expandedOrder === order.id && (
+                {expandedOrder === order._id && (
                   <div className="border-t pt-4 mt-4 space-y-4">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       {/* Customer Info */}
@@ -242,15 +269,21 @@ export function AdminTransferOrders() {
                         <>
                           <Button
                             size="sm"
-                            onClick={() => handleStatusChange(order.id, 'confirmed')}
+                            onClick={() => handleStatusChange(order._id, 'confirmed')}
+                            disabled={actionLoading === order._id}
                           >
-                            <Check className="h-4 w-4 mr-1" />
+                            {actionLoading === order._id ? (
+                              <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                            ) : (
+                              <Check className="h-4 w-4 mr-1" />
+                            )}
                             Confirm
                           </Button>
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => handleStatusChange(order.id, 'cancelled')}
+                            onClick={() => handleStatusChange(order._id, 'cancelled')}
+                            disabled={actionLoading === order._id}
                           >
                             <X className="h-4 w-4 mr-1" />
                             Cancel
@@ -260,19 +293,28 @@ export function AdminTransferOrders() {
                       {order.status === 'confirmed' && (
                         <Button
                           size="sm"
-                          onClick={() => handleStatusChange(order.id, 'completed')}
+                          onClick={() => handleStatusChange(order._id, 'completed')}
+                          disabled={actionLoading === order._id}
                         >
-                          <Check className="h-4 w-4 mr-1" />
+                          {actionLoading === order._id ? (
+                            <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                          ) : (
+                            <Check className="h-4 w-4 mr-1" />
+                          )}
                           Mark Completed
                         </Button>
                       )}
-                      {deleteConfirm === order.id ? (
+                      {deleteConfirm === order._id ? (
                         <div className="flex items-center gap-2">
                           <Button
                             size="sm"
                             variant="destructive"
-                            onClick={() => handleDelete(order.id)}
+                            onClick={() => handleDelete(order._id)}
+                            disabled={actionLoading === order._id}
                           >
+                            {actionLoading === order._id ? (
+                              <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                            ) : null}
                             Confirm Delete
                           </Button>
                           <Button
@@ -288,7 +330,7 @@ export function AdminTransferOrders() {
                           size="sm"
                           variant="ghost"
                           className="text-destructive hover:text-destructive"
-                          onClick={() => setDeleteConfirm(order.id)}
+                          onClick={() => setDeleteConfirm(order._id)}
                         >
                           <Trash2 className="h-4 w-4 mr-1" />
                           Delete
