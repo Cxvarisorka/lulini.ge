@@ -1,5 +1,7 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import { authService } from '../services/auth';
+import { transferService } from '../services/transfer';
+import { rentalService } from '../services/rental';
 
 const UserContext = createContext(null);
 
@@ -42,6 +44,42 @@ export function UserProvider({ children }) {
   }, []);
 
   const [userOrders, setUserOrders] = useState({ transfers: [], rentals: [] });
+
+  // Fetch user's transfers when logged in
+  const fetchUserTransfers = async () => {
+    if (!user.isLoggedIn) return;
+    try {
+      const res = await transferService.getMyTransfers();
+      setUserOrders(prev => ({
+        ...prev,
+        transfers: res.data.transfers
+      }));
+    } catch (error) {
+      console.error('Failed to fetch transfers:', error);
+    }
+  };
+
+  // Fetch user's rental orders when logged in
+  const fetchUserRentalOrders = async () => {
+    if (!user.isLoggedIn) return;
+    try {
+      const res = await rentalService.getMyOrders();
+      setUserOrders(prev => ({
+        ...prev,
+        rentals: res.data.orders
+      }));
+    } catch (error) {
+      console.error('Failed to fetch rental orders:', error);
+    }
+  };
+
+  // Fetch orders when user logs in
+  useEffect(() => {
+    if (user.isLoggedIn) {
+      fetchUserTransfers();
+      fetchUserRentalOrders();
+    }
+  }, [user.isLoggedIn]);
 
   // Login user
   const login = async (email, password) => {
@@ -90,15 +128,10 @@ export function UserProvider({ children }) {
     setUser(prev => ({ ...prev, ...updates }));
   };
 
-  // Add transfer order for user
-  const addUserTransferOrder = (order) => {
-    const newOrder = {
-      ...order,
-      id: order.id || `TO-${Date.now()}`,
-      userId: user.id,
-      createdAt: new Date().toISOString(),
-      status: 'pending'
-    };
+  // Add transfer order for user (via API)
+  const addUserTransferOrder = async (orderData) => {
+    const res = await transferService.create(orderData);
+    const newOrder = res.data.transfer;
     setUserOrders(prev => ({
       ...prev,
       transfers: [newOrder, ...prev.transfers]
@@ -106,15 +139,23 @@ export function UserProvider({ children }) {
     return newOrder;
   };
 
-  // Add rental order for user
-  const addUserRentalOrder = (order) => {
-    const newOrder = {
-      ...order,
-      id: order.id || `RO-${Date.now()}`,
-      userId: user.id,
-      createdAt: new Date().toISOString(),
-      status: 'pending'
-    };
+  // Cancel a transfer order
+  const cancelUserTransferOrder = async (orderId) => {
+    const res = await transferService.cancel(orderId);
+    const updatedOrder = res.data.transfer;
+    setUserOrders(prev => ({
+      ...prev,
+      transfers: prev.transfers.map(o =>
+        o._id === orderId ? updatedOrder : o
+      )
+    }));
+    return updatedOrder;
+  };
+
+  // Add rental order for user (via API)
+  const addUserRentalOrder = async (orderData) => {
+    const res = await rentalService.createOrder(orderData);
+    const newOrder = res.data.order;
     setUserOrders(prev => ({
       ...prev,
       rentals: [newOrder, ...prev.rentals]
@@ -122,14 +163,27 @@ export function UserProvider({ children }) {
     return newOrder;
   };
 
+  // Cancel a rental order
+  const cancelUserRentalOrder = async (orderId) => {
+    const res = await rentalService.cancelOrder(orderId);
+    const updatedOrder = res.data.order;
+    setUserOrders(prev => ({
+      ...prev,
+      rentals: prev.rentals.map(o =>
+        o._id === orderId ? updatedOrder : o
+      )
+    }));
+    return updatedOrder;
+  };
+
   // Get user's transfer orders
   const getUserTransferOrders = () => {
-    return userOrders.transfers.filter(o => o.userId === user.id || o.email === user.email);
+    return userOrders.transfers;
   };
 
   // Get user's rental orders
   const getUserRentalOrders = () => {
-    return userOrders.rentals.filter(o => o.userId === user.id || o.email === user.email);
+    return userOrders.rentals;
   };
 
   // Get order statistics
@@ -178,11 +232,15 @@ export function UserProvider({ children }) {
     logout,
     updateProfile,
     addUserTransferOrder,
+    cancelUserTransferOrder,
     addUserRentalOrder,
+    cancelUserRentalOrder,
     getUserTransferOrders,
     getUserRentalOrders,
     getOrderStats,
     syncOrderStatus,
+    fetchUserTransfers,
+    fetchUserRentalOrders,
     isLoggedIn: user.isLoggedIn
   };
 
