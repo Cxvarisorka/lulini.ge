@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -20,7 +20,9 @@ import {
   X,
   User,
   Mail,
-  Phone
+  Phone,
+  LogIn,
+  Loader2
 } from 'lucide-react';
 import { Header } from '../components/Header';
 import { Footer } from '../components/Footer';
@@ -29,26 +31,71 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { cn } from '../lib/utils';
 import { useAdmin } from '../context/AdminContext';
+import { useUser } from '../context/UserContext';
+import { rentalService } from '../services/rental';
 
 export function CarRentalDetail() {
   const { carId } = useParams();
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { getCarById, cityLocations, addRentalOrder } = useAdmin();
+  const { getCarById, cityLocations, loadingCars } = useAdmin();
+  const { user, isLoggedIn, addUserRentalOrder } = useUser();
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [showBookingModal, setShowBookingModal] = useState(false);
+  const [showLoginPrompt, setShowLoginPrompt] = useState(false);
   const [bookingSubmitted, setBookingSubmitted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState(null);
+  const [fetchedCar, setFetchedCar] = useState(null);
+  const [fetchingCar, setFetchingCar] = useState(false);
   const [bookingForm, setBookingForm] = useState({
     startDate: '',
     endDate: '',
+    pickupTime: '10:00',
+    returnTime: '10:00',
     name: '',
     email: '',
     phone: '',
     notes: ''
   });
 
-  const car = getCarById(carId);
+  // Try to get car from context first, fallback to fetched car
+  const contextCar = getCarById(carId);
+  const car = contextCar || fetchedCar;
   const location = car ? cityLocations.find(loc => loc.id === car.locationId) : null;
+
+  // Check if carId is a valid MongoDB ObjectId (24 hex characters)
+  const isValidObjectId = carId && /^[a-fA-F0-9]{24}$/.test(carId);
+
+  // Fetch car directly from API if not found in context
+  useEffect(() => {
+    if (!contextCar && !loadingCars && isValidObjectId && !fetchedCar && !fetchingCar) {
+      setFetchingCar(true);
+      rentalService.getCarById(carId)
+        .then(res => {
+          setFetchedCar(res.data.car);
+        })
+        .catch(err => {
+          console.error('Failed to fetch car:', err);
+        })
+        .finally(() => {
+          setFetchingCar(false);
+        });
+    }
+  }, [carId, contextCar, loadingCars, fetchedCar, fetchingCar, isValidObjectId]);
+
+  // Show loading while fetching car
+  if (loadingCars || fetchingCar) {
+    return (
+      <div className="min-h-screen flex flex-col">
+        <Header />
+        <div className="flex-1 flex items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+        <Footer />
+      </div>
+    );
+  }
 
   if (!car) {
     return (
@@ -293,7 +340,20 @@ export function CarRentalDetail() {
                 size="xl"
                 className="w-full text-lg py-6"
                 disabled={!car.available}
-                onClick={() => setShowBookingModal(true)}
+                onClick={() => {
+                  if (!isLoggedIn) {
+                    setShowLoginPrompt(true);
+                  } else {
+                    // Pre-fill form with user data
+                    setBookingForm(prev => ({
+                      ...prev,
+                      name: user.name || '',
+                      email: user.email || '',
+                      phone: user.phone || ''
+                    }));
+                    setShowBookingModal(true);
+                  }
+                }}
               >
                 {t('carRentals.bookNow')} - ${car.pricePerDay}/{t('carRentals.day')}
               </Button>
@@ -309,6 +369,29 @@ export function CarRentalDetail() {
 
       <Footer />
 
+      {/* Login Prompt Modal */}
+      {showLoginPrompt && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-background rounded-2xl w-full max-w-md p-8 text-center">
+            <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <LogIn className="w-8 h-8 text-blue-600" />
+            </div>
+            <h2 className="text-2xl font-bold mb-2">{t('auth.loginRequired') || 'Login Required'}</h2>
+            <p className="text-muted-foreground mb-6">
+              {t('carRentals.loginToBook') || 'Please log in or create an account to book this car.'}
+            </p>
+            <div className="flex gap-3">
+              <Button variant="outline" onClick={() => setShowLoginPrompt(false)} className="flex-1">
+                {t('common.cancel') || 'Cancel'}
+              </Button>
+              <Button onClick={() => navigate('/login', { state: { from: `/car-rentals/${carId}` } })} className="flex-1">
+                {t('auth.login') || 'Login'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Booking Modal */}
       {showBookingModal && (
         <BookingModal
@@ -317,41 +400,53 @@ export function CarRentalDetail() {
           bookingForm={bookingForm}
           setBookingForm={setBookingForm}
           bookingSubmitted={bookingSubmitted}
+          isSubmitting={isSubmitting}
+          submitError={submitError}
           onClose={() => {
             setShowBookingModal(false);
             setBookingSubmitted(false);
+            setSubmitError(null);
             setBookingForm({
               startDate: '',
               endDate: '',
+              pickupTime: '10:00',
+              returnTime: '10:00',
               name: '',
               email: '',
               phone: '',
               notes: ''
             });
           }}
-          onSubmit={() => {
-            // Calculate days
-            const start = new Date(bookingForm.startDate);
-            const end = new Date(bookingForm.endDate);
-            const days = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
-            const totalPrice = days * car.pricePerDay;
+          onSubmit={async () => {
+            setIsSubmitting(true);
+            setSubmitError(null);
 
-            addRentalOrder({
-              carId: car.id,
-              carName: `${car.brand} ${car.model}`,
-              locationId: car.locationId,
-              startDate: bookingForm.startDate,
-              endDate: bookingForm.endDate,
-              days,
-              pricePerDay: car.pricePerDay,
-              totalPrice,
-              name: bookingForm.name,
-              email: bookingForm.email,
-              phone: bookingForm.phone,
-              notes: bookingForm.notes
-            });
+            try {
+              // Calculate days
+              const start = new Date(bookingForm.startDate);
+              const end = new Date(bookingForm.endDate);
+              const days = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
 
-            setBookingSubmitted(true);
+              await addUserRentalOrder({
+                carId: car._id || car.id,
+                startDate: bookingForm.startDate,
+                endDate: bookingForm.endDate,
+                pickupTime: bookingForm.pickupTime,
+                returnTime: bookingForm.returnTime,
+                pickupLocation: location?.name || 'Main Office',
+                days,
+                name: bookingForm.name,
+                email: bookingForm.email,
+                phone: bookingForm.phone,
+                notes: bookingForm.notes
+              });
+
+              setBookingSubmitted(true);
+            } catch (error) {
+              setSubmitError(error.message || 'Failed to submit booking');
+            } finally {
+              setIsSubmitting(false);
+            }
           }}
           t={t}
         />
@@ -360,7 +455,7 @@ export function CarRentalDetail() {
   );
 }
 
-function BookingModal({ car, location, bookingForm, setBookingForm, bookingSubmitted, onClose, onSubmit, t }) {
+function BookingModal({ car, location, bookingForm, setBookingForm, bookingSubmitted, isSubmitting, submitError, onClose, onSubmit, t }) {
   const handleChange = (e) => {
     const { name, value } = e.target;
     setBookingForm(prev => ({ ...prev, [name]: value }));
@@ -552,14 +647,28 @@ function BookingModal({ car, location, bookingForm, setBookingForm, bookingSubmi
             </div>
           )}
 
+          {/* Error Message */}
+          {submitError && (
+            <div className="bg-red-50 text-red-700 px-4 py-3 rounded-lg text-sm">
+              {submitError}
+            </div>
+          )}
+
           {/* Submit */}
           <Button
             type="submit"
             size="lg"
             className="w-full"
-            disabled={!isValid}
+            disabled={!isValid || isSubmitting}
           >
-            Submit Booking Request
+            {isSubmitting ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Submitting...
+              </>
+            ) : (
+              'Submit Booking Request'
+            )}
           </Button>
         </form>
       </div>

@@ -183,10 +183,11 @@ export function CarRentals() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredCars.map((car) => {
               const location = getLocationById(car.locationId);
+              const carId = car._id || car.id;
               return (
                 <Link
-                  key={car.id}
-                  to={`/car-rentals/${car.id}`}
+                  key={carId}
+                  to={`/car-rentals/${carId}`}
                   className="group bg-white rounded-xl border border-border overflow-hidden hover:shadow-xl transition-all duration-300"
                 >
                   {/* Car Image */}
