@@ -33,6 +33,7 @@ export function Header() {
     { key: 'home', href: '/', isRoute: true },
     { key: 'transfers', href: '/transfers', isRoute: true },
     { key: 'carRentals', href: '/car-rentals', isRoute: true },
+    { key: 'tours', href: '/tours', isRoute: true },
     { key: 'contact', href: '/contact', isRoute: true }
   ];
 
@@ -51,14 +52,14 @@ export function Header() {
           </a>
 
           {/* Desktop Navigation */}
-          <nav className="hidden md:flex items-center gap-8">
+          <nav className="hidden lg:flex items-center gap-8">
             {navItems.map((item) => (
               item.isRoute ? (
                 <Link
                   key={item.key}
                   to={item.href}
                   className={cn(
-                    "text-sm font-medium transition-colors",
+                    "text-sm font-medium transition-colors whitespace-nowrap",
                     location.pathname === item.href
                       ? "text-foreground"
                       : "text-muted-foreground hover:text-foreground"
@@ -70,7 +71,7 @@ export function Header() {
                 <a
                   key={item.key}
                   href={item.href}
-                  className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+                  className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors whitespace-nowrap"
                 >
                   {t(`header.nav.${item.key}`)}
                 </a>
@@ -79,14 +80,14 @@ export function Header() {
           </nav>
 
           {/* Actions */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 sm:gap-2">
             {/* Language Dropdown */}
             <div className="relative">
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => setIsLangOpen(!isLangOpen)}
-                className="hidden sm:flex items-center gap-1"
+                className="hidden sm:flex items-center gap-1 flex-shrink-0"
               >
                 <Globe className="h-4 w-4" />
                 <span className="text-xs uppercase">{currentLang.code}</span>
@@ -120,18 +121,18 @@ export function Header() {
 
             {/* User Profile / Sign In */}
             {isLoggedIn ? (
-              <div className="relative hidden md:block">
+              <div className="relative hidden lg:block">
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => setIsProfileOpen(!isProfileOpen)}
-                  className="flex items-center gap-2"
+                  className="flex items-center gap-1.5"
                 >
-                  <div className="w-7 h-7 bg-foreground text-background rounded-full flex items-center justify-center text-xs font-medium">
+                  <div className="w-7 h-7 bg-foreground text-background rounded-full flex items-center justify-center text-xs font-medium flex-shrink-0">
                     {user.name?.charAt(0)?.toUpperCase() || user.email?.charAt(0)?.toUpperCase() || 'U'}
                   </div>
-                  <span className="max-w-[100px] truncate">{user.name || 'User'}</span>
-                  <ChevronDown className="h-3 w-3" />
+                  <span className="max-w-[100px] truncate text-sm">{user.name || 'User'}</span>
+                  <ChevronDown className="h-3 w-3 flex-shrink-0" />
                 </Button>
 
                 {isProfileOpen && (
@@ -140,10 +141,10 @@ export function Header() {
                       className="fixed inset-0 z-40"
                       onClick={() => setIsProfileOpen(false)}
                     />
-                    <div className="absolute right-0 top-full mt-1 bg-white border border-border rounded-lg shadow-lg overflow-hidden z-50 min-w-[180px]">
+                    <div className="absolute right-0 top-full mt-1 bg-white border border-border rounded-lg shadow-lg overflow-hidden z-50 w-[220px]">
                       <div className="px-3 py-2 border-b border-border">
                         <p className="font-medium text-sm truncate">{user.name || 'User'}</p>
-                        <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+                        <p className="text-xs text-muted-foreground truncate break-all">{user.email}</p>
                       </div>
                       <Link
                         to="/profile"
@@ -169,14 +170,14 @@ export function Header() {
               </div>
             ) : (
               <Link to="/signin">
-                <Button variant="ghost" className="hidden md:flex">
+                <Button variant="ghost" className="hidden lg:flex">
                   {t('header.nav.signIn')}
                 </Button>
               </Link>
             )}
 
             <Link to="/transfers">
-              <Button className="hidden md:flex ml-2">
+              <Button className="hidden lg:flex ml-2 flex-shrink-0">
                 {t('common.book')}
               </Button>
             </Link>
@@ -185,7 +186,7 @@ export function Header() {
             <Button
               variant="ghost"
               size="icon"
-              className="md:hidden"
+              className="lg:hidden"
               onClick={() => setIsMenuOpen(!isMenuOpen)}
             >
               {isMenuOpen ? (
@@ -200,7 +201,7 @@ export function Header() {
         {/* Mobile Menu */}
         <div
           className={cn(
-            "md:hidden overflow-hidden transition-all duration-300",
+            "lg:hidden overflow-hidden transition-all duration-300",
             isMenuOpen ? "max-h-[80vh] pb-6" : "max-h-0"
           )}
         >

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import {
   MapPin,
   Calendar,
@@ -8,7 +9,8 @@ import {
   Briefcase,
   ArrowRight,
   Plane,
-  ArrowLeftRight
+  ArrowLeftRight,
+  LogIn
 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -16,12 +18,17 @@ import { Label } from './ui/label';
 import { LocationInput } from './LocationInput';
 import { VehicleSelector } from './VehicleSelector';
 import { useAdmin } from '../context/AdminContext';
+import { useUser } from '../context/UserContext';
 import { cn } from '../lib/utils';
 
 export function BookingForm({ onSubmit, onLocationsChange, routeInfo }) {
   const { t } = useTranslation();
-  const { transferPricing, addTransferOrder } = useAdmin();
+  const navigate = useNavigate();
+  const { transferPricing } = useAdmin();
+  const { user, isLoggedIn, addUserTransferOrder } = useUser();
   const [step, setStep] = useState(1);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState(null);
   const [tripType, setTripType] = useState('oneWay');
   const [formData, setFormData] = useState({
     pickup: null,
@@ -117,19 +124,59 @@ export function BookingForm({ onSubmit, onLocationsChange, routeInfo }) {
     setStep(3);
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
 
-    // Save order to admin context
-    const orderData = {
-      ...formData,
-      tripType,
-      quote
-    };
-    addTransferOrder(orderData);
+    // Check if user is logged in
+    if (!isLoggedIn) {
+      setError('Please sign in to book a transfer');
+      return;
+    }
 
-    // Call the original onSubmit callback
-    onSubmit?.(orderData);
+    setIsSubmitting(true);
+    setError(null);
+
+    try {
+      // Prepare order data for API
+      const orderData = {
+        tripType,
+        pickup: {
+          lat: formData.pickup.lat,
+          lng: formData.pickup.lng,
+          address: formData.pickupAddress
+        },
+        dropoff: {
+          lat: formData.dropoff.lat,
+          lng: formData.dropoff.lng,
+          address: formData.dropoffAddress
+        },
+        pickupAddress: formData.pickupAddress,
+        dropoffAddress: formData.dropoffAddress,
+        date: formData.date,
+        time: formData.time,
+        returnDate: formData.returnDate || null,
+        returnTime: formData.returnTime || null,
+        passengers: formData.passengers,
+        luggage: formData.luggage,
+        vehicle: formData.vehicle,
+        flightNumber: formData.flightNumber || null,
+        name: formData.name,
+        email: formData.email,
+        phone: formData.phone,
+        notes: formData.notes || null,
+        quote
+      };
+
+      // Save order via API (requires login)
+      const newOrder = await addUserTransferOrder(orderData);
+
+      // Call the original onSubmit callback with the created order
+      onSubmit?.(newOrder);
+    } catch (err) {
+      setError(err.message || 'Failed to create booking. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const isStep1Valid =
@@ -396,6 +443,39 @@ export function BookingForm({ onSubmit, onLocationsChange, routeInfo }) {
         <div className="space-y-6">
           <h3 className="text-lg font-semibold">{t('contact.title')}</h3>
 
+          {/* Login Required Notice */}
+          {!isLoggedIn && (
+            <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
+              <div className="flex items-center gap-3">
+                <LogIn className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
+                    {t('booking.loginRequired', 'Sign in required to book')}
+                  </p>
+                  <p className="text-sm text-amber-600 dark:text-amber-400">
+                    {t('booking.loginRequiredDesc', 'Please sign in to complete your booking')}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => navigate('/signin')}
+                  className="border-amber-300 text-amber-700 hover:bg-amber-100 dark:border-amber-700 dark:text-amber-300 dark:hover:bg-amber-900"
+                >
+                  {t('booking.signInButton', 'Sign In')}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Error Message */}
+          {error && (
+            <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg p-4">
+              <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+            </div>
+          )}
+
           <div className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="name">{t('contact.name')}</Label>
@@ -490,16 +570,17 @@ export function BookingForm({ onSubmit, onLocationsChange, routeInfo }) {
               variant="outline"
               onClick={() => setStep(2)}
               className="flex-1 h-12"
+              disabled={isSubmitting}
             >
               {t('common.back')}
             </Button>
             <Button
               type="submit"
-              disabled={!isStep3Valid}
+              disabled={!isStep3Valid || !isLoggedIn || isSubmitting}
               className="flex-1 h-14 text-lg"
               size="xl"
             >
-              {t('booking.bookNow')}
+              {isSubmitting ? t('booking.booking', 'Booking...') : t('booking.bookNow')}
             </Button>
           </div>
         </div>
