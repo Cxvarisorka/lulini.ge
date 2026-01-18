@@ -1,5 +1,6 @@
 const { verifyToken } = require('../utils/jwt.utils');
 const User = require('../models/user.model');
+const Driver = require('../models/driver.model');
 const AppError = require('../utils/AppError');
 const catchAsync = require('../utils/catchAsync');
 
@@ -37,4 +38,16 @@ const authorize = (...roles) => {
     };
 };
 
-module.exports = { protect, authorize };
+// Middleware to check if user is a driver (has driver profile)
+const isDriver = catchAsync(async (req, res, next) => {
+    const driver = await Driver.findOne({ user: req.user.id, isActive: true, isApproved: true });
+
+    if (!driver) {
+        return next(new AppError('Driver profile not found or not approved', 403));
+    }
+
+    req.driver = driver;
+    next();
+});
+
+module.exports = { protect, authorize, isDriver };

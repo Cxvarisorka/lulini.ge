@@ -2,17 +2,18 @@ const User = require('../models/user.model');
 const { generateToken } = require('../utils/jwt.utils');
 const AppError = require('../utils/AppError');
 const catchAsync = require('../utils/catchAsync');
+const { OAuth2Client } = require('google-auth-library');
 
 // Cookie options
 const cookieOptions = {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // 'none' for cross-origin (mobile apps)
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     path: '/'
 };
 
-// Helper to send token via cookie
+// Helper to send token via cookie AND response body (for mobile clients)
 const sendTokenResponse = (user, statusCode, res, message) => {
     const token = generateToken(user._id);
 
@@ -21,14 +22,18 @@ const sendTokenResponse = (user, statusCode, res, message) => {
     res.status(statusCode).json({
         success: true,
         message,
+        token, // Include token in response body for mobile clients
         data: {
             user: {
                 id: user._id,
                 firstName: user.firstName,
                 lastName: user.lastName,
                 email: user.email,
+                phone: user.phone,
                 role: user.role,
-                avatar: user.avatar
+                avatar: user.avatar,
+                isVerified: user.isVerified,
+                createdAt: user.createdAt
             }
         }
     });
@@ -122,7 +127,7 @@ const getMe = catchAsync(async (req, res, next) => {
     });
 });
 
-// @desc    Handle OAuth callback success
+// @desc    Handle OAuth callback success (web)
 const oauthSuccess = (req, res) => {
     const token = generateToken(req.user._id);
 
@@ -130,10 +135,92 @@ const oauthSuccess = (req, res) => {
     res.redirect(`${process.env.CLIENT_URL || 'http://localhost:5173'}/profile`);
 };
 
+// @desc    Handle OAuth callback success (mobile)
+const oauthSuccessMobile = (req, res) => {
+    const token = generateToken(req.user._id);
+    const redirectUri = req.query.state || req.session?.redirectUri;
+
+    if (redirectUri) {
+        // Redirect back to mobile app with token
+        res.redirect(`${redirectUri}?token=${token}`);
+    } else {
+        // Fallback: return JSON response
+        res.json({
+            success: true,
+            token,
+            data: {
+                user: {
+                    id: req.user._id,
+                    firstName: req.user.firstName,
+                    lastName: req.user.lastName,
+                    email: req.user.email,
+                    phone: req.user.phone,
+                    role: req.user.role,
+                    avatar: req.user.avatar,
+                    isVerified: req.user.isVerified,
+                    createdAt: req.user.createdAt
+                }
+            }
+        });
+    }
+};
+
 // @desc    Handle OAuth callback failure
 const oauthFailure = (req, res) => {
     res.redirect(`${process.env.CLIENT_URL}/login?error=oauth_failed`);
 };
+
+// @desc    Verify Google ID token from mobile app
+// @route   POST /api/auth/google/token
+const googleTokenAuth = catchAsync(async (req, res, next) => {
+    const { idToken } = req.body;
+
+    if (!idToken) {
+        return next(new AppError('ID token is required', 400));
+    }
+
+    const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
+    // Verify the ID token
+    const ticket = await client.verifyIdToken({
+        idToken,
+        audience: process.env.GOOGLE_CLIENT_ID,
+    });
+
+    const payload = ticket.getPayload();
+    const { sub: googleId, email, given_name, family_name, picture } = payload;
+
+    // Find or create user
+    let user = await User.findOne({
+        $or: [
+            { providerId: googleId, provider: 'google' },
+            { email: email }
+        ]
+    });
+
+    if (user) {
+        // If user exists with email but different provider, update provider info
+        if (user.provider !== 'google') {
+            user.provider = 'google';
+            user.providerId = googleId;
+            user.avatar = picture || user.avatar;
+            await user.save();
+        }
+    } else {
+        // Create new user
+        user = await User.create({
+            firstName: given_name,
+            lastName: family_name,
+            email: email,
+            provider: 'google',
+            providerId: googleId,
+            avatar: picture,
+            isVerified: true
+        });
+    }
+
+    sendTokenResponse(user, 200, res, 'Google login successful');
+});
 
 module.exports = {
     register,
@@ -141,5 +228,7 @@ module.exports = {
     logout,
     getMe,
     oauthSuccess,
-    oauthFailure
+    oauthSuccessMobile,
+    oauthFailure,
+    googleTokenAuth
 };
