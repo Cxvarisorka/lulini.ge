@@ -1,22 +1,26 @@
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Car, DollarSign, ArrowLeft, ClipboardList, FileText, Menu, X } from 'lucide-react';
+import { LayoutDashboard, Car, DollarSign, ArrowLeft, ClipboardList, FileText, Menu, X, MapIcon, Ticket, Users } from 'lucide-react';
 import { useAdmin } from '../../context/AdminContext';
 import { cn } from '../../lib/utils';
 
 export function AdminSidebar() {
   const location = useLocation();
-  const { transferOrders, rentalOrders } = useAdmin();
+  const { transferOrders, rentalOrders, tourOrders } = useAdmin();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const pendingTransfers = transferOrders.filter(o => o.status === 'pending').length;
   const pendingRentals = rentalOrders.filter(o => o.status === 'pending').length;
+  const pendingTours = tourOrders.filter(o => o.status === 'pending').length;
 
   const navItems = [
     { path: '/admin', icon: LayoutDashboard, label: 'Dashboard' },
     { path: '/admin/transfer-orders', icon: ClipboardList, label: 'Transfer Orders', badge: pendingTransfers },
     { path: '/admin/rental-orders', icon: FileText, label: 'Rental Orders', badge: pendingRentals },
+    { path: '/admin/tour-orders', icon: Ticket, label: 'Tour Bookings', badge: pendingTours },
+    { path: '/admin/drivers', icon: Users, label: 'Drivers' },
     { path: '/admin/car-rentals', icon: Car, label: 'Car Rentals' },
+    { path: '/admin/tours', icon: MapIcon, label: 'Tours' },
     { path: '/admin/transfer-pricing', icon: DollarSign, label: 'Transfer Pricing' },
   ];
 

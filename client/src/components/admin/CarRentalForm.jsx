@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { X, Plus, Trash2 } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { X, Plus, Upload, Loader2, Image as ImageIcon } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
@@ -11,8 +11,6 @@ const defaultCar = {
   year: new Date().getFullYear(),
   category: 'economy',
   locationId: 'tbilisi',
-  image: '',
-  images: [],
   pricePerDay: 50,
   deposit: 200,
   mileageLimit: 'unlimited',
@@ -32,10 +30,45 @@ export function CarRentalForm({ car, onClose }) {
   const { addCar, updateCar, categories, cityLocations } = useAdmin();
   const isEditing = !!car;
 
-  const [formData, setFormData] = useState(car || defaultCar);
+  const [formData, setFormData] = useState(() => {
+    if (car) {
+      return {
+        brand: car.brand || '',
+        model: car.model || '',
+        year: car.year || new Date().getFullYear(),
+        category: car.category || 'economy',
+        locationId: car.locationId || 'tbilisi',
+        pricePerDay: car.pricePerDay || 50,
+        deposit: car.deposit || 200,
+        mileageLimit: car.mileageLimit || 'unlimited',
+        minAge: car.minAge || 21,
+        passengers: car.passengers || 5,
+        luggage: car.luggage || 3,
+        doors: car.doors || 4,
+        transmission: car.transmission || 'automatic',
+        fuelType: car.fuelType || 'petrol',
+        airConditioning: car.airConditioning !== false,
+        features: car.features || [],
+        description: car.description || '',
+        available: car.available !== false,
+        existingImages: car.images || []
+      };
+    }
+    return { ...defaultCar, existingImages: [] };
+  });
+
   const [newFeature, setNewFeature] = useState('');
-  const [newImage, setNewImage] = useState('');
   const [errors, setErrors] = useState({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Image upload state
+  const [mainImageFile, setMainImageFile] = useState(null);
+  const [mainImagePreview, setMainImagePreview] = useState(car?.image || null);
+  const [galleryFiles, setGalleryFiles] = useState([]);
+  const [galleryPreviews, setGalleryPreviews] = useState([]);
+
+  const mainImageRef = useRef(null);
+  const galleryRef = useRef(null);
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -46,6 +79,53 @@ export function CarRentalForm({ car, onClose }) {
     if (errors[name]) {
       setErrors(prev => ({ ...prev, [name]: null }));
     }
+  };
+
+  // Main image upload handler
+  const handleMainImageChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      if (!file.type.startsWith('image/')) {
+        setErrors(prev => ({ ...prev, image: 'Please select an image file' }));
+        return;
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        setErrors(prev => ({ ...prev, image: 'Image must be less than 5MB' }));
+        return;
+      }
+      setMainImageFile(file);
+      setMainImagePreview(URL.createObjectURL(file));
+      setErrors(prev => ({ ...prev, image: null }));
+    }
+  };
+
+  // Gallery images upload handler
+  const handleGalleryChange = (e) => {
+    const files = Array.from(e.target.files);
+    const validFiles = files.filter(file => {
+      if (!file.type.startsWith('image/')) return false;
+      if (file.size > 5 * 1024 * 1024) return false;
+      return true;
+    });
+
+    if (validFiles.length > 0) {
+      setGalleryFiles(prev => [...prev, ...validFiles]);
+      const newPreviews = validFiles.map(file => URL.createObjectURL(file));
+      setGalleryPreviews(prev => [...prev, ...newPreviews]);
+    }
+  };
+
+  const removeGalleryImage = (index) => {
+    URL.revokeObjectURL(galleryPreviews[index]);
+    setGalleryFiles(prev => prev.filter((_, i) => i !== index));
+    setGalleryPreviews(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const removeExistingImage = (imageUrl) => {
+    setFormData(prev => ({
+      ...prev,
+      existingImages: prev.existingImages.filter(img => img !== imageUrl)
+    }));
   };
 
   const addFeature = () => {
@@ -65,43 +145,59 @@ export function CarRentalForm({ car, onClose }) {
     }));
   };
 
-  const addImage = () => {
-    if (newImage.trim() && !formData.images.includes(newImage.trim())) {
-      setFormData(prev => ({
-        ...prev,
-        images: [...prev.images, newImage.trim()]
-      }));
-      setNewImage('');
-    }
-  };
-
-  const removeImage = (image) => {
-    setFormData(prev => ({
-      ...prev,
-      images: prev.images.filter(i => i !== image)
-    }));
-  };
-
   const validate = () => {
     const newErrors = {};
     if (!formData.brand.trim()) newErrors.brand = 'Brand is required';
     if (!formData.model.trim()) newErrors.model = 'Model is required';
-    if (!formData.image.trim()) newErrors.image = 'Main image URL is required';
+    if (!isEditing && !mainImageFile && !mainImagePreview) {
+      newErrors.image = 'Main image is required';
+    }
     if (formData.pricePerDay <= 0) newErrors.pricePerDay = 'Price must be greater than 0';
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!validate()) return;
 
-    if (isEditing) {
-      updateCar(car.id, formData);
-    } else {
-      addCar(formData);
+    setIsSubmitting(true);
+    try {
+      const carData = {
+        brand: formData.brand,
+        model: formData.model,
+        year: formData.year,
+        category: formData.category,
+        locationId: formData.locationId,
+        pricePerDay: formData.pricePerDay,
+        deposit: formData.deposit,
+        mileageLimit: formData.mileageLimit,
+        minAge: formData.minAge,
+        passengers: formData.passengers,
+        luggage: formData.luggage,
+        doors: formData.doors,
+        transmission: formData.transmission,
+        fuelType: formData.fuelType,
+        airConditioning: formData.airConditioning,
+        features: formData.features,
+        description: formData.description,
+        available: formData.available
+      };
+
+      if (isEditing) {
+        // Include existing images (for keeping/removing)
+        carData.images = formData.existingImages;
+        await updateCar(car._id || car.id, carData, mainImageFile, galleryFiles);
+      } else {
+        await addCar(carData, mainImageFile, galleryFiles);
+      }
+      onClose();
+    } catch (error) {
+      console.error('Failed to save car:', error);
+      setErrors(prev => ({ ...prev, submit: error.message || 'Failed to save car' }));
+    } finally {
+      setIsSubmitting(false);
     }
-    onClose();
   };
 
   return (
@@ -115,6 +211,7 @@ export function CarRentalForm({ car, onClose }) {
           <button
             onClick={onClose}
             className="p-2 hover:bg-secondary rounded-lg transition-colors"
+            disabled={isSubmitting}
           >
             <X className="h-5 w-5" />
           </button>
@@ -122,6 +219,12 @@ export function CarRentalForm({ car, onClose }) {
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
+          {errors.submit && (
+            <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive text-sm">
+              {errors.submit}
+            </div>
+          )}
+
           {/* Basic Info */}
           <div>
             <h3 className="font-semibold mb-4">Basic Information</h3>
@@ -337,53 +440,110 @@ export function CarRentalForm({ car, onClose }) {
           <div>
             <h3 className="font-semibold mb-4">Images</h3>
             <div className="space-y-4">
+              {/* Main Image Upload */}
               <div className="space-y-2">
-                <Label htmlFor="image">Main Image URL *</Label>
-                <Input
-                  id="image"
-                  name="image"
-                  value={formData.image}
-                  onChange={handleChange}
-                  placeholder="https://..."
-                  className={errors.image ? 'border-destructive' : ''}
-                />
+                <Label>Main Image *</Label>
+                <div className="flex items-start gap-4">
+                  <div
+                    onClick={() => mainImageRef.current?.click()}
+                    className={`relative w-40 h-28 border-2 border-dashed rounded-lg cursor-pointer hover:border-foreground/50 transition-colors flex items-center justify-center overflow-hidden ${
+                      errors.image ? 'border-destructive' : 'border-input'
+                    }`}
+                  >
+                    {mainImagePreview ? (
+                      <img
+                        src={mainImagePreview}
+                        alt="Main preview"
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="text-center p-4">
+                        <Upload className="h-6 w-6 mx-auto mb-1 text-muted-foreground" />
+                        <p className="text-xs text-muted-foreground">Click to upload</p>
+                      </div>
+                    )}
+                    <input
+                      ref={mainImageRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleMainImageChange}
+                      className="hidden"
+                    />
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    <p>Upload main car image</p>
+                    <p>Max 5MB, JPG/PNG/WebP</p>
+                  </div>
+                </div>
                 {errors.image && <p className="text-xs text-destructive">{errors.image}</p>}
               </div>
 
+              {/* Gallery Images Upload */}
               <div className="space-y-2">
                 <Label>Gallery Images</Label>
-                <div className="flex gap-2">
-                  <Input
-                    value={newImage}
-                    onChange={(e) => setNewImage(e.target.value)}
-                    placeholder="Add image URL..."
-                    onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addImage())}
+                <div
+                  onClick={() => galleryRef.current?.click()}
+                  className="border-2 border-dashed border-input rounded-lg p-4 cursor-pointer hover:border-foreground/50 transition-colors text-center"
+                >
+                  <ImageIcon className="h-6 w-6 mx-auto mb-2 text-muted-foreground" />
+                  <p className="text-sm text-muted-foreground">Click to add gallery images</p>
+                  <input
+                    ref={galleryRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={handleGalleryChange}
+                    className="hidden"
                   />
-                  <Button type="button" variant="outline" onClick={addImage}>
-                    <Plus className="h-4 w-4" />
-                  </Button>
                 </div>
-                {formData.images.length > 0 && (
-                  <div className="flex flex-wrap gap-2 mt-2">
-                    {formData.images.map((img, idx) => (
-                      <div key={idx} className="relative group">
-                        <img
-                          src={img}
-                          alt={`Gallery ${idx + 1}`}
-                          className="w-20 h-14 object-cover rounded-lg"
-                          onError={(e) => {
-                            e.target.src = 'https://images.unsplash.com/photo-1494976388531-d1058494cdd8?w=400&q=80';
-                          }}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => removeImage(img)}
-                          className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </div>
-                    ))}
+
+                {/* Existing Gallery Images (when editing) */}
+                {formData.existingImages.length > 0 && (
+                  <div>
+                    <p className="text-sm text-muted-foreground mb-2">Existing images:</p>
+                    <div className="flex flex-wrap gap-2">
+                      {formData.existingImages.map((img, idx) => (
+                        <div key={`existing-${idx}`} className="relative group">
+                          <img
+                            src={img}
+                            alt={`Existing ${idx + 1}`}
+                            className="w-20 h-14 object-cover rounded-lg"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => removeExistingImage(img)}
+                            className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* New Gallery Previews */}
+                {galleryPreviews.length > 0 && (
+                  <div>
+                    <p className="text-sm text-muted-foreground mb-2">New images to upload:</p>
+                    <div className="flex flex-wrap gap-2">
+                      {galleryPreviews.map((preview, idx) => (
+                        <div key={`new-${idx}`} className="relative group">
+                          <img
+                            src={preview}
+                            alt={`New ${idx + 1}`}
+                            className="w-20 h-14 object-cover rounded-lg"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => removeGalleryImage(idx)}
+                            className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
@@ -458,11 +618,18 @@ export function CarRentalForm({ car, onClose }) {
 
           {/* Actions */}
           <div className="flex justify-end gap-3 pt-4 border-t">
-            <Button type="button" variant="outline" onClick={onClose}>
+            <Button type="button" variant="outline" onClick={onClose} disabled={isSubmitting}>
               Cancel
             </Button>
-            <Button type="submit">
-              {isEditing ? 'Save Changes' : 'Add Car'}
+            <Button type="submit" disabled={isSubmitting}>
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  {isEditing ? 'Saving...' : 'Creating...'}
+                </>
+              ) : (
+                isEditing ? 'Save Changes' : 'Add Car'
+              )}
             </Button>
           </div>
         </form>
