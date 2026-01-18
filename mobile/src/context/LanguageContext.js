@@ -1,0 +1,67 @@
+import React, { createContext, useState, useContext, useEffect } from 'react';
+import * as SecureStore from 'expo-secure-store';
+import { useTranslation } from 'react-i18next';
+import '../i18n';
+
+const LanguageContext = createContext({});
+
+export const useLanguage = () => useContext(LanguageContext);
+
+export const LANGUAGES = [
+  { code: 'en', name: 'English', nativeName: 'English', flag: 'GB' },
+  { code: 'es', name: 'Spanish', nativeName: 'Espanol', flag: 'ES' },
+  { code: 'ru', name: 'Russian', nativeName: 'Русский', flag: 'RU' },
+  { code: 'ka', name: 'Georgian', nativeName: 'ქართული', flag: 'GE' },
+];
+
+export const LanguageProvider = ({ children }) => {
+  const { i18n } = useTranslation();
+  const [currentLanguage, setCurrentLanguage] = useState('en');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    loadSavedLanguage();
+  }, []);
+
+  const loadSavedLanguage = async () => {
+    try {
+      const savedLanguage = await SecureStore.getItemAsync('language');
+      if (savedLanguage && LANGUAGES.find(l => l.code === savedLanguage)) {
+        setCurrentLanguage(savedLanguage);
+        await i18n.changeLanguage(savedLanguage);
+      }
+    } catch (error) {
+      console.log('Error loading language:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const changeLanguage = async (languageCode) => {
+    try {
+      await SecureStore.setItemAsync('language', languageCode);
+      await i18n.changeLanguage(languageCode);
+      setCurrentLanguage(languageCode);
+    } catch (error) {
+      console.log('Error changing language:', error);
+    }
+  };
+
+  const getCurrentLanguageInfo = () => {
+    return LANGUAGES.find(l => l.code === currentLanguage) || LANGUAGES[0];
+  };
+
+  return (
+    <LanguageContext.Provider
+      value={{
+        currentLanguage,
+        changeLanguage,
+        languages: LANGUAGES,
+        getCurrentLanguageInfo,
+        loading,
+      }}
+    >
+      {children}
+    </LanguageContext.Provider>
+  );
+};
