@@ -95,3 +95,9 @@
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* Ensure smooth scrolling for horizontal scroll containers */
+.overflow-x-auto {
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+}

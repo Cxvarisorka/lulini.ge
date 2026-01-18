@@ -23,6 +23,7 @@
       "home": "Home",
       "transfers": "Transfers",
       "carRentals": "Car Rentals",
+      "tours": "Tours",
       "contact": "Contact",
       "signIn": "Sign In"
     }
@@ -236,7 +237,11 @@
     "flightNumber": "Flight Number (optional)",
     "specialRequests": "Special Requests",
     "getQuote": "Get Quote",
-    "bookNow": "Book Now"
+    "bookNow": "Book Now",
+    "booking": "Booking...",
+    "loginRequired": "Sign in required to book",
+    "loginRequiredDesc": "Please sign in to complete your booking",
+    "signInButton": "Sign In"
   },
   "vehicles": {
     "title": "Choose Your Vehicle",
@@ -404,8 +409,92 @@
       "minAge": "Minimum Age"
     }
   },
+  "tours": {
+    "title": "Tours",
+    "subtitle": "Discover Georgia with our expertly guided tours",
+    "perPerson": "per person",
+    "perGroup": "per group",
+    "viewDetails": "View Details",
+    "bookNow": "Book Now",
+    "backToList": "Back to Tours",
+    "notFound": "Tour not found",
+    "noTours": "No tours available",
+    "searchPlaceholder": "Search by tour name, location...",
+    "toursFound": "tours found",
+    "clearFilters": "Clear filters",
+    "available": "Available",
+    "unavailable": "Currently Unavailable",
+    "featured": "Featured Tour",
+    "duration": "Duration",
+    "groupSize": "Group Size",
+    "meetingPoint": "Meeting Point",
+    "language": "Language",
+    "languages": "Languages",
+    "difficulty": "Difficulty",
+    "includes": "What's Included",
+    "excludes": "What's Not Included",
+    "itinerary": "Itinerary",
+    "requirements": "Requirements",
+    "cancellationPolicy": "Cancellation Policy",
+    "categories": {
+      "all": "All Tours",
+      "cultural": "Cultural",
+      "adventure": "Adventure",
+      "nature": "Nature",
+      "wine": "Wine Tours",
+      "food": "Food Tours",
+      "historical": "Historical",
+      "religious": "Religious",
+      "mountain": "Mountain",
+      "city": "City Tours"
+    },
+    "difficultyLevels": {
+      "easy": "Easy",
+      "moderate": "Moderate",
+      "challenging": "Challenging"
+    },
+    "booking": {
+      "title": "Book This Tour",
+      "date": "Select Date",
+      "time": "Select Time",
+      "participants": "Number of Participants",
+      "participantsPlaceholder": "Enter number of participants",
+      "language": "Preferred Language",
+      "languagePlaceholder": "Select language",
+      "withCarRental": "Add Car Rental",
+      "withTransfer": "Add Transfer",
+      "selectCarRental": "Select Car Rental",
+      "selectTransfer": "Select Transfer",
+      "noCarRentals": "No active car rentals. Book a car rental first.",
+      "noTransfers": "No active transfers. Book a transfer first.",
+      "yourInfo": "Your Information",
+      "name": "Full Name",
+      "email": "Email Address",
+      "phone": "Phone Number",
+      "notes": "Additional Notes",
+      "specialRequirements": "Special Requirements",
+      "bookingDetails": "Booking Details",
+      "tour": "Tour",
+      "totalPrice": "Total Price",
+      "carRental": "Car Rental",
+      "transfer": "Transfer",
+      "confirmBooking": "Confirm Booking",
+      "booking": "Booking...",
+      "success": "Tour booked successfully!",
+      "error": "Failed to book tour. Please try again."
+    }
+  },
   "profile": {
     "title": "Profile",
+    "welcome": "Welcome back",
+    "overviewDescription": "Here's an overview of your bookings and activity",
+    "recentActivity": "Recent Activity",
+    "viewAllTransfers": "View all transfers",
+    "viewAllRentals": "View all rentals",
+    "noOrders": {
+      "title": "No orders yet",
+      "description": "Start by booking a transfer or renting a car"
+    },
     "signInToView": "Sign in to view your profile",
     "signInDescription": "Access your bookings, track orders, and manage your account",
     "signIn": "Sign In",
@@ -417,6 +506,7 @@
       "overview": "Overview",
       "transfers": "Transfer Orders",
       "rentals": "Rental Orders",
+      "tours": "Tour Bookings",
       "settings": "Profile Settings"
     },
     "stats": {
@@ -427,12 +517,16 @@
     },
     "recentTransfers": "Recent Transfers",
     "recentRentals": "Recent Rentals",
+    "recentTours": "Recent Tours",
     "viewAll": "View All",
+    "viewAllTours": "View all tours",
     "noTransferOrders": "No transfer orders yet",
     "noRentalOrders": "No rental orders yet",
+    "noTourOrders": "No tour bookings yet",
     "quickActions": "Quick Actions",
     "bookTransfer": "Book Transfer",
     "rentACar": "Rent a Car",
+    "bookATour": "Book a Tour",
     "contactSupport": "Contact Support",
     "noTransfers": {
       "title": "No Transfer Orders",
@@ -443,6 +537,11 @@
       "title": "No Rental Orders",
       "description": "You haven't rented any cars yet",
       "cta": "Browse Cars"
+    },
+    "noTours": {
+      "title": "No Tour Bookings",
+      "description": "You haven't booked any tours yet",
+      "cta": "Browse Tours"
     },
     "tripDetails": "Trip Details",
     "pickup": "Pickup",
@@ -486,7 +585,9 @@
       "dashboard": "Dashboard",
       "transferOrders": "Transfer Orders",
       "rentalOrders": "Rental Orders",
+      "tourOrders": "Tour Bookings",
       "carRentals": "Car Rentals",
+      "tours": "Tours",
       "transferPricing": "Transfer Pricing",
       "backToSite": "Back to Site"
     },
@@ -495,6 +596,7 @@
       "welcome": "Welcome to the Admin Panel",
       "totalTransfers": "Total Transfers",
       "totalRentals": "Total Rentals",
+      "totalTours": "Total Tours",
       "pendingOrders": "Pending Orders",
       "revenue": "Revenue"
     },
@@ -524,6 +626,19 @@
       "category": "Category",
       "available": "Available",
       "unavailable": "Unavailable"
+    },
+    "tours": {
+      "title": "Tours",
+      "addTour": "Add Tour",
+      "editTour": "Edit Tour",
+      "name": "Tour Name",
+      "duration": "Duration",
+      "price": "Price",
+      "category": "Category",
+      "location": "Location",
+      "available": "Available",
+      "unavailable": "Unavailable",
+      "featured": "Featured"
     },
     "pricing": {
       "title": "Pricing Management",
