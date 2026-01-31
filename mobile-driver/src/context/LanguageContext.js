@@ -13,15 +13,15 @@ export const useLanguage = () => {
 };
 
 const LANGUAGES = [
-  { code: 'en', name: 'English', nativeName: 'English' },
   { code: 'ka', name: 'Georgian', nativeName: 'ქართული' },
+  { code: 'en', name: 'English', nativeName: 'English' },
   { code: 'ru', name: 'Russian', nativeName: 'Русский' },
   { code: 'es', name: 'Spanish', nativeName: 'Español' },
 ];
 
 export const LanguageProvider = ({ children }) => {
   const { i18n } = useTranslation();
-  const [currentLanguage, setCurrentLanguage] = useState('en');
+  const [currentLanguage, setCurrentLanguage] = useState('ka');
 
   useEffect(() => {
     loadLanguage();
@@ -51,7 +51,7 @@ export const LanguageProvider = ({ children }) => {
 
   const getCurrentLanguageName = () => {
     const language = LANGUAGES.find((lang) => lang.code === currentLanguage);
-    return language ? language.nativeName : 'English';
+    return language ? language.nativeName : 'ქართული';
   };
 
   const value = {

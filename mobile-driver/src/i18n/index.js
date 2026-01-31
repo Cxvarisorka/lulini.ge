@@ -10,9 +10,9 @@ import es from './locales/es.json';
 // Get saved language from storage
 const getStoredLanguage = async () => {
   try {
-    return await SecureStore.getItemAsync('language') || 'en';
+    return await SecureStore.getItemAsync('language') || 'ka';
   } catch (error) {
-    return 'en';
+    return 'ka';
   }
 };
 
@@ -26,8 +26,8 @@ i18n
       ru: { translation: ru },
       es: { translation: es },
     },
-    lng: 'en',
-    fallbackLng: 'en',
+    lng: 'ka',
+    fallbackLng: 'ka',
     interpolation: {
       escapeValue: false,
     },

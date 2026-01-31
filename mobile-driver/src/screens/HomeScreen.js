@@ -29,7 +29,7 @@ export default function HomeScreen({ navigation }) {
 
   const { isOnline, goOnline, goOffline, loading, stats, addActiveRide } = useDriver();
   const { location, isTracking } = useLocation();
-  const { newRideRequest, clearRideRequest, isConnected } = useSocket();
+  const { newRideRequest, clearRideRequest, isConnected, fetchPendingRides } = useSocket();
 
   const [showRideRequest, setShowRideRequest] = useState(false);
   const [accepting, setAccepting] = useState(false);
@@ -37,6 +37,9 @@ export default function HomeScreen({ navigation }) {
   useEffect(() => {
     if (newRideRequest) {
       setShowRideRequest(true);
+    } else {
+      // Hide modal when ride request is cleared (cancelled by user or accepted by another driver)
+      setShowRideRequest(false);
     }
   }, [newRideRequest]);
 
@@ -60,6 +63,14 @@ export default function HomeScreen({ navigation }) {
       const result = await goOnline();
       if (!result.success) {
         Alert.alert(t('common.error'), result.message || t('errors.locationError'));
+      } else {
+        // Fetch any pending ride requests when going online
+        // Add slight delay to ensure status is updated on backend
+        if (fetchPendingRides) {
+          setTimeout(() => {
+            fetchPendingRides();
+          }, 500);
+        }
       }
     }
   };
@@ -84,16 +95,13 @@ export default function HomeScreen({ navigation }) {
     }
   };
 
-  const handleDeclineRide = async () => {
+  const handleDeclineRide = () => {
     if (!newRideRequest) return;
 
-    try {
-      await rideAPI.declineRide(newRideRequest._id);
-      setShowRideRequest(false);
-      clearRideRequest();
-    } catch (error) {
-      console.log('Error declining ride:', error);
-    }
+    // Simply clear the ride request locally
+    // The ride remains available for other drivers
+    setShowRideRequest(false);
+    clearRideRequest();
   };
 
   const getMapHTML = () => {

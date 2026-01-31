@@ -33,6 +33,7 @@ export const LocationProvider = ({ children }) => {
   const [isTracking, setIsTracking] = useState(false);
   const [error, setError] = useState(null);
   const locationSubscription = useRef(null);
+  const isShowingAlert = useRef(false);
 
   useEffect(() => {
     requestLocationPermission();
@@ -51,11 +52,17 @@ export const LocationProvider = ({ children }) => {
       console.log('Location services enabled:', locationEnabled);
 
       if (!locationEnabled) {
-        Alert.alert(
-          'Location Services Disabled',
-          'Please enable location services in your device settings to use this app.',
-          [{ text: 'OK' }]
-        );
+        if (!isShowingAlert.current) {
+          isShowingAlert.current = true;
+          Alert.alert(
+            'Location Services Disabled',
+            'Please enable location services in your device settings to use this app.',
+            [{
+              text: 'OK',
+              onPress: () => { isShowingAlert.current = false; }
+            }]
+          );
+        }
         setError('Location services disabled');
         setLocation(DEFAULT_LOCATION);
         return false;
@@ -67,11 +74,17 @@ export const LocationProvider = ({ children }) => {
 
       if (status !== 'granted') {
         console.log('Location permission denied');
-        Alert.alert(
-          'Location Permission Required',
-          'Please enable location permissions in your device settings to use this app.',
-          [{ text: 'OK' }]
-        );
+        if (!isShowingAlert.current) {
+          isShowingAlert.current = true;
+          Alert.alert(
+            'Location Permission Required',
+            'Please enable location permissions in your device settings to use this app.',
+            [{
+              text: 'OK',
+              onPress: () => { isShowingAlert.current = false; }
+            }]
+          );
+        }
         setError('Location permission not granted');
         setLocation(DEFAULT_LOCATION);
         return false;
@@ -128,11 +141,17 @@ export const LocationProvider = ({ children }) => {
         errorMessage += err.message;
       }
 
-      Alert.alert(
-        'Location Error',
-        errorMessage,
-        [{ text: 'OK' }]
-      );
+      if (!isShowingAlert.current) {
+        isShowingAlert.current = true;
+        Alert.alert(
+          'Location Error',
+          errorMessage,
+          [{
+            text: 'OK',
+            onPress: () => { isShowingAlert.current = false; }
+          }]
+        );
+      }
       setError('Location error');
       setLocation(DEFAULT_LOCATION);
       return false;
@@ -141,9 +160,45 @@ export const LocationProvider = ({ children }) => {
 
   const startTracking = async () => {
     try {
-      const hasPermission = await requestLocationPermission();
-      if (!hasPermission) {
-        return false;
+      console.log('Starting location tracking...');
+
+      // Check if we already have permission
+      const { status } = await Location.getForegroundPermissionsAsync();
+      console.log('Current permission status:', status);
+
+      if (status !== 'granted') {
+        console.log('Permission not granted, requesting...');
+        const hasPermission = await requestLocationPermission();
+        if (!hasPermission) {
+          return false;
+        }
+      } else {
+        console.log('Permission already granted');
+        // Get initial location if we don't have one
+        if (!location) {
+          try {
+            console.log('Getting initial location...');
+            const currentLocation = await Promise.race([
+              Location.getCurrentPositionAsync({
+                accuracy: Location.Accuracy.Balanced,
+              }),
+              new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('Location timeout')), 10000)
+              )
+            ]);
+            const coords = {
+              latitude: currentLocation.coords.latitude,
+              longitude: currentLocation.coords.longitude,
+            };
+            console.log('Initial location obtained:', coords);
+            setLocation(coords);
+          } catch (err) {
+            console.log('Error getting initial location:', err);
+            // Use default location as fallback
+            console.log('Using default location as fallback');
+            setLocation(DEFAULT_LOCATION);
+          }
+        }
       }
 
       // Note: Background location tracking removed for now
@@ -177,11 +232,19 @@ export const LocationProvider = ({ children }) => {
       console.log('Error starting location tracking:', err);
       console.error('Full error:', err);
       setError('Failed to start tracking');
-      Alert.alert(
-        'Location Tracking Error',
-        `Could not start tracking: ${err.message}`,
-        [{ text: 'OK' }]
-      );
+
+      // Don't show alert for permission errors (already handled)
+      if (!err.message.includes('permission') && !err.message.includes('denied') && !isShowingAlert.current) {
+        isShowingAlert.current = true;
+        Alert.alert(
+          'Location Tracking Error',
+          `Could not start tracking: ${err.message}`,
+          [{
+            text: 'OK',
+            onPress: () => { isShowingAlert.current = false; }
+          }]
+        );
+      }
       return false;
     }
   };
@@ -235,11 +298,17 @@ export const LocationProvider = ({ children }) => {
         errorMessage += err.message;
       }
 
-      Alert.alert(
-        'Location Error',
-        errorMessage,
-        [{ text: 'OK' }]
-      );
+      if (!isShowingAlert.current) {
+        isShowingAlert.current = true;
+        Alert.alert(
+          'Location Error',
+          errorMessage,
+          [{
+            text: 'OK',
+            onPress: () => { isShowingAlert.current = false; }
+          }]
+        );
+      }
       return null;
     }
   };

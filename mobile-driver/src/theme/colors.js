@@ -57,6 +57,9 @@ export const colors = {
   status: {
     pending: '#d97706',
     confirmed: '#2563eb',
+    accepted: '#2563eb',
+    driver_arrived: '#8b5cf6',
+    in_progress: '#16a34a',
     active: '#16a34a',
     completed: '#16a34a',
     cancelled: '#ef4444',

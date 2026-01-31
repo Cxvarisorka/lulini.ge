@@ -11,6 +11,7 @@ import { SocketProvider } from './src/context/SocketContext';
 import { LocationProvider } from './src/context/LocationContext';
 import { DriverProvider } from './src/context/DriverContext';
 import { LanguageProvider } from './src/context/LanguageContext';
+import { MapProvider } from './src/context/MapContext';
 import AppNavigator from './src/navigation/AppNavigator';
 
 // Ignore certain warnings
@@ -43,6 +44,7 @@ export default function App() {
       <I18nextProvider i18n={i18n}>
         <SafeAreaProvider>
           <LanguageProvider>
+            <MapProvider>
             <AuthProvider>
               <LocationProvider>
                 <SocketProvider>
@@ -53,6 +55,7 @@ export default function App() {
                 </SocketProvider>
               </LocationProvider>
             </AuthProvider>
+            </MapProvider>
           </LanguageProvider>
         </SafeAreaProvider>
       </I18nextProvider>

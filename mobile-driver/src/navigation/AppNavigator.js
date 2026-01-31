@@ -4,6 +4,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
 
 import { useAuth } from '../context/AuthContext';
 import { colors } from '../theme/colors';
@@ -17,12 +18,14 @@ import ProfileScreen from '../screens/ProfileScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import RideDetailScreen from '../screens/RideDetailScreen';
 import LanguageSelectScreen from '../screens/LanguageSelectScreen';
+import MapSelectScreen from '../screens/MapSelectScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
 function MainTabs() {
   const insets = useSafeAreaInsets();
+  const { t } = useTranslation();
 
   return (
     <Tab.Navigator
@@ -58,10 +61,26 @@ function MainTabs() {
         headerShown: false,
       })}
     >
-      <Tab.Screen name="Home" component={HomeScreen} />
-      <Tab.Screen name="Rides" component={RidesScreen} />
-      <Tab.Screen name="Earnings" component={EarningsScreen} />
-      <Tab.Screen name="Profile" component={ProfileScreen} />
+      <Tab.Screen
+        name="Home"
+        component={HomeScreen}
+        options={{ tabBarLabel: t('navigation.home') }}
+      />
+      <Tab.Screen
+        name="Rides"
+        component={RidesScreen}
+        options={{ tabBarLabel: t('navigation.rides') }}
+      />
+      <Tab.Screen
+        name="Earnings"
+        component={EarningsScreen}
+        options={{ tabBarLabel: t('navigation.earnings') }}
+      />
+      <Tab.Screen
+        name="Profile"
+        component={ProfileScreen}
+        options={{ tabBarLabel: t('navigation.profile') }}
+      />
     </Tab.Navigator>
   );
 }
@@ -89,6 +108,7 @@ export default function AppNavigator() {
             <Stack.Screen name="RideDetail" component={RideDetailScreen} />
             <Stack.Screen name="Settings" component={SettingsScreen} />
             <Stack.Screen name="LanguageSelect" component={LanguageSelectScreen} />
+            <Stack.Screen name="MapSelect" component={MapSelectScreen} />
           </>
         )}
       </Stack.Navigator>

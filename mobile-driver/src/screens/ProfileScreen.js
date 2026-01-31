@@ -48,7 +48,9 @@ export default function ProfileScreen({ navigation }) {
           <View style={styles.ratingContainer}>
             <Ionicons name="star" size={20} color="#FFD700" />
             <Text style={styles.ratingText}>{stats.rating?.toFixed(1) || '0.0'}</Text>
-            <Text style={styles.ratingLabel}>({stats.trips || 0} {t('home.trips')})</Text>
+            <Text style={styles.ratingLabel}>
+              ({stats.totalReviews || 0} {stats.totalReviews === 1 ? t('profile.review') : t('profile.reviews')})
+            </Text>
           </View>
         </View>
 

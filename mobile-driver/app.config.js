@@ -6,13 +6,17 @@ export default {
     orientation: 'portrait',
     icon: './assets/icon.png',
     userInterfaceStyle: 'light',
+    // newArchEnabled requires development build, disable for Expo Go
+    // newArchEnabled: true,
+    scheme: 'gotours-driver',
     splash: {
       image: './assets/splash.png',
       resizeMode: 'contain',
       backgroundColor: '#171717'
     },
     updates: {
-      fallbackToCacheTimeout: 0
+      fallbackToCacheTimeout: 0,
+      enabled: false
     },
     assetBundlePatterns: [
       '**/*'
@@ -21,10 +25,14 @@ export default {
       supportsTablet: true,
       bundleIdentifier: 'com.gotours.driver',
       infoPlist: {
-        NSLocationWhenInUseUsageDescription: 'GoTours Driver needs your location to show your position on the map and match you with nearby ride requests.'
+        NSLocationWhenInUseUsageDescription: 'GoTours Driver needs your location to show your position on the map and match you with nearby ride requests.',
+        NSLocationAlwaysAndWhenInUseUsageDescription: 'GoTours Driver needs your location in the background to accept ride requests and navigate to passengers.',
+        NSLocationAlwaysUsageDescription: 'GoTours Driver needs your location in the background to accept ride requests and navigate to passengers.',
+        UIBackgroundModes: ['location'],
+        ITSAppUsesNonExemptEncryption: false
       },
       config: {
-        googleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY
+        googleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || ''
       }
     },
     android: {
@@ -32,36 +40,44 @@ export default {
         foregroundImage: './assets/adaptive-icon.png',
         backgroundColor: '#171717'
       },
+      edgeToEdgeEnabled: true,
       package: 'com.gotours.driver',
       permissions: [
-        'ACCESS_FINE_LOCATION',
         'ACCESS_COARSE_LOCATION',
+        'ACCESS_FINE_LOCATION',
         'POST_NOTIFICATIONS'
       ],
       config: {
         googleMaps: {
-          apiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY
+          apiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || ''
         }
       }
     },
+    web: {
+      favicon: './assets/favicon.png'
+    },
     plugins: [
+      'expo-secure-store',
       [
         'expo-location',
         {
-          locationWhenInUsePermission: 'GoTours Driver needs your location to show your position on the map and match you with nearby ride requests.'
+          locationAlwaysAndWhenInUsePermission: 'GoTours Driver needs your location to show your position on the map and match you with nearby ride requests.',
+          locationAlwaysPermission: 'GoTours Driver needs your location in the background to accept ride requests and navigate to passengers.',
+          locationWhenInUsePermission: 'GoTours Driver needs your location to show your position on the map and match you with nearby ride requests.',
+          isIosBackgroundLocationEnabled: true,
+          isAndroidBackgroundLocationEnabled: true
         }
       ],
       [
         'expo-notifications',
         {
-          icon: './assets/notification-icon.png',
           color: '#171717'
         }
       ]
     ],
     extra: {
       eas: {
-        projectId: 'your-project-id-here'
+        projectId: 'd95167ad-aa6e-4509-9721-4eb2cc99c70c'
       }
     }
   }

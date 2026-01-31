@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
+import { useMap } from '../context/MapContext';
 import { colors, shadows, radius } from '../theme/colors';
 
 export default function SettingsScreen({ navigation }) {
@@ -20,6 +21,7 @@ export default function SettingsScreen({ navigation }) {
   const insets = useSafeAreaInsets();
   const { logout } = useAuth();
   const { getCurrentLanguageName } = useLanguage();
+  const { getCurrentMapName } = useMap();
 
   const handleLogout = () => {
     Alert.alert(
@@ -45,6 +47,12 @@ export default function SettingsScreen({ navigation }) {
           label: t('settings.language'),
           value: getCurrentLanguageName(),
           onPress: () => navigation.navigate('LanguageSelect'),
+        },
+        {
+          icon: 'map-outline',
+          label: t('settings.mapProvider'),
+          value: getCurrentMapName(),
+          onPress: () => navigation.navigate('MapSelect'),
         },
       ],
     },
