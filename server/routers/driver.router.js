@@ -10,7 +10,9 @@ const {
     updateDriverStatus,
     updateDriverLocation,
     getDriverStats,
-    getDriverEarnings
+    getDriverEarnings,
+    getDriverReviews,
+    getAllDriverStatistics
 } = require('../controllers/driver.controller');
 
 const router = express.Router();
@@ -26,9 +28,11 @@ router.get('/stats', isDriver, getDriverStats);
 router.get('/earnings', isDriver, getDriverEarnings);
 
 // Admin routes
+router.get('/admin/statistics', authorize('admin'), getAllDriverStatistics);
 router.post('/', authorize('admin'), createDriver);
 router.get('/', authorize('admin'), getAllDrivers);
 router.get('/:id', authorize('admin'), getDriver);
+router.get('/:id/reviews', getDriverReviews); // Admin or driver can access their own reviews
 router.patch('/:id', authorize('admin'), updateDriver);
 router.delete('/:id', authorize('admin'), deleteDriver);
 

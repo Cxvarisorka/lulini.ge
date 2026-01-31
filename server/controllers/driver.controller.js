@@ -274,6 +274,27 @@ const updateDriverLocation = catchAsync(async (req, res, next) => {
     };
     await driver.save();
 
+    // If driver has an active ride, broadcast location to the customer
+    const Ride = require('../models/ride.model');
+    const activeRide = await Ride.findOne({
+        driver: driver._id,
+        status: { $in: ['accepted', 'driver_arrived'] }
+    });
+
+    if (activeRide) {
+        const io = req.app.get('io');
+        if (io) {
+            // Emit location update to the customer waiting for this driver
+            io.to(`user:${activeRide.user}`).emit('driver:locationUpdate', {
+                rideId: activeRide._id,
+                location: {
+                    latitude,
+                    longitude
+                }
+            });
+        }
+    }
+
     res.json({
         success: true,
         message: 'Location updated successfully'
@@ -371,6 +392,7 @@ const getDriverStats = catchAsync(async (req, res, next) => {
                     trips: driver.totalTrips
                 },
                 rating: driver.rating,
+                totalReviews: driver.totalReviews || 0,
                 pendingRides,
                 status: driver.status
             }
@@ -419,6 +441,154 @@ const getDriverEarnings = catchAsync(async (req, res, next) => {
     });
 });
 
+// @desc    Get driver reviews
+// @route   GET /api/drivers/:id/reviews
+// @access  Private/Admin or Driver (own reviews)
+const getDriverReviews = catchAsync(async (req, res, next) => {
+    const driverId = req.params.id;
+
+    // Check if user is admin or the driver themselves
+    const driver = await Driver.findById(driverId);
+    if (!driver) {
+        return next(new AppError('Driver not found', 404));
+    }
+
+    if (req.user.role !== 'admin' && driver.user.toString() !== req.user.id) {
+        return next(new AppError('You do not have permission to view these reviews', 403));
+    }
+
+    const reviews = await Ride.find({
+        driver: driverId,
+        status: 'completed',
+        rating: { $exists: true, $ne: null }
+    })
+        .populate('user', 'firstName lastName')
+        .select('rating review reviewedAt pickup dropoff fare createdAt')
+        .sort({ reviewedAt: -1 });
+
+    // Calculate review statistics
+    const totalReviews = reviews.length;
+    const averageRating = totalReviews > 0
+        ? reviews.reduce((sum, r) => sum + r.rating, 0) / totalReviews
+        : 0;
+
+    const ratingDistribution = {
+        5: reviews.filter(r => r.rating === 5).length,
+        4: reviews.filter(r => r.rating === 4).length,
+        3: reviews.filter(r => r.rating === 3).length,
+        2: reviews.filter(r => r.rating === 2).length,
+        1: reviews.filter(r => r.rating === 1).length,
+    };
+
+    res.json({
+        success: true,
+        data: {
+            reviews,
+            statistics: {
+                totalReviews,
+                averageRating: Math.round(averageRating * 10) / 10,
+                ratingDistribution
+            }
+        }
+    });
+});
+
+// @desc    Get all drivers statistics (Admin)
+// @route   GET /api/drivers/admin/statistics
+// @access  Private/Admin
+const getAllDriverStatistics = catchAsync(async (req, res, next) => {
+    console.log('===== GET ALL DRIVER STATISTICS =====');
+
+    const drivers = await Driver.find({ isActive: true })
+        .populate('user', 'firstName lastName email')
+        .sort({ createdAt: -1 });
+
+    console.log(`Found ${drivers.length} active drivers`);
+
+    if (drivers.length === 0) {
+        return res.json({
+            success: true,
+            count: 0,
+            data: { statistics: [] }
+        });
+    }
+
+    const now = new Date();
+    const last24Hours = new Date(now - 24 * 60 * 60 * 1000);
+    const last7Days = new Date(now - 7 * 24 * 60 * 60 * 1000);
+    const last30Days = new Date(now - 30 * 24 * 60 * 60 * 1000);
+
+    const driverStats = await Promise.all(drivers.map(async (driver) => {
+        if (!driver.user) {
+            console.log(`Warning: Driver ${driver._id} has no user associated`);
+            return null;
+        }
+
+        // Get all rides for this driver
+        const allRides = await Ride.find({ driver: driver._id });
+
+        // Completed rides
+        const completedRides = allRides.filter(r => r.status === 'completed');
+
+        // Cancelled rides (cancelled by driver)
+        const cancelledByDriver = allRides.filter(r =>
+            r.status === 'cancelled' && r.cancelledBy === 'driver'
+        );
+
+        // Calculate earnings for different periods
+        const last24HoursRides = completedRides.filter(r =>
+            r.endTime && new Date(r.endTime) >= last24Hours
+        );
+        const last7DaysRides = completedRides.filter(r =>
+            r.endTime && new Date(r.endTime) >= last7Days
+        );
+        const last30DaysRides = completedRides.filter(r =>
+            r.endTime && new Date(r.endTime) >= last30Days
+        );
+
+        const earnings24h = last24HoursRides.reduce((sum, r) => sum + (r.fare || 0), 0);
+        const earnings7d = last7DaysRides.reduce((sum, r) => sum + (r.fare || 0), 0);
+        const earnings30d = last30DaysRides.reduce((sum, r) => sum + (r.fare || 0), 0);
+
+        return {
+            driverId: driver._id,
+            name: `${driver.user.firstName} ${driver.user.lastName}`,
+            email: driver.user.email,
+            phone: driver.phone,
+            vehicle: driver.vehicle,
+            status: driver.status,
+            rating: driver.rating || 0,
+            totalReviews: driver.totalReviews || 0,
+            statistics: {
+                totalTrips: completedRides.length,
+                cancelledTrips: cancelledByDriver.length,
+                totalEarnings: driver.totalEarnings || 0,
+                earnings: {
+                    last24Hours: earnings24h,
+                    last7Days: earnings7d,
+                    last30Days: earnings30d
+                },
+                trips: {
+                    last24Hours: last24HoursRides.length,
+                    last7Days: last7DaysRides.length,
+                    last30Days: last30DaysRides.length
+                }
+            }
+        };
+    }));
+
+    // Filter out null entries (drivers without users)
+    const validStats = driverStats.filter(stat => stat !== null);
+
+    console.log(`Returning statistics for ${validStats.length} drivers`);
+
+    res.json({
+        success: true,
+        count: validStats.length,
+        data: { statistics: validStats }
+    });
+});
+
 module.exports = {
     createDriver,
     getAllDrivers,
@@ -429,5 +599,7 @@ module.exports = {
     updateDriverStatus,
     updateDriverLocation,
     getDriverStats,
-    getDriverEarnings
+    getDriverEarnings,
+    getDriverReviews,
+    getAllDriverStatistics
 };

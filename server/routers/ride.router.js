@@ -3,13 +3,16 @@ const router = express.Router();
 const {
     createRide,
     acceptRide,
+    notifyArrival,
     startRide,
     completeRide,
     cancelRide,
     getMyRides,
     getDriverRides,
     getRide,
-    getAllRides
+    getAllRides,
+    getAvailableRides,
+    reviewDriver
 } = require('../controllers/ride.controller');
 const { protect, authorize, isDriver } = require('../middlewares/auth.middleware');
 
@@ -18,14 +21,17 @@ router.post('/', protect, createRide);
 router.get('/my', protect, getMyRides);
 
 // Driver routes
+router.get('/driver/available', protect, isDriver, getAvailableRides);
 router.get('/driver/my', protect, isDriver, getDriverRides);
 router.patch('/:id/accept', protect, isDriver, acceptRide);
+router.patch('/:id/arrive', protect, isDriver, notifyArrival);
 router.patch('/:id/start', protect, isDriver, startRide);
 router.patch('/:id/complete', protect, isDriver, completeRide);
 
 // Shared routes
 router.get('/:id', protect, getRide);
 router.patch('/:id/cancel', protect, cancelRide);
+router.post('/:id/review', protect, reviewDriver);
 
 // Admin routes
 router.get('/', protect, authorize('admin'), getAllRides);

@@ -180,8 +180,48 @@ app.use(globalErrorHandler);
 
 const PORT = process.env.PORT || 3000;
 
+// Import the ride expiration functions
+const { expireOldRides, expireWaitingRides } = require('./controllers/ride.controller');
+
+// Schedule ride expiration check every minute
+const EXPIRATION_CHECK_INTERVAL = 60 * 1000; // 1 minute
+// Schedule waiting expiration check every 15 seconds (for 3-minute timeout accuracy)
+const WAITING_CHECK_INTERVAL = 15 * 1000; // 15 seconds
+
 server.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
+
+    // Run initial expiration check on startup
+    expireOldRides(io).then(result => {
+        if (result.expired > 0) {
+            console.log(`Expired ${result.expired} old ride requests on startup`);
+        }
+    });
+
+    // Run initial waiting expiration check on startup
+    expireWaitingRides(io).then(result => {
+        if (result.cancelled > 0) {
+            console.log(`Cancelled ${result.cancelled} rides due to waiting timeout on startup`);
+        }
+    });
+
+    // Schedule periodic ride request expiration checks (1 hour timeout)
+    setInterval(() => {
+        expireOldRides(io).then(result => {
+            if (result.expired > 0) {
+                console.log(`Expired ${result.expired} old ride requests`);
+            }
+        });
+    }, EXPIRATION_CHECK_INTERVAL);
+
+    // Schedule periodic waiting expiration checks (3-minute timeout)
+    setInterval(() => {
+        expireWaitingRides(io).then(result => {
+            if (result.cancelled > 0) {
+                console.log(`Cancelled ${result.cancelled} rides due to waiting timeout`);
+            }
+        });
+    }, WAITING_CHECK_INTERVAL);
 });
 
 module.exports = { app, io };
