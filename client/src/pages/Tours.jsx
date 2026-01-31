@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Clock, Users, MapPin, Search, X, Star } from 'lucide-react';
@@ -6,7 +6,7 @@ import { Header } from '../components/Header';
 import { Footer } from '../components/Footer';
 import { Button } from '../components/ui/button';
 import { cn } from '../lib/utils';
-import { tourService } from '../services/tour';
+import { useTours } from '../context/ToursContext';
 
 const tourCategories = [
   { id: 'all', label: 'All Tours' },
@@ -22,26 +22,9 @@ const tourCategories = [
 
 export function Tours() {
   const { t } = useTranslation();
-  const [tours, setTours] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const { tours, loading } = useTours();
   const [activeCategory, setActiveCategory] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
-
-  useEffect(() => {
-    fetchTours();
-  }, []);
-
-  const fetchTours = async () => {
-    try {
-      setLoading(true);
-      const response = await tourService.getAllTours();
-      setTours(response.data.tours || []);
-    } catch (error) {
-      console.error('Error fetching tours:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const filteredTours = useMemo(() => {
     let filtered = tours;
@@ -177,8 +160,11 @@ export function Tours() {
                       alt={tour.name}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                       onError={(e) => {
-                        e.target.src = 'https://via.placeholder.com/400x300?text=Tour+Image';
-                        e.target.className = 'w-full h-full object-contain p-8';
+                        if (!e.target.dataset.errorHandled) {
+                          e.target.dataset.errorHandled = 'true';
+                          e.target.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="400" height="300"%3E%3Crect fill="%23f0f0f0" width="400" height="300"/%3E%3Ctext fill="%23999" font-family="Arial" font-size="20" x="50%25" y="50%25" text-anchor="middle" dy=".3em"%3ETour Image%3C/text%3E%3C/svg%3E';
+                          e.target.className = 'w-full h-full object-contain p-8';
+                        }
                       }}
                     />
                     {/* Category Badge */}

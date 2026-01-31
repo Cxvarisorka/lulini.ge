@@ -37,12 +37,14 @@ function AdminDriversContent() {
     if (socket) {
       socket.on('driver:updated', handleDriverUpdate);
       socket.on('driver:deleted', handleDriverDelete);
+      socket.on('driver:statusChanged', handleDriverStatusChange);
     }
 
     return () => {
       if (socket) {
         socket.off('driver:updated', handleDriverUpdate);
         socket.off('driver:deleted', handleDriverDelete);
+        socket.off('driver:statusChanged', handleDriverStatusChange);
       }
     };
   }, [socket]);
@@ -67,6 +69,12 @@ function AdminDriversContent() {
   const handleDriverUpdate = (updatedDriver) => {
     setDrivers((prev) =>
       prev.map((driver) => (driver._id === updatedDriver._id ? updatedDriver : driver))
+    );
+  };
+
+  const handleDriverStatusChange = ({ driverId, status }) => {
+    setDrivers((prev) =>
+      prev.map((driver) => (driver._id === driverId ? { ...driver, status } : driver))
     );
   };
 
@@ -283,7 +291,9 @@ function AdminDriversContent() {
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-muted-foreground">Rating:</span>
-                  <span className="font-semibold">{(driver.rating || 0).toFixed(1)} ⭐</span>
+                  <span className="font-semibold">
+                    {(driver.rating || 0).toFixed(1)} ⭐ ({driver.totalReviews || 0} {driver.totalReviews === 1 ? 'review' : 'reviews'})
+                  </span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-muted-foreground">Trips:</span>

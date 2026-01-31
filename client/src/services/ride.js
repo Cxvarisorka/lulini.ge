@@ -31,48 +31,31 @@ async function apiRequest(endpoint, options = {}) {
   }
 }
 
-export const driverService = {
-  // Get all drivers
-  getAll: async () => {
-    return apiRequest('/drivers');
+export const rideService = {
+  // Get all rides (admin only)
+  getAll: async (filters = {}) => {
+    const params = new URLSearchParams();
+    if (filters.status) params.append('status', filters.status);
+    if (filters.startDate) params.append('startDate', filters.startDate);
+    if (filters.endDate) params.append('endDate', filters.endDate);
+    if (filters.page) params.append('page', filters.page);
+    if (filters.limit) params.append('limit', filters.limit);
+
+    const queryString = params.toString();
+    return apiRequest(`/rides${queryString ? `?${queryString}` : ''}`);
   },
 
-  // Get single driver
+  // Get single ride
   getById: async (id) => {
-    return apiRequest(`/drivers/${id}`);
+    return apiRequest(`/rides/${id}`);
   },
 
-  // Create new driver
-  create: async (driverData) => {
-    return apiRequest('/drivers', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(driverData),
-    });
-  },
-
-  // Update driver
-  update: async (id, updates) => {
-    return apiRequest(`/drivers/${id}`, {
+  // Cancel ride (admin)
+  cancel: async (id, reason) => {
+    return apiRequest(`/rides/${id}/cancel`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updates),
+      body: JSON.stringify({ reason }),
     });
-  },
-
-  // Delete driver
-  delete: async (id) => {
-    const response = await apiRequest(`/drivers/${id}`, {
-      method: 'DELETE',
-    });
-    if (!response.success) {
-      throw new Error(response.message || 'Failed to delete driver');
-    }
-    return response;
-  },
-
-  // Get all driver statistics (Admin)
-  getAllStatistics: async () => {
-    return apiRequest('/drivers/admin/statistics');
   },
 };
