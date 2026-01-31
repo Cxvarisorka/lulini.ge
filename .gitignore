@@ -1,2 +1,11 @@
 # Claude
 .claude/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Misc
+nul
+*.log
