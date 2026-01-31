@@ -88,11 +88,11 @@ export const taxiAPI = {
   getRideById: (id) =>
     api.get(`/rides/${id}`),
 
-  cancelRide: (id, reason) =>
-    api.patch(`/rides/${id}/cancel`, { reason }),
+  cancelRide: (id, reason, note) =>
+    api.patch(`/rides/${id}/cancel`, { reason, note }),
 
-  rateRide: (id, rating, review) =>
-    api.post(`/rides/${id}/rate`, { rating, review }),
+  reviewDriver: (id, rating, review) =>
+    api.post(`/rides/${id}/review`, { rating, review }),
 };
 
 // Rental API

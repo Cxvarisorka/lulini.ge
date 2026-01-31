@@ -3,6 +3,7 @@ import * as SecureStore from 'expo-secure-store';
 import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
 import { authAPI } from '../services/api';
+import { GOOGLE_CONFIG } from '../config/google.config';
 
 // Complete any pending auth session
 WebBrowser.maybeCompleteAuthSession();
@@ -18,9 +19,9 @@ export const AuthProvider = ({ children }) => {
 
   // Google Auth configuration using expo-auth-session
   const [request, response, promptAsync] = Google.useIdTokenAuthRequest({
-    androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID,
-    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
-    webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+    clientId: GOOGLE_CONFIG.webClientId,
+    androidClientId: GOOGLE_CONFIG.androidClientId,
+    iosClientId: GOOGLE_CONFIG.iosClientId,
   });
 
   // Handle Google auth response

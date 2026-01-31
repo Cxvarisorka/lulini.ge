@@ -8,15 +8,15 @@ const LanguageContext = createContext({});
 export const useLanguage = () => useContext(LanguageContext);
 
 export const LANGUAGES = [
+  { code: 'ka', name: 'Georgian', nativeName: 'ქართული', flag: 'GE' },
   { code: 'en', name: 'English', nativeName: 'English', flag: 'GB' },
   { code: 'es', name: 'Spanish', nativeName: 'Espanol', flag: 'ES' },
   { code: 'ru', name: 'Russian', nativeName: 'Русский', flag: 'RU' },
-  { code: 'ka', name: 'Georgian', nativeName: 'ქართული', flag: 'GE' },
 ];
 
 export const LanguageProvider = ({ children }) => {
   const { i18n } = useTranslation();
-  const [currentLanguage, setCurrentLanguage] = useState('en');
+  const [currentLanguage, setCurrentLanguage] = useState('ka');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {

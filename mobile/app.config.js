@@ -6,7 +6,8 @@ export default {
     orientation: "portrait",
     icon: "./assets/icon.png",
     userInterfaceStyle: "light",
-    newArchEnabled: true,
+    // newArchEnabled requires development build, disable for Expo Go
+    // newArchEnabled: true,
     scheme: "gotours",
     splash: {
       image: "./assets/splash-icon.png",
@@ -22,6 +23,8 @@ export default {
       infoPlist: {
         NSLocationWhenInUseUsageDescription: "We need your location to show your position on the map and find nearby drivers.",
         NSLocationAlwaysUsageDescription: "We need your location to provide ride services.",
+        NSLocationAlwaysAndWhenInUseUsageDescription: "We need your location to provide ride services and find nearby drivers.",
+        UIBackgroundModes: ["location"],
         ITSAppUsesNonExemptEncryption: false
       }
     },
@@ -39,7 +42,8 @@ export default {
       },
       permissions: [
         "ACCESS_COARSE_LOCATION",
-        "ACCESS_FINE_LOCATION"
+        "ACCESS_FINE_LOCATION",
+        "POST_NOTIFICATIONS"
       ]
     },
     web: {
@@ -54,10 +58,20 @@ export default {
         }
       ],
       "expo-web-browser",
-      "@react-native-google-signin/google-signin"
+      // Google Sign-In requires development build, comment out for Expo Go
+      // "@react-native-google-signin/google-signin",
+      [
+        "expo-notifications",
+        {
+          color: "#171717"
+        }
+      ]
     ],
     extra: {
       googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY || "",
+      EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || "",
+      EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || "",
+      EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || "",
       eas: {
         projectId: "295eb794-8d13-4244-918e-1425298d8eb1"
       }

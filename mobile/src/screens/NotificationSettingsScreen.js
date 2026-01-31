@@ -1,0 +1,321 @@
+import React, { useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  Switch,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { useTranslation } from 'react-i18next';
+import { colors, shadows, radius, spacing } from '../theme/colors';
+
+export default function NotificationSettingsScreen({ navigation }) {
+  const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
+
+  // Notification settings state
+  const [settings, setSettings] = useState({
+    pushEnabled: true,
+    rideUpdates: true,
+    driverArrival: true,
+    rideCompleted: true,
+    promotions: false,
+    news: false,
+    paymentAlerts: true,
+    supportResponses: true,
+    soundEnabled: true,
+    vibrationEnabled: true,
+  });
+
+  const toggleSetting = (key) => {
+    setSettings((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const notificationSections = [
+    {
+      title: t('notifications.rideNotifications'),
+      items: [
+        {
+          icon: 'car',
+          label: t('notifications.rideUpdates'),
+          description: t('notifications.rideUpdatesDesc'),
+          key: 'rideUpdates',
+        },
+        {
+          icon: 'location',
+          label: t('notifications.driverArrival'),
+          description: t('notifications.driverArrivalDesc'),
+          key: 'driverArrival',
+        },
+        {
+          icon: 'checkmark-circle',
+          label: t('notifications.rideCompleted'),
+          description: t('notifications.rideCompletedDesc'),
+          key: 'rideCompleted',
+        },
+      ],
+    },
+    {
+      title: t('notifications.accountNotifications'),
+      items: [
+        {
+          icon: 'card',
+          label: t('notifications.paymentAlerts'),
+          description: t('notifications.paymentAlertsDesc'),
+          key: 'paymentAlerts',
+        },
+        {
+          icon: 'chatbubble',
+          label: t('notifications.supportResponses'),
+          description: t('notifications.supportResponsesDesc'),
+          key: 'supportResponses',
+        },
+      ],
+    },
+    {
+      title: t('notifications.marketingNotifications'),
+      items: [
+        {
+          icon: 'gift',
+          label: t('notifications.promotions'),
+          description: t('notifications.promotionsDesc'),
+          key: 'promotions',
+        },
+        {
+          icon: 'newspaper',
+          label: t('notifications.news'),
+          description: t('notifications.newsDesc'),
+          key: 'news',
+        },
+      ],
+    },
+    {
+      title: t('notifications.alertPreferences'),
+      items: [
+        {
+          icon: 'volume-high',
+          label: t('notifications.sound'),
+          description: t('notifications.soundDesc'),
+          key: 'soundEnabled',
+        },
+        {
+          icon: 'phone-portrait',
+          label: t('notifications.vibration'),
+          description: t('notifications.vibrationDesc'),
+          key: 'vibrationEnabled',
+        },
+      ],
+    },
+  ];
+
+  return (
+    <View style={styles.container}>
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingBottom: insets.bottom + spacing.xl },
+        ]}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Master Toggle */}
+        <View style={styles.masterToggle}>
+          <View style={styles.masterToggleContent}>
+            <View style={styles.masterToggleIcon}>
+              <Ionicons
+                name={settings.pushEnabled ? 'notifications' : 'notifications-off'}
+                size={24}
+                color={settings.pushEnabled ? colors.primary : colors.mutedForeground}
+              />
+            </View>
+            <View style={styles.masterToggleText}>
+              <Text style={styles.masterToggleLabel}>
+                {t('notifications.pushNotifications')}
+              </Text>
+              <Text style={styles.masterToggleDescription}>
+                {settings.pushEnabled
+                  ? t('notifications.enabled')
+                  : t('notifications.disabled')}
+              </Text>
+            </View>
+          </View>
+          <Switch
+            value={settings.pushEnabled}
+            onValueChange={() => toggleSetting('pushEnabled')}
+            trackColor={{ false: colors.muted, true: colors.primary }}
+            thumbColor={colors.background}
+          />
+        </View>
+
+        {/* Notification Sections */}
+        {settings.pushEnabled &&
+          notificationSections.map((section, sectionIndex) => (
+            <View key={sectionIndex} style={styles.section}>
+              <Text style={styles.sectionTitle}>{section.title}</Text>
+              <View style={styles.sectionContent}>
+                {section.items.map((item, itemIndex) => (
+                  <View
+                    key={item.key}
+                    style={[
+                      styles.settingItem,
+                      itemIndex !== section.items.length - 1 &&
+                        styles.settingItemBorder,
+                    ]}
+                  >
+                    <View style={styles.settingIcon}>
+                      <Ionicons
+                        name={item.icon}
+                        size={20}
+                        color={colors.foreground}
+                      />
+                    </View>
+                    <View style={styles.settingContent}>
+                      <Text style={styles.settingLabel}>{item.label}</Text>
+                      <Text style={styles.settingDescription}>
+                        {item.description}
+                      </Text>
+                    </View>
+                    <Switch
+                      value={settings[item.key]}
+                      onValueChange={() => toggleSetting(item.key)}
+                      trackColor={{ false: colors.muted, true: colors.primary }}
+                      thumbColor={colors.background}
+                    />
+                  </View>
+                ))}
+              </View>
+            </View>
+          ))}
+
+        {/* Info Card */}
+        <View style={styles.infoCard}>
+          <Ionicons
+            name="information-circle"
+            size={24}
+            color={colors.info}
+          />
+          <Text style={styles.infoText}>
+            {t('notifications.infoMessage')}
+          </Text>
+        </View>
+      </ScrollView>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: colors.muted,
+  },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
+  },
+  masterToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.background,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    marginBottom: spacing.xl,
+    ...shadows.md,
+  },
+  masterToggleContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  masterToggleIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: radius.md,
+    backgroundColor: colors.muted,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: spacing.md,
+  },
+  masterToggleText: {
+    flex: 1,
+  },
+  masterToggleLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.foreground,
+  },
+  masterToggleDescription: {
+    fontSize: 14,
+    color: colors.mutedForeground,
+    marginTop: 2,
+  },
+  section: {
+    marginBottom: spacing.xl,
+  },
+  sectionTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.mutedForeground,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: spacing.sm,
+    paddingHorizontal: spacing.sm,
+  },
+  sectionContent: {
+    backgroundColor: colors.background,
+    borderRadius: radius.lg,
+    ...shadows.sm,
+  },
+  settingItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: spacing.lg,
+  },
+  settingItemBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  settingIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.md,
+    backgroundColor: colors.muted,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: spacing.md,
+  },
+  settingContent: {
+    flex: 1,
+    marginRight: spacing.md,
+  },
+  settingLabel: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: colors.foreground,
+  },
+  settingDescription: {
+    fontSize: 13,
+    color: colors.mutedForeground,
+    marginTop: 2,
+  },
+  infoCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: `${colors.info}10`,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    marginBottom: spacing.xl,
+  },
+  infoText: {
+    flex: 1,
+    fontSize: 14,
+    color: colors.mutedForeground,
+    marginLeft: spacing.md,
+    lineHeight: 20,
+  },
+});
