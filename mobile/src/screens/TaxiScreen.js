@@ -1,16 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
-  TextInput,
-  ScrollView,
   ActivityIndicator,
   Alert,
   Dimensions,
-  Platform,
-  Image,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
@@ -21,47 +17,35 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import { taxiAPI } from '../services/api';
+import { getDirections, isGoogleMapsConfigured, reverseGeocode } from '../services/googleMaps';
 import { colors, shadows, radius } from '../theme/colors';
 import CancelRideModal from '../components/CancelRideModal';
 import RideReviewModal from '../components/RideReviewModal';
+import LocationSearchSheet from '../components/taxi/LocationSearchSheet';
+import RideOptionsSheet from '../components/taxi/RideOptionsSheet';
+import RideStatusSheet from '../components/taxi/RideStatusSheet';
+import DraggableBottomSheet from '../components/taxi/DraggableBottomSheet';
+import { VEHICLE_TYPES } from '../components/taxi/VehicleTypeSelector';
 
 const { width, height } = Dimensions.get('window');
 
-// Default location (Tbilisi, Georgia)
+// Default location (Kutaisi, Georgia)
 const DEFAULT_LOCATION = {
-  latitude: 41.7151,
-  longitude: 44.8271,
+  latitude: 42.2679,
+  longitude: 42.6946,
 };
 
 // Timeout duration for ride request (90 seconds = 1.5 minutes)
-const RIDE_REQUEST_TIMEOUT = 90000; // milliseconds
+const RIDE_REQUEST_TIMEOUT = 90000;
 
-const VEHICLE_TYPES = [
-  { id: 'economy', icon: 'car-outline', priceMultiplier: 1 },
-  { id: 'comfort', icon: 'car', priceMultiplier: 1.5 },
-  { id: 'business', icon: 'car-sport', priceMultiplier: 2 },
-];
-
-// Helper function to convert color names to hex
-const getColorHex = (colorName) => {
-  const colorMap = {
-    'white': '#FFFFFF',
-    'black': '#000000',
-    'silver': '#C0C0C0',
-    'gray': '#808080',
-    'grey': '#808080',
-    'red': '#FF0000',
-    'blue': '#0000FF',
-    'green': '#008000',
-    'yellow': '#FFFF00',
-    'orange': '#FFA500',
-    'brown': '#8B4513',
-    'beige': '#F5F5DC',
-    'gold': '#FFD700',
-    'purple': '#800080',
-    'pink': '#FFC0CB',
-  };
-  return colorMap[colorName?.toLowerCase()] || '#808080';
+// Booking flow steps
+const BOOKING_STEPS = {
+  LOCATION_SEARCH: 'location_search',
+  RIDE_OPTIONS: 'ride_options',
+  SEARCHING: 'searching',
+  DRIVER_FOUND: 'driver_found',
+  DRIVER_ARRIVED: 'driver_arrived',
+  IN_PROGRESS: 'in_progress',
 };
 
 export default function TaxiScreen({ navigation }) {
@@ -69,19 +53,25 @@ export default function TaxiScreen({ navigation }) {
   const { user } = useAuth();
   const { socket } = useSocket();
   const webViewRef = useRef(null);
+  const bottomSheetRef = useRef(null);
   const insets = useSafeAreaInsets();
 
+  // Location states
   const [location, setLocation] = useState(null);
   const [locationAddress, setLocationAddress] = useState('');
   const [destination, setDestination] = useState('');
   const [destinationCoords, setDestinationCoords] = useState(null);
-  const [selectedVehicle, setSelectedVehicle] = useState('economy');
   const [isLoadingLocation, setIsLoadingLocation] = useState(true);
-  const [isRequesting, setIsRequesting] = useState(false);
+
+  // Booking states
+  const [bookingStep, setBookingStep] = useState(BOOKING_STEPS.LOCATION_SEARCH);
+  const [selectedVehicle, setSelectedVehicle] = useState('economy');
+  const [paymentMethod, setPaymentMethod] = useState('cash');
   const [estimatedPrice, setEstimatedPrice] = useState(null);
   const [estimatedDuration, setEstimatedDuration] = useState(null);
-  const [rideStatus, setRideStatus] = useState(null);
-  const [paymentMethod, setPaymentMethod] = useState('cash');
+  const [isRequesting, setIsRequesting] = useState(false);
+
+  // Ride states
   const [currentRide, setCurrentRide] = useState(null);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
@@ -90,25 +80,166 @@ export default function TaxiScreen({ navigation }) {
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
   const [timeoutTimer, setTimeoutTimer] = useState(null);
   const [progress, setProgress] = useState(0);
+
+  // Driver tracking states
   const [driverLocation, setDriverLocation] = useState(null);
   const [driverETA, setDriverETA] = useState(null);
   const [driverDistance, setDriverDistance] = useState(null);
   const [waitingTimeLeft, setWaitingTimeLeft] = useState(null);
   const [waitingFee, setWaitingFee] = useState(0);
 
+  // Route polyline for directions
+  const [routePolyline, setRoutePolyline] = useState(null);
+  const [isLoadingDirections, setIsLoadingDirections] = useState(false);
+
+  // Map selection mode
+  const [isSelectingOnMap, setIsSelectingOnMap] = useState(false);
+
+  // Check if user has phone number
+  const hasPhoneNumber = user?.phone && user.phone.trim() !== '';
+
+  // Dynamic snap points based on booking step (max 70% to keep map visible)
+  const snapPoints = useMemo(() => {
+    switch (bookingStep) {
+      case BOOKING_STEPS.LOCATION_SEARCH:
+        return ['25%', '45%', '70%'];
+      case BOOKING_STEPS.RIDE_OPTIONS:
+        return ['45%', '55%', '70%'];
+      case BOOKING_STEPS.SEARCHING:
+      case BOOKING_STEPS.DRIVER_FOUND:
+      case BOOKING_STEPS.DRIVER_ARRIVED:
+      case BOOKING_STEPS.IN_PROGRESS:
+        return ['30%', '50%', '70%'];
+      default:
+        return ['35%', '55%', '70%'];
+    }
+  }, [bookingStep]);
+
+  // Initialize location on mount
   useEffect(() => {
     requestLocationPermission();
   }, []);
 
+  // Check for active ride on mount
+  useEffect(() => {
+    const checkActiveRide = async () => {
+      try {
+        const response = await taxiAPI.getMyRides();
+        const rides = response.data?.data?.rides || [];
+        const activeRide = rides.find(r =>
+          !['completed', 'cancelled'].includes(r.status)
+        );
+
+        if (activeRide) {
+          setCurrentRide(activeRide);
+
+          // Restore destination info from ride data
+          if (activeRide.dropoff) {
+            setDestination(activeRide.dropoff.address || '');
+            if (activeRide.dropoff.lat && activeRide.dropoff.lng) {
+              setDestinationCoords({
+                latitude: activeRide.dropoff.lat,
+                longitude: activeRide.dropoff.lng,
+              });
+            }
+          }
+
+          // Restore pickup address
+          if (activeRide.pickup?.address) {
+            setLocationAddress(activeRide.pickup.address);
+          }
+
+          // Restore price and duration from quote
+          if (activeRide.quote) {
+            setEstimatedPrice(activeRide.quote.totalPrice);
+            setEstimatedDuration(activeRide.quote.duration);
+          }
+
+          // Restore vehicle type and payment method
+          if (activeRide.vehicleType) {
+            setSelectedVehicle(activeRide.vehicleType);
+          }
+          if (activeRide.paymentMethod) {
+            setPaymentMethod(activeRide.paymentMethod);
+          }
+
+          // Restore driver location if available
+          if (activeRide.driver?.location?.coordinates) {
+            const [lng, lat] = activeRide.driver.location.coordinates;
+            setDriverLocation({ latitude: lat, longitude: lng });
+          }
+
+          // Map ride status to booking step
+          switch (activeRide.status) {
+            case 'pending':
+              setBookingStep(BOOKING_STEPS.SEARCHING);
+              break;
+            case 'accepted':
+              setBookingStep(BOOKING_STEPS.DRIVER_FOUND);
+              break;
+            case 'driver_arrived':
+              setBookingStep(BOOKING_STEPS.DRIVER_ARRIVED);
+              break;
+            case 'in_progress':
+              setBookingStep(BOOKING_STEPS.IN_PROGRESS);
+              break;
+          }
+
+          // Update map markers after WebView has loaded
+          setTimeout(() => {
+            if (!webViewRef.current) return;
+
+            // Update pickup marker on map
+            if (activeRide.pickup?.lat && activeRide.pickup?.lng) {
+              webViewRef.current.injectJavaScript(`
+                updatePickupMarker(${activeRide.pickup.lat}, ${activeRide.pickup.lng});
+                true;
+              `);
+            }
+
+            // Show destination marker and route
+            if (activeRide.dropoff?.lat && activeRide.dropoff?.lng) {
+              webViewRef.current.injectJavaScript(`
+                updateDestinationMarker(${activeRide.dropoff.lat}, ${activeRide.dropoff.lng});
+                true;
+              `);
+
+              // Fit bounds to show both pickup and destination
+              if (activeRide.pickup?.lat && activeRide.pickup?.lng) {
+                webViewRef.current.injectJavaScript(`
+                  fitBounds(${activeRide.pickup.lat}, ${activeRide.pickup.lng}, ${activeRide.dropoff.lat}, ${activeRide.dropoff.lng});
+                  true;
+                `);
+              }
+            }
+
+            // Show driver marker if driver has location
+            if (activeRide.driver?.location?.coordinates) {
+              const [dLng, dLat] = activeRide.driver.location.coordinates;
+              webViewRef.current.injectJavaScript(`
+                updateDriverMarker(${dLat}, ${dLng});
+                true;
+              `);
+            }
+          }, 500);
+        }
+      } catch (error) {
+        console.log('Error checking active ride:', error);
+      }
+    };
+
+    checkActiveRide();
+  }, []);
+
   // Waiting time countdown effect
   useEffect(() => {
-    if (rideStatus !== 'driver_arrived' || !currentRide?.waitingExpiresAt) {
+    if (bookingStep !== BOOKING_STEPS.DRIVER_ARRIVED || !currentRide?.waitingExpiresAt) {
       setWaitingTimeLeft(null);
       setWaitingFee(0);
       return;
     }
 
-    const FREE_WAITING_SECONDS = 60; // 1 minute free
+    const FREE_WAITING_SECONDS = 60;
     const WAITING_FEE_PER_MINUTE = 0.50;
 
     const updateWaitingTime = () => {
@@ -125,9 +256,8 @@ export default function TaxiScreen({ navigation }) {
 
       setWaitingTimeLeft(Math.ceil(timeLeftMs / 1000));
 
-      // Calculate waiting fee (after 1 minute free)
       if (waitedSeconds > FREE_WAITING_SECONDS) {
-        const paidSeconds = Math.min(waitedSeconds - FREE_WAITING_SECONDS, 120); // Max 2 minutes paid
+        const paidSeconds = Math.min(waitedSeconds - FREE_WAITING_SECONDS, 120);
         const fee = Math.round((paidSeconds / 60) * WAITING_FEE_PER_MINUTE * 100) / 100;
         setWaitingFee(fee);
       } else {
@@ -139,7 +269,7 @@ export default function TaxiScreen({ navigation }) {
     const interval = setInterval(updateWaitingTime, 1000);
 
     return () => clearInterval(interval);
-  }, [rideStatus, currentRide?.waitingExpiresAt, currentRide?.arrivalTime]);
+  }, [bookingStep, currentRide?.waitingExpiresAt, currentRide?.arrivalTime]);
 
   // Socket event listeners
   useEffect(() => {
@@ -147,11 +277,10 @@ export default function TaxiScreen({ navigation }) {
 
     socket.on('ride:accepted', (ride) => {
       console.log('Ride accepted:', ride);
-      clearRideTimeout(); // Clear timeout when driver accepts
+      clearRideTimeout();
       setCurrentRide(ride);
-      setRideStatus('found');
+      setBookingStep(BOOKING_STEPS.DRIVER_FOUND);
 
-      // Initialize driver location if available
       if (ride.driver?.location?.coordinates) {
         const [lng, lat] = ride.driver.location.coordinates;
         setDriverLocation({ latitude: lat, longitude: lng });
@@ -170,14 +299,12 @@ export default function TaxiScreen({ navigation }) {
         const { latitude, longitude } = data.location;
         setDriverLocation({ latitude, longitude });
 
-        // Update driver marker on map
         if (webViewRef.current && location) {
           webViewRef.current.injectJavaScript(`
             updateDriverMarker(${latitude}, ${longitude});
             true;
           `);
 
-          // Calculate distance and ETA to pickup location
           const distance = calculateDistance(
             latitude,
             longitude,
@@ -186,8 +313,7 @@ export default function TaxiScreen({ navigation }) {
           );
           setDriverDistance(distance);
 
-          // Estimate ETA (assuming average speed of 30 km/h in city)
-          const eta = Math.round((distance / 30) * 60); // Convert to minutes
+          const eta = Math.round((distance / 30) * 60);
           setDriverETA(eta);
         }
       }
@@ -196,7 +322,7 @@ export default function TaxiScreen({ navigation }) {
     socket.on('ride:arrived', (ride) => {
       console.log('Driver arrived:', ride);
       setCurrentRide(ride);
-      setRideStatus('driver_arrived');
+      setBookingStep(BOOKING_STEPS.DRIVER_ARRIVED);
       Alert.alert(
         t('taxi.driverArrived'),
         t('taxi.driverArrivedMessage'),
@@ -207,7 +333,7 @@ export default function TaxiScreen({ navigation }) {
     socket.on('ride:started', (ride) => {
       console.log('Ride started:', ride);
       setCurrentRide(ride);
-      setRideStatus('in_progress');
+      setBookingStep(BOOKING_STEPS.IN_PROGRESS);
       Alert.alert(
         t('taxi.rideStarted'),
         t('taxi.enjoyYourRide'),
@@ -218,30 +344,14 @@ export default function TaxiScreen({ navigation }) {
     socket.on('ride:completed', (data) => {
       console.log('Ride completed:', data);
       const ride = data.ride || data;
-
-      // Store the completed ride and show review modal
       setCompletedRide(ride);
       setShowReviewModal(true);
-
-      // Reset ride state
-      setCurrentRide(null);
-      setRideStatus(null);
-      setDestination('');
-      setDestinationCoords(null);
-      setEstimatedPrice(null);
-      setEstimatedDuration(null);
-      setDriverLocation(null);
-      setDriverETA(null);
-      setDriverDistance(null);
+      resetBookingState();
     });
 
     socket.on('ride:cancelled', (ride) => {
       console.log('Ride cancelled:', ride);
-      setCurrentRide(null);
-      setRideStatus(null);
-      setDriverLocation(null);
-      setDriverETA(null);
-      setDriverDistance(null);
+      resetBookingState();
       Alert.alert(
         t('taxi.rideCancelled'),
         ride.cancelledBy === 'driver'
@@ -254,15 +364,7 @@ export default function TaxiScreen({ navigation }) {
     socket.on('ride:expired', (data) => {
       console.log('Ride expired:', data);
       clearRideTimeout();
-      setCurrentRide(null);
-      setRideStatus(null);
-      setDestination('');
-      setDestinationCoords(null);
-      setEstimatedPrice(null);
-      setEstimatedDuration(null);
-      setDriverLocation(null);
-      setDriverETA(null);
-      setDriverDistance(null);
+      resetBookingState();
       Alert.alert(
         t('taxi.rideExpired'),
         t('taxi.rideExpiredMessage'),
@@ -272,15 +374,7 @@ export default function TaxiScreen({ navigation }) {
 
     socket.on('ride:waitingTimeout', (data) => {
       console.log('Ride waiting timeout:', data);
-      setCurrentRide(null);
-      setRideStatus(null);
-      setDestination('');
-      setDestinationCoords(null);
-      setEstimatedPrice(null);
-      setEstimatedDuration(null);
-      setDriverLocation(null);
-      setDriverETA(null);
-      setDriverDistance(null);
+      resetBookingState();
       Alert.alert(
         t('taxi.waitingTimeout'),
         t('taxi.waitingTimeoutMessage'),
@@ -298,7 +392,43 @@ export default function TaxiScreen({ navigation }) {
       socket.off('ride:expired');
       socket.off('ride:waitingTimeout');
     };
-  }, [socket, navigation, t]);
+  }, [socket, navigation, t, currentRide?._id, location]);
+
+  // Progress bar animation for searching
+  useEffect(() => {
+    if (bookingStep === BOOKING_STEPS.SEARCHING) {
+      const startTime = Date.now();
+      const duration = RIDE_REQUEST_TIMEOUT;
+
+      const interval = setInterval(() => {
+        const elapsed = Date.now() - startTime;
+        const newProgress = Math.min((elapsed / duration) * 100, 100);
+        setProgress(newProgress);
+
+        if (newProgress >= 100) {
+          clearInterval(interval);
+        }
+      }, 100);
+
+      return () => clearInterval(interval);
+    } else {
+      setProgress(0);
+    }
+  }, [bookingStep]);
+
+  const resetBookingState = () => {
+    setCurrentRide(null);
+    setBookingStep(BOOKING_STEPS.LOCATION_SEARCH);
+    setDestination('');
+    setDestinationCoords(null);
+    setEstimatedPrice(null);
+    setEstimatedDuration(null);
+    setDriverLocation(null);
+    setDriverETA(null);
+    setDriverDistance(null);
+    setRoutePolyline(null);
+    clearRideTimeout();
+  };
 
   const requestLocationPermission = async () => {
     try {
@@ -327,7 +457,6 @@ export default function TaxiScreen({ navigation }) {
 
       setLocation(newLocation);
 
-      // Update map
       if (webViewRef.current) {
         webViewRef.current.injectJavaScript(`
           updatePickupMarker(${newLocation.latitude}, ${newLocation.longitude});
@@ -335,7 +464,6 @@ export default function TaxiScreen({ navigation }) {
         `);
       }
 
-      // Get address from coordinates
       const [address] = await Location.reverseGeocodeAsync({
         latitude: currentLocation.coords.latitude,
         longitude: currentLocation.coords.longitude,
@@ -352,7 +480,7 @@ export default function TaxiScreen({ navigation }) {
     } catch (error) {
       console.log('Error getting location:', error);
       setLocation(DEFAULT_LOCATION);
-      setLocationAddress('Tbilisi, Georgia');
+      setLocationAddress('Kutaisi, Georgia');
     } finally {
       setIsLoadingLocation(false);
     }
@@ -370,26 +498,59 @@ export default function TaxiScreen({ navigation }) {
     return R * c;
   };
 
-  const handleDestinationChange = async (text) => {
-    setDestination(text);
+  // Fetch directions and update map with route polyline
+  const fetchDirectionsAndUpdate = useCallback(async (destCoords) => {
+    if (!location || !destCoords) return;
 
-    if (text.length > 3 && location) {
-      const randomOffset = () => (Math.random() - 0.5) * 0.05;
-      const destCoords = {
-        latitude: location.latitude + randomOffset() + 0.02,
-        longitude: location.longitude + randomOffset() + 0.02,
-      };
-      setDestinationCoords(destCoords);
+    setIsLoadingDirections(true);
 
-      // Update map with destination
-      if (webViewRef.current) {
-        webViewRef.current.injectJavaScript(`
-          updateDestinationMarker(${destCoords.latitude}, ${destCoords.longitude});
-          fitBounds(${location.latitude}, ${location.longitude}, ${destCoords.latitude}, ${destCoords.longitude});
-          true;
-        `);
+    try {
+      // Try to get real directions from Google
+      const directions = await getDirections(location, destCoords);
+
+      if (directions) {
+        // Use real distance and duration from Google Directions
+        const vehicleType = VEHICLE_TYPES.find(v => v.id === selectedVehicle);
+        const basePrice = 5 + (directions.distance * 1.5);
+        setEstimatedPrice((basePrice * vehicleType.priceMultiplier).toFixed(2));
+        setEstimatedDuration(directions.duration);
+        setRoutePolyline(directions.polyline);
+
+        // Update map with actual route polyline
+        if (webViewRef.current && directions.polyline.length > 0) {
+          const polylineJSON = JSON.stringify(directions.polyline);
+          webViewRef.current.injectJavaScript(`
+            updateRouteWithPolyline(${destCoords.latitude}, ${destCoords.longitude}, ${polylineJSON});
+            fitBounds(${location.latitude}, ${location.longitude}, ${destCoords.latitude}, ${destCoords.longitude});
+            true;
+          `);
+        }
+      } else {
+        // Fallback to straight line and estimated calculations
+        const distance = calculateDistance(
+          location.latitude,
+          location.longitude,
+          destCoords.latitude,
+          destCoords.longitude
+        );
+        const vehicleType = VEHICLE_TYPES.find(v => v.id === selectedVehicle);
+        const basePrice = 5 + (distance * 1.5);
+        setEstimatedPrice((basePrice * vehicleType.priceMultiplier).toFixed(2));
+        setEstimatedDuration(Math.round(distance * 2.5));
+        setRoutePolyline(null);
+
+        // Update map with simple line
+        if (webViewRef.current) {
+          webViewRef.current.injectJavaScript(`
+            updateDestinationMarker(${destCoords.latitude}, ${destCoords.longitude});
+            fitBounds(${location.latitude}, ${location.longitude}, ${destCoords.latitude}, ${destCoords.longitude});
+            true;
+          `);
+        }
       }
-
+    } catch (error) {
+      console.log('Error fetching directions:', error);
+      // Fallback calculation
       const distance = calculateDistance(
         location.latitude,
         location.longitude,
@@ -400,10 +561,43 @@ export default function TaxiScreen({ navigation }) {
       const basePrice = 5 + (distance * 1.5);
       setEstimatedPrice((basePrice * vehicleType.priceMultiplier).toFixed(2));
       setEstimatedDuration(Math.round(distance * 2.5));
+    } finally {
+      setIsLoadingDirections(false);
+    }
+  }, [location, selectedVehicle]);
+
+  // Handle destination selection with coordinates (from Places Autocomplete)
+  const handleDestinationSelectWithCoords = useCallback(async (address, coords) => {
+    setDestination(address);
+    setDestinationCoords(coords);
+
+    await fetchDirectionsAndUpdate(coords);
+
+    // Auto-transition to ride options when destination is selected
+    setBookingStep(BOOKING_STEPS.RIDE_OPTIONS);
+  }, [fetchDirectionsAndUpdate]);
+
+  const handleDestinationChange = useCallback(async (text) => {
+    setDestination(text);
+
+    if (text.length > 3 && location) {
+      // Generate approximate coordinates when no Places API coordinates
+      const randomOffset = () => (Math.random() - 0.5) * 0.05;
+      const destCoords = {
+        latitude: location.latitude + randomOffset() + 0.02,
+        longitude: location.longitude + randomOffset() + 0.02,
+      };
+      setDestinationCoords(destCoords);
+
+      await fetchDirectionsAndUpdate(destCoords);
+
+      // Auto-transition to ride options when destination is selected
+      setBookingStep(BOOKING_STEPS.RIDE_OPTIONS);
     } else {
       setDestinationCoords(null);
       setEstimatedPrice(null);
       setEstimatedDuration(null);
+      setRoutePolyline(null);
       if (webViewRef.current) {
         webViewRef.current.injectJavaScript(`
           clearDestinationMarker();
@@ -411,9 +605,17 @@ export default function TaxiScreen({ navigation }) {
         `);
       }
     }
-  };
+  }, [location, fetchDirectionsAndUpdate]);
 
-  const handleVehicleSelect = (vehicleId) => {
+  const handleDestinationSelect = useCallback((address, coords) => {
+    if (coords) {
+      handleDestinationSelectWithCoords(address, coords);
+    } else {
+      handleDestinationChange(address);
+    }
+  }, [handleDestinationSelectWithCoords, handleDestinationChange]);
+
+  const handleVehicleSelect = useCallback((vehicleId) => {
     setSelectedVehicle(vehicleId);
 
     if (location && destinationCoords) {
@@ -427,9 +629,8 @@ export default function TaxiScreen({ navigation }) {
       const basePrice = 5 + (distance * 1.5);
       setEstimatedPrice((basePrice * vehicleType.priceMultiplier).toFixed(2));
     }
-  };
+  }, [location, destinationCoords]);
 
-  // Clear timeout timer
   const clearRideTimeout = () => {
     if (timeoutTimer) {
       clearTimeout(timeoutTimer);
@@ -438,23 +639,12 @@ export default function TaxiScreen({ navigation }) {
     setProgress(0);
   };
 
-  // Handle timeout when no driver accepts
   const handleRideTimeout = async () => {
     if (!currentRide || !currentRide._id) return;
 
     try {
-      // Auto-cancel the ride with timeout reason
       await taxiAPI.cancelRide(currentRide._id, 'waiting_time_too_long', 'No driver accepted within the time limit');
-
-      // Reset state
-      setCurrentRide(null);
-      setRideStatus(null);
-      setDestination('');
-      setDestinationCoords(null);
-      setEstimatedPrice(null);
-      setEstimatedDuration(null);
-      clearRideTimeout();
-
+      resetBookingState();
       Alert.alert(
         t('taxi.noDriverFound'),
         t('taxi.noDriverFoundMessage'),
@@ -462,34 +652,9 @@ export default function TaxiScreen({ navigation }) {
       );
     } catch (error) {
       console.log('Error auto-cancelling ride:', error);
-      // Still reset the state even if cancel fails
-      setCurrentRide(null);
-      setRideStatus(null);
-      clearRideTimeout();
+      resetBookingState();
     }
   };
-
-  // Progress bar animation
-  useEffect(() => {
-    if (rideStatus === 'searching') {
-      const startTime = Date.now();
-      const duration = RIDE_REQUEST_TIMEOUT;
-
-      const interval = setInterval(() => {
-        const elapsed = Date.now() - startTime;
-        const newProgress = Math.min((elapsed / duration) * 100, 100);
-        setProgress(newProgress);
-
-        if (newProgress >= 100) {
-          clearInterval(interval);
-        }
-      }, 100); // Update every 100ms for smooth animation
-
-      return () => clearInterval(interval);
-    } else {
-      setProgress(0);
-    }
-  }, [rideStatus]);
 
   const handleRequestRide = async () => {
     if (!location) {
@@ -507,8 +672,23 @@ export default function TaxiScreen({ navigation }) {
       return;
     }
 
+    // Check if user has phone number
+    if (!hasPhoneNumber) {
+      Alert.alert(
+        t('taxi.phoneNumberRequired'),
+        t('taxi.phoneNumberRequiredMessage'),
+        [
+          { text: t('common.cancel'), style: 'cancel' },
+          {
+            text: t('taxi.addPhoneNumber'),
+            onPress: () => navigation.navigate('MainTabs', { screen: 'Profile' })
+          }
+        ]
+      );
+      return;
+    }
+
     setIsRequesting(true);
-    setRideStatus('requesting');
 
     try {
       const distance = calculateDistance(
@@ -553,10 +733,9 @@ export default function TaxiScreen({ navigation }) {
 
       if (response.data.success) {
         setCurrentRide(response.data.data.ride);
-        setRideStatus('searching');
+        setBookingStep(BOOKING_STEPS.SEARCHING);
         setProgress(0);
 
-        // Start timeout timer (90 seconds)
         const timeout = setTimeout(() => {
           handleRideTimeout();
         }, RIDE_REQUEST_TIMEOUT);
@@ -568,13 +747,10 @@ export default function TaxiScreen({ navigation }) {
           [{ text: t('common.ok') }]
         );
       }
-
     } catch (error) {
       console.log('Error requesting ride:', error);
       const errorMessage = error.response?.data?.message || t('errors.tryAgain');
       Alert.alert(t('errors.somethingWentWrong'), errorMessage);
-      setRideStatus(null);
-      setCurrentRide(null);
     } finally {
       setIsRequesting(false);
     }
@@ -593,19 +769,9 @@ export default function TaxiScreen({ navigation }) {
     setIsCancelling(true);
     try {
       await taxiAPI.cancelRide(currentRide._id, reason, note);
-
-      // Clear timeout timer
       clearRideTimeout();
-
-      // Reset state
-      setCurrentRide(null);
-      setRideStatus(null);
-      setDestination('');
-      setDestinationCoords(null);
-      setEstimatedPrice(null);
-      setEstimatedDuration(null);
+      resetBookingState();
       setShowCancelModal(false);
-
       Alert.alert(
         t('taxi.rideCancelled'),
         t('taxi.rideCancelledSuccessfully'),
@@ -629,20 +795,17 @@ export default function TaxiScreen({ navigation }) {
     setIsSubmittingReview(true);
     try {
       await taxiAPI.reviewDriver(completedRide._id, rating, reviewText);
-
       Alert.alert(
         t('taxi.thankYou'),
         t('taxi.reviewSubmitted'),
-        [
-          {
-            text: t('common.ok'),
-            onPress: () => {
-              setShowReviewModal(false);
-              setCompletedRide(null);
-              navigation.navigate('TaxiHistory');
-            }
+        [{
+          text: t('common.ok'),
+          onPress: () => {
+            setShowReviewModal(false);
+            setCompletedRide(null);
+            navigation.replace('TaxiHistory');
           }
-        ]
+        }]
       );
     } catch (error) {
       console.log('Error submitting review:', error);
@@ -656,8 +819,27 @@ export default function TaxiScreen({ navigation }) {
   const handleCloseReviewModal = () => {
     setShowReviewModal(false);
     setCompletedRide(null);
-    navigation.navigate('TaxiHistory');
+    navigation.replace('TaxiHistory');
   };
+
+  const handleBackToSearch = useCallback(() => {
+    // Clear destination to allow entering a new one
+    setDestination('');
+    setDestinationCoords(null);
+    setEstimatedPrice(null);
+    setEstimatedDuration(null);
+    setRoutePolyline(null);
+
+    // Clear map markers
+    if (webViewRef.current) {
+      webViewRef.current.injectJavaScript(`
+        clearDestinationMarker();
+        true;
+      `);
+    }
+
+    setBookingStep(BOOKING_STEPS.LOCATION_SEARCH);
+  }, []);
 
   const centerOnUser = () => {
     if (location && webViewRef.current) {
@@ -668,7 +850,145 @@ export default function TaxiScreen({ navigation }) {
     }
   };
 
-  // OpenStreetMap with Leaflet - works in WebView
+  // Handle "Select on Map" button press
+  const handleSelectOnMap = useCallback(() => {
+    setIsSelectingOnMap(true);
+    // Collapse bottom sheet to give more map space
+    if (bottomSheetRef.current) {
+      bottomSheetRef.current.collapse();
+    }
+    // Enable map click mode
+    if (webViewRef.current) {
+      webViewRef.current.injectJavaScript(`
+        enableMapClickMode();
+        true;
+      `);
+    }
+  }, []);
+
+  // Handle map click message from WebView
+  const handleWebViewMessage = useCallback(async (event) => {
+    try {
+      const data = JSON.parse(event.nativeEvent.data);
+
+      if (data.type === 'mapClick' && isSelectingOnMap) {
+        const { latitude, longitude } = data;
+
+        // Show loading state
+        setIsLoadingDirections(true);
+
+        // Get address from coordinates
+        const addressResult = await reverseGeocode(latitude, longitude);
+
+        if (addressResult) {
+          const address = addressResult.mainText || addressResult.address;
+          const coords = { latitude, longitude };
+
+          // Update destination
+          setDestination(address);
+          setDestinationCoords(coords);
+
+          // Update map with destination marker
+          if (webViewRef.current) {
+            webViewRef.current.injectJavaScript(`
+              disableMapClickMode();
+              updateDestinationMarker(${latitude}, ${longitude});
+              true;
+            `);
+          }
+
+          // Fetch directions and update estimates
+          await fetchDirectionsAndUpdate(coords);
+
+          // Expand bottom sheet back and move to ride options
+          if (bottomSheetRef.current) {
+            bottomSheetRef.current.snapToIndex(1);
+          }
+          setBookingStep(BOOKING_STEPS.RIDE_OPTIONS);
+        }
+
+        setIsSelectingOnMap(false);
+        setIsLoadingDirections(false);
+      }
+    } catch (error) {
+      console.log('Error handling map click:', error);
+      setIsSelectingOnMap(false);
+      setIsLoadingDirections(false);
+      // Expand bottom sheet back on error
+      if (bottomSheetRef.current) {
+        bottomSheetRef.current.snapToIndex(1);
+      }
+    }
+  }, [isSelectingOnMap, fetchDirectionsAndUpdate]);
+
+  // Get ride status for RideStatusSheet
+  const getRideStatus = () => {
+    switch (bookingStep) {
+      case BOOKING_STEPS.SEARCHING:
+        return 'searching';
+      case BOOKING_STEPS.DRIVER_FOUND:
+        return 'found';
+      case BOOKING_STEPS.DRIVER_ARRIVED:
+        return 'driver_arrived';
+      case BOOKING_STEPS.IN_PROGRESS:
+        return 'in_progress';
+      default:
+        return null;
+    }
+  };
+
+  // Render sheet content based on step
+  const renderSheetContent = () => {
+    const rideStatus = getRideStatus();
+
+    if (rideStatus) {
+      return (
+        <RideStatusSheet
+          rideStatus={rideStatus}
+          currentRide={currentRide}
+          estimatedPrice={estimatedPrice}
+          estimatedDuration={estimatedDuration}
+          progress={progress}
+          driverETA={driverETA}
+          driverDistance={driverDistance}
+          waitingTimeLeft={waitingTimeLeft}
+          waitingFee={waitingFee}
+          onCancel={handleCancelRide}
+        />
+      );
+    }
+
+    if (bookingStep === BOOKING_STEPS.RIDE_OPTIONS) {
+      return (
+        <RideOptionsSheet
+          selectedVehicle={selectedVehicle}
+          paymentMethod={paymentMethod}
+          estimatedPrice={estimatedPrice}
+          estimatedDuration={estimatedDuration}
+          onVehicleChange={handleVehicleSelect}
+          onPaymentChange={setPaymentMethod}
+          onRequestRide={handleRequestRide}
+          onBack={handleBackToSearch}
+          isRequesting={isRequesting}
+        />
+      );
+    }
+
+    return (
+      <LocationSearchSheet
+        pickup={{ address: locationAddress }}
+        destination={destination}
+        onDestinationChange={handleDestinationChange}
+        onDestinationSelect={handleDestinationSelect}
+        onPickupRefresh={requestLocationPermission}
+        isLoadingLocation={isLoadingLocation || isLoadingDirections}
+        userLocation={location}
+        onSelectOnMap={handleSelectOnMap}
+      />
+    );
+  };
+
+  // Map HTML
   const getMapHTML = () => {
     const lat = location?.latitude || DEFAULT_LOCATION.latitude;
     const lng = location?.longitude || DEFAULT_LOCATION.longitude;
@@ -683,20 +1003,32 @@ export default function TaxiScreen({ navigation }) {
         <style>
           body { margin: 0; padding: 0; }
           #map { width: 100%; height: 100vh; }
+
+          @keyframes pulse-green {
+            0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.6); }
+            70% { box-shadow: 0 0 0 12px rgba(34, 197, 94, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+          }
+          @keyframes pulse-dark {
+            0% { box-shadow: 0 0 0 0 rgba(23, 23, 23, 0.5); }
+            70% { box-shadow: 0 0 0 14px rgba(23, 23, 23, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(23, 23, 23, 0); }
+          }
+
           .pickup-marker {
             background: #22c55e;
             border: 3px solid white;
             border-radius: 50%;
-            width: 20px;
-            height: 20px;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            width: 18px;
+            height: 18px;
+            animation: pulse-green 2s ease-out infinite;
           }
           .destination-marker {
             background: #ef4444;
             border: 3px solid white;
             border-radius: 50%;
-            width: 20px;
-            height: 20px;
+            width: 18px;
+            height: 18px;
             box-shadow: 0 2px 6px rgba(0,0,0,0.3);
           }
           .driver-marker {
@@ -705,16 +1037,11 @@ export default function TaxiScreen({ navigation }) {
             border-radius: 50%;
             width: 24px;
             height: 24px;
-            box-shadow: 0 3px 8px rgba(0,0,0,0.4);
-            position: relative;
-          }
-          .driver-marker::after {
-            content: '🚗';
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
             font-size: 14px;
+            animation: pulse-dark 2s ease-out infinite;
           }
         </style>
       </head>
@@ -744,6 +1071,7 @@ export default function TaxiScreen({ navigation }) {
 
           var driverIcon = L.divIcon({
             className: 'driver-marker',
+            html: '🚗',
             iconSize: [24, 24],
             iconAnchor: [12, 12]
           });
@@ -765,7 +1093,6 @@ export default function TaxiScreen({ navigation }) {
               destinationMarker = L.marker([lat, lng], {icon: destinationIcon}).addTo(map);
             }
 
-            // Draw route line
             if (routeLine) {
               map.removeLayer(routeLine);
             }
@@ -775,6 +1102,43 @@ export default function TaxiScreen({ navigation }) {
               weight: 4,
               opacity: 0.8
             }).addTo(map);
+          }
+
+          function updateRouteWithPolyline(destLat, destLng, polylineCoords) {
+            // Update destination marker
+            if (destinationMarker) {
+              destinationMarker.setLatLng([destLat, destLng]);
+            } else {
+              destinationMarker = L.marker([destLat, destLng], {icon: destinationIcon}).addTo(map);
+            }
+
+            // Remove old route line
+            if (routeLine) {
+              map.removeLayer(routeLine);
+            }
+
+            // Draw the actual route polyline from Google Directions
+            if (polylineCoords && polylineCoords.length > 0) {
+              routeLine = L.polyline(polylineCoords, {
+                color: '#171717',
+                weight: 5,
+                opacity: 0.9,
+                lineJoin: 'round',
+                lineCap: 'round'
+              }).addTo(map);
+
+              // Fit map to the route bounds
+              var bounds = routeLine.getBounds();
+              map.fitBounds(bounds, {padding: [50, 50]});
+            } else {
+              // Fallback to straight line
+              var pickup = pickupMarker.getLatLng();
+              routeLine = L.polyline([[pickup.lat, pickup.lng], [destLat, destLng]], {
+                color: '#171717',
+                weight: 4,
+                opacity: 0.8
+              }).addTo(map);
+            }
           }
 
           function clearDestinationMarker() {
@@ -800,7 +1164,6 @@ export default function TaxiScreen({ navigation }) {
               driverMarker = L.marker([lat, lng], {icon: driverIcon}).addTo(map);
             }
 
-            // Update route line from driver to pickup
             if (routeLine) {
               map.removeLayer(routeLine);
             }
@@ -812,7 +1175,6 @@ export default function TaxiScreen({ navigation }) {
               dashArray: '10, 10'
             }).addTo(map);
 
-            // Fit map to show both driver and pickup
             var bounds = L.latLngBounds([[lat, lng], [pickup.lat, pickup.lng]]);
             map.fitBounds(bounds, {padding: [80, 80]});
           }
@@ -823,6 +1185,46 @@ export default function TaxiScreen({ navigation }) {
               driverMarker = null;
             }
           }
+
+          // Map click mode for pin selection
+          var mapClickMode = false;
+          var clickMarker = null;
+
+          function enableMapClickMode() {
+            mapClickMode = true;
+            map.getContainer().style.cursor = 'crosshair';
+          }
+
+          function disableMapClickMode() {
+            mapClickMode = false;
+            map.getContainer().style.cursor = '';
+            if (clickMarker) {
+              map.removeLayer(clickMarker);
+              clickMarker = null;
+            }
+          }
+
+          // Handle map clicks
+          map.on('click', function(e) {
+            if (mapClickMode) {
+              var lat = e.latlng.lat;
+              var lng = e.latlng.lng;
+
+              // Show temporary marker
+              if (clickMarker) {
+                clickMarker.setLatLng([lat, lng]);
+              } else {
+                clickMarker = L.marker([lat, lng], {icon: destinationIcon}).addTo(map);
+              }
+
+              // Send coordinates to React Native
+              window.ReactNativeWebView.postMessage(JSON.stringify({
+                type: 'mapClick',
+                latitude: lat,
+                longitude: lng
+              }));
+            }
+          });
         </script>
       </body>
       </html>
@@ -848,14 +1250,17 @@ export default function TaxiScreen({ navigation }) {
         isLoading={isSubmittingReview}
       />
 
-      {/* Map */}
+      {/* Full Screen Map */}
       <View style={styles.mapContainer}>
         <WebView
           ref={webViewRef}
           source={{ html: getMapHTML() }}
           style={styles.map}
           scrollEnabled={false}
+          javaScriptEnabled={true}
+          domStorageEnabled={true}
           onError={(e) => console.log('WebView error:', e)}
+          onMessage={handleWebViewMessage}
         />
 
         {/* Loading Overlay */}
@@ -866,367 +1271,84 @@ export default function TaxiScreen({ navigation }) {
           </View>
         )}
 
-        {/* Back Button */}
-        <TouchableOpacity
-          style={[styles.backButton, { top: insets.top + 10 }]}
-          onPress={() => navigation.goBack()}
-        >
-          <Ionicons name="arrow-back" size={24} color={colors.foreground} />
-        </TouchableOpacity>
-
-        {/* My Location Button */}
-        <TouchableOpacity
-          style={styles.myLocationButton}
-          onPress={centerOnUser}
-        >
-          <Ionicons name="locate" size={24} color={colors.primary} />
-        </TouchableOpacity>
-
-        {/* History Button */}
-        <TouchableOpacity
-          style={[styles.historyButton, { top: insets.top + 10 }]}
-          onPress={() => navigation.navigate('TaxiHistory')}
-        >
-          <Ionicons name="time-outline" size={24} color={colors.primary} />
-        </TouchableOpacity>
-      </View>
-
-      {/* Bottom Sheet */}
-      <View style={[styles.bottomSheet, { paddingBottom: insets.bottom }]}>
-        {rideStatus === 'searching' || rideStatus === 'found' || rideStatus === 'driver_arrived' || rideStatus === 'in_progress' ? (
-          <View style={styles.rideStatusContainer}>
-            <View style={styles.rideStatusHeader}>
-              <View style={styles.statusIndicator}>
-                {rideStatus === 'searching' ? (
-                  <ActivityIndicator size="small" color={colors.primary} />
-                ) : rideStatus === 'in_progress' ? (
-                  <Ionicons name="car" size={24} color={colors.primary} />
-                ) : (
-                  <Ionicons name="checkmark-circle" size={24} color={colors.success} />
-                )}
-              </View>
-              <Text style={styles.rideStatusText}>
-                {rideStatus === 'searching'
-                  ? t('taxi.lookingForDriver')
-                  : rideStatus === 'driver_arrived'
-                  ? t('taxi.driverArrived')
-                  : rideStatus === 'in_progress'
-                  ? t('taxi.rideInProgress')
-                  : t('taxi.driverFound')}
-              </Text>
-            </View>
-
-            {/* Progress Bar */}
-            {rideStatus === 'searching' && (
-              <View style={styles.progressContainer}>
-                <Text style={styles.progressLabel}>{t('taxi.searchingForDriver')}</Text>
-                <View style={styles.progressBarBackground}>
-                  <View style={[styles.progressBarFill, { width: `${progress}%` }]} />
-                </View>
-              </View>
-            )}
-
-            {/* Driver Info Card - shown when driver is found */}
-            {rideStatus === 'found' && currentRide?.driver && (
-              <View style={styles.driverInfoCard}>
-                {/* Driver is coming indicator */}
-                <View style={styles.driverComingBanner}>
-                  <View style={styles.driverComingIconContainer}>
-                    <Ionicons name="car" size={20} color={colors.primary} />
-                  </View>
-                  <View style={styles.driverComingTextContainer}>
-                    <Text style={styles.driverComingTitle}>{t('taxi.driverIsOnTheWay')}</Text>
-                    {driverETA !== null && driverDistance !== null && (
-                      <Text style={styles.driverComingSubtitle}>
-                        {driverDistance < 1
-                          ? `${(driverDistance * 1000).toFixed(0)}m`
-                          : `${driverDistance.toFixed(1)}km`} • {driverETA} {t('taxi.minutesAway')}
-                      </Text>
-                    )}
-                  </View>
-                </View>
-
-                <View style={styles.divider} />
-
-                <View style={styles.driverInfoHeader}>
-                  <View style={styles.driverAvatarContainer}>
-                    {currentRide.driver.user?.profileImage ? (
-                      <Image
-                        source={{ uri: currentRide.driver.user.profileImage }}
-                        style={styles.driverAvatar}
-                      />
-                    ) : (
-                      <View style={styles.driverAvatarPlaceholder}>
-                        <Ionicons name="person" size={32} color={colors.mutedForeground} />
-                      </View>
-                    )}
-                  </View>
-                  <View style={styles.driverInfoMain}>
-                    <Text style={styles.driverName}>
-                      {currentRide.driver.user?.firstName} {currentRide.driver.user?.lastName}
-                    </Text>
-                    <View style={styles.driverRatingRow}>
-                      <Ionicons name="star" size={14} color="#FFA500" />
-                      <Text style={styles.driverRating}>
-                        {currentRide.driver.rating?.toFixed(1) || '5.0'}
-                      </Text>
-                      <Text style={styles.driverTrips}>
-                        • {currentRide.driver.totalTrips || 0} {t('taxi.trips')}
-                      </Text>
-                    </View>
-                  </View>
-                  <TouchableOpacity style={styles.callButton}>
-                    <Ionicons name="call" size={20} color={colors.primary} />
-                  </TouchableOpacity>
-                </View>
-
-                <View style={styles.divider} />
-
-                <View style={styles.vehicleInfo}>
-                  <View style={styles.vehicleIconContainer}>
-                    <Ionicons name="car-sport" size={24} color={colors.primary} />
-                  </View>
-                  <View style={styles.vehicleDetails}>
-                    <Text style={styles.vehicleName}>
-                      {currentRide.driver.vehicle?.make} {currentRide.driver.vehicle?.model}
-                    </Text>
-                    <View style={styles.vehicleMetaRow}>
-                      <View style={styles.vehiclePlate}>
-                        <Text style={styles.vehiclePlateText}>
-                          {currentRide.driver.vehicle?.licensePlate}
-                        </Text>
-                      </View>
-                      <View style={styles.vehicleColor}>
-                        <View style={[
-                          styles.colorDot,
-                          { backgroundColor: getColorHex(currentRide.driver.vehicle?.color) }
-                        ]} />
-                        <Text style={styles.vehicleColorText}>
-                          {currentRide.driver.vehicle?.color}
-                        </Text>
-                      </View>
-                    </View>
-                  </View>
-                </View>
-              </View>
-            )}
-
-            {/* Waiting Time Countdown - shown when driver has arrived */}
-            {rideStatus === 'driver_arrived' && waitingTimeLeft !== null && (
-              <View style={styles.waitingContainer}>
-                <View style={styles.waitingHeader}>
-                  <Ionicons name="time-outline" size={20} color={waitingTimeLeft <= 60 ? colors.destructive : colors.warning} />
-                  <Text style={styles.waitingTitle}>{t('taxi.waitingForYou')}</Text>
-                </View>
-                <View style={styles.waitingTimeRow}>
-                  <Text style={[
-                    styles.waitingTimeValue,
-                    waitingTimeLeft <= 60 && styles.waitingTimeUrgent
-                  ]}>
-                    {Math.floor(waitingTimeLeft / 60)}:{(waitingTimeLeft % 60).toString().padStart(2, '0')}
-                  </Text>
-                  <Text style={styles.waitingTimeLabel}>{t('taxi.timeRemaining')}</Text>
-                </View>
-                <View style={styles.waitingProgressBar}>
-                  <View style={[
-                    styles.waitingProgressFill,
-                    { width: `${(waitingTimeLeft / 180) * 100}%` },
-                    waitingTimeLeft <= 60 && styles.waitingProgressUrgent
-                  ]} />
-                </View>
-                <View style={styles.waitingFeeRow}>
-                  <Text style={styles.waitingFeeLabel}>
-                    {waitingFee > 0 ? t('taxi.paidWaiting') : t('taxi.freeWaiting')}
-                  </Text>
-                  {waitingFee > 0 && (
-                    <Text style={styles.waitingFeeValue}>+${waitingFee.toFixed(2)}</Text>
-                  )}
-                </View>
-                {waitingTimeLeft <= 60 && (
-                  <Text style={styles.waitingWarning}>{t('taxi.hurryUp')}</Text>
-                )}
-              </View>
-            )}
-
-            {/* In Progress Status */}
-            {rideStatus === 'in_progress' && (
-              <View style={styles.inProgressContainer}>
-                <Ionicons name="navigate" size={24} color={colors.primary} />
-                <Text style={styles.inProgressText}>{t('taxi.enjoyYourRide')}</Text>
-              </View>
-            )}
-
-            <View style={styles.rideDetailsRow}>
-              <View style={styles.rideDetailItem}>
-                <Text style={styles.rideDetailLabel}>{t('taxi.estimatedFare')}</Text>
-                <Text style={styles.rideDetailValue}>
-                  ${estimatedPrice}{waitingFee > 0 ? ` (+$${waitingFee.toFixed(2)})` : ''}
-                </Text>
-              </View>
-              <View style={styles.rideDetailItem}>
-                <Text style={styles.rideDetailLabel}>{t('taxi.duration')}</Text>
-                <Text style={styles.rideDetailValue}>{estimatedDuration} {t('taxi.minutes')}</Text>
-              </View>
-            </View>
-
-            {rideStatus !== 'in_progress' && (
-              <TouchableOpacity style={styles.cancelButton} onPress={handleCancelRide}>
-                <Text style={styles.cancelButtonText}>{t('taxi.cancelRide')}</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        ) : (
-          <ScrollView
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-            keyboardDismissMode="on-drag"
+        {/* Map Controls */}
+        <View style={[styles.mapControls, { top: insets.top + 10 }]}>
+          <TouchableOpacity
+            style={styles.controlButton}
+            onPress={() => navigation.goBack()}
           >
-            {/* Pickup Location */}
-            <View style={styles.locationRow}>
-              <View style={styles.locationDot}>
-                <Ionicons name="radio-button-on" size={16} color={colors.success} />
-              </View>
-              <View style={styles.locationInputContainer}>
-                <Text style={styles.locationLabel}>{t('taxi.currentLocation')}</Text>
-                <Text style={styles.locationText} numberOfLines={1}>
-                  {locationAddress || t('taxi.gettingLocation')}
-                </Text>
-              </View>
-              <TouchableOpacity onPress={requestLocationPermission}>
-                <Ionicons name="refresh" size={20} color={colors.mutedForeground} />
-              </TouchableOpacity>
-            </View>
+            <Ionicons name="arrow-back" size={24} color={colors.foreground} />
+          </TouchableOpacity>
 
-            <View style={styles.locationLine} />
+          <TouchableOpacity
+            style={styles.controlButton}
+            onPress={() => navigation.navigate('TaxiHistory')}
+          >
+            <Ionicons name="time-outline" size={24} color={colors.primary} />
+          </TouchableOpacity>
+        </View>
 
-            {/* Destination */}
-            <View style={styles.locationRow}>
-              <View style={styles.locationDot}>
-                <Ionicons name="location" size={16} color={colors.destructive} />
-              </View>
-              <View style={styles.locationInputContainer}>
-                <Text style={styles.locationLabel}>{t('taxi.destination')}</Text>
-                <TextInput
-                  style={styles.destinationInput}
-                  placeholder={t('taxi.enterDestination')}
-                  placeholderTextColor={colors.mutedForeground}
-                  value={destination}
-                  onChangeText={handleDestinationChange}
-                />
-              </View>
-            </View>
-
-            {/* Vehicle Types */}
-            <Text style={styles.sectionTitle}>{t('taxi.vehicleType')}</Text>
-            <View style={styles.vehicleTypes}>
-              {VEHICLE_TYPES.map((vehicle) => (
-                <TouchableOpacity
-                  key={vehicle.id}
-                  style={[
-                    styles.vehicleCard,
-                    selectedVehicle === vehicle.id && styles.vehicleCardSelected,
-                  ]}
-                  onPress={() => handleVehicleSelect(vehicle.id)}
-                >
-                  <View style={[
-                    styles.vehicleIconContainer,
-                    selectedVehicle === vehicle.id && styles.vehicleIconContainerSelected,
-                  ]}>
-                    <Ionicons
-                      name={vehicle.icon}
-                      size={28}
-                      color={selectedVehicle === vehicle.id ? colors.background : colors.primary}
-                    />
-                  </View>
-                  <Text style={[
-                    styles.vehicleName,
-                    selectedVehicle === vehicle.id && styles.vehicleNameSelected,
-                  ]}>
-                    {t(`taxi.${vehicle.id}`)}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            {/* Payment Method */}
-            <Text style={styles.sectionTitle}>{t('taxi.paymentMethod')}</Text>
-            <View style={styles.paymentMethods}>
+        {/* Map Selection Mode Overlay */}
+        {isSelectingOnMap && (
+          <View style={[styles.mapSelectionOverlay, { top: insets.top + 10 }]}>
+            <View style={styles.mapSelectionBanner}>
+              <Ionicons name="location" size={20} color={colors.background} />
+              <Text style={styles.mapSelectionText}>{t('taxi.tapToSelectLocation')}</Text>
               <TouchableOpacity
-                style={[
-                  styles.paymentOption,
-                  paymentMethod === 'cash' && styles.paymentOptionSelected,
-                ]}
-                onPress={() => setPaymentMethod('cash')}
+                style={styles.mapSelectionCancel}
+                onPress={() => {
+                  setIsSelectingOnMap(false);
+                  // Expand bottom sheet back
+                  if (bottomSheetRef.current) {
+                    bottomSheetRef.current.snapToIndex(1);
+                  }
+                  if (webViewRef.current) {
+                    webViewRef.current.injectJavaScript(`
+                      disableMapClickMode();
+                      true;
+                    `);
+                  }
+                }}
               >
-                <Ionicons
-                  name="cash-outline"
-                  size={20}
-                  color={paymentMethod === 'cash' ? colors.primary : colors.mutedForeground}
-                />
-                <Text style={[
-                  styles.paymentText,
-                  paymentMethod === 'cash' && styles.paymentTextSelected,
-                ]}>
-                  {t('taxi.cash')}
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.paymentOption,
-                  paymentMethod === 'card' && styles.paymentOptionSelected,
-                ]}
-                onPress={() => setPaymentMethod('card')}
-              >
-                <Ionicons
-                  name="card-outline"
-                  size={20}
-                  color={paymentMethod === 'card' ? colors.primary : colors.mutedForeground}
-                />
-                <Text style={[
-                  styles.paymentText,
-                  paymentMethod === 'card' && styles.paymentTextSelected,
-                ]}>
-                  {t('taxi.card')}
-                </Text>
+                <Ionicons name="close" size={20} color={colors.background} />
               </TouchableOpacity>
             </View>
-
-            {/* Estimated Price */}
-            {estimatedPrice && (
-              <View style={styles.estimateContainer}>
-                <View style={styles.estimateRow}>
-                  <Text style={styles.estimateLabel}>{t('taxi.estimatedFare')}</Text>
-                  <Text style={styles.estimateValue}>${estimatedPrice}</Text>
-                </View>
-                <View style={styles.estimateRow}>
-                  <Text style={styles.estimateLabel}>{t('taxi.duration')}</Text>
-                  <Text style={styles.estimateValue}>{estimatedDuration} {t('taxi.minutes')}</Text>
-                </View>
-              </View>
-            )}
-
-            {/* Request Button */}
-            <TouchableOpacity
-              style={[
-                styles.requestButton,
-                !destination && styles.requestButtonDisabled,
-              ]}
-              onPress={handleRequestRide}
-              disabled={isRequesting || !destination}
-            >
-              {isRequesting ? (
-                <ActivityIndicator color={colors.background} />
-              ) : (
-                <>
-                  <Ionicons name="car" size={20} color={colors.background} />
-                  <Text style={styles.requestButtonText}>{t('taxi.requestRide')}</Text>
-                </>
-              )}
-            </TouchableOpacity>
-          </ScrollView>
+          </View>
         )}
+
+        {/* Phone Number Required Alert Banner */}
+        {!hasPhoneNumber && user && (
+          <TouchableOpacity
+            style={[styles.phoneAlertBanner, { top: insets.top + 64 }]}
+            onPress={() => navigation.navigate('MainTabs', { screen: 'Profile' })}
+            activeOpacity={0.9}
+          >
+            <View style={styles.phoneAlertContent}>
+              <Ionicons name="warning" size={20} color="#fff" />
+              <View style={styles.phoneAlertTextContainer}>
+                <Text style={styles.phoneAlertTitle}>{t('taxi.phoneNumberRequired')}</Text>
+                <Text style={styles.phoneAlertMessage}>{t('taxi.addPhoneNumber')}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color="#fff" />
+            </View>
+          </TouchableOpacity>
+        )}
+
       </View>
+
+      {/* Draggable Bottom Sheet */}
+      <DraggableBottomSheet
+        ref={bottomSheetRef}
+        snapPoints={snapPoints}
+        initialSnapIndex={1}
+        floatingButton={
+          <TouchableOpacity style={styles.myLocationButton} onPress={centerOnUser}>
+            <Ionicons name="locate" size={24} color={colors.primary} />
+          </TouchableOpacity>
+        }
+      >
+        {renderSheetContent()}
+      </DraggableBottomSheet>
     </View>
   );
 }
@@ -1237,7 +1359,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   mapContainer: {
-    height: height * 0.45,
+    flex: 1,
     position: 'relative',
   },
   map: {
@@ -1254,9 +1376,15 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: colors.foreground,
   },
-  backButton: {
+  mapControls: {
     position: 'absolute',
     left: 16,
+    right: 16,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    zIndex: 10,
+  },
+  controlButton: {
     width: 44,
     height: 44,
     borderRadius: 22,
@@ -1267,7 +1395,6 @@ const styles = StyleSheet.create({
   },
   myLocationButton: {
     position: 'absolute',
-    bottom: 30,
     right: 16,
     width: 44,
     height: 44,
@@ -1276,488 +1403,59 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     ...shadows.md,
+    zIndex: 10,
   },
-  historyButton: {
+  phoneAlertBanner: {
     position: 'absolute',
+    left: 16,
     right: 16,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: colors.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-    ...shadows.md,
-  },
-  bottomSheet: {
-    flex: 1,
-    backgroundColor: colors.background,
-    borderTopLeftRadius: radius['2xl'],
-    borderTopRightRadius: radius['2xl'],
-    padding: 20,
-    marginTop: -20,
+    backgroundColor: '#dc2626',
+    borderRadius: radius.lg,
+    padding: 12,
+    zIndex: 10,
     ...shadows.lg,
   },
-  locationRow: {
+  phoneAlertContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
   },
-  locationDot: {
-    width: 32,
-    alignItems: 'center',
-  },
-  locationLine: {
-    width: 2,
-    height: 20,
-    backgroundColor: colors.border,
-    marginLeft: 15,
-  },
-  locationInputContainer: {
+  phoneAlertTextContainer: {
     flex: 1,
-    marginLeft: 8,
+    marginLeft: 10,
   },
-  locationLabel: {
+  phoneAlertTitle: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  phoneAlertMessage: {
+    color: 'rgba(255,255,255,0.9)',
     fontSize: 12,
-    color: colors.mutedForeground,
-    marginBottom: 2,
+    marginTop: 2,
   },
-  locationText: {
-    fontSize: 15,
-    color: colors.foreground,
-    fontWeight: '500',
+  mapSelectionOverlay: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    zIndex: 20,
   },
-  destinationInput: {
-    fontSize: 15,
-    color: colors.foreground,
-    fontWeight: '500',
-    padding: 0,
-  },
-  sectionTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.foreground,
-    marginBottom: 12,
-    marginTop: 16,
-  },
-  vehicleTypes: {
+  mapSelectionBanner: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  vehicleCard: {
-    flex: 1,
     alignItems: 'center',
-    padding: 12,
-    marginHorizontal: 4,
-    borderRadius: radius.lg,
-    backgroundColor: colors.secondary,
-    borderWidth: 2,
-    borderColor: 'transparent',
-  },
-  vehicleCardSelected: {
-    borderColor: colors.primary,
-    backgroundColor: colors.background,
-  },
-  vehicleIconContainer: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: colors.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  vehicleIconContainerSelected: {
     backgroundColor: colors.primary,
+    borderRadius: radius.lg,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    ...shadows.lg,
   },
-  vehicleName: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: colors.mutedForeground,
-  },
-  vehicleNameSelected: {
-    color: colors.primary,
-    fontWeight: '600',
-  },
-  paymentMethods: {
-    flexDirection: 'row',
-    marginBottom: 16,
-  },
-  paymentOption: {
+  mapSelectionText: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 12,
-    marginHorizontal: 4,
-    borderRadius: radius.lg,
-    backgroundColor: colors.secondary,
-    borderWidth: 2,
-    borderColor: 'transparent',
-  },
-  paymentOptionSelected: {
-    borderColor: colors.primary,
-    backgroundColor: colors.background,
-  },
-  paymentText: {
-    marginLeft: 8,
-    fontSize: 14,
-    color: colors.mutedForeground,
-  },
-  paymentTextSelected: {
-    color: colors.primary,
-    fontWeight: '600',
-  },
-  estimateContainer: {
-    backgroundColor: colors.secondary,
-    borderRadius: radius.lg,
-    padding: 16,
-    marginBottom: 16,
-  },
-  estimateRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  estimateLabel: {
-    fontSize: 14,
-    color: colors.mutedForeground,
-  },
-  estimateValue: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.foreground,
-  },
-  requestButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.primary,
-    padding: 16,
-    borderRadius: radius.lg,
-    marginBottom: 20,
-  },
-  requestButtonDisabled: {
-    opacity: 0.5,
-  },
-  requestButtonText: {
     color: colors.background,
-    fontSize: 16,
-    fontWeight: '600',
-    marginLeft: 8,
-  },
-  rideStatusContainer: {
-    paddingVertical: 8,
-  },
-  rideStatusHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  statusIndicator: {
-    width: 32,
-    height: 32,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  rideStatusText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: colors.foreground,
-    marginLeft: 8,
-  },
-  progressContainer: {
-    marginBottom: 16,
-  },
-  progressLabel: {
-    fontSize: 13,
-    color: colors.mutedForeground,
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  progressBarBackground: {
-    height: 6,
-    backgroundColor: colors.secondary,
-    borderRadius: radius.full,
-    overflow: 'hidden',
-  },
-  progressBarFill: {
-    height: '100%',
-    backgroundColor: colors.primary,
-    borderRadius: radius.full,
-  },
-  rideDetailsRow: {
-    flexDirection: 'row',
-    marginBottom: 16,
-  },
-  rideDetailItem: {
-    flex: 1,
-    backgroundColor: colors.secondary,
-    padding: 16,
-    borderRadius: radius.lg,
-    marginHorizontal: 4,
-  },
-  rideDetailLabel: {
-    fontSize: 12,
-    color: colors.mutedForeground,
-    marginBottom: 4,
-  },
-  rideDetailValue: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: colors.foreground,
-  },
-  cancelButton: {
-    backgroundColor: colors.destructive + '15',
-    padding: 16,
-    borderRadius: radius.lg,
-    alignItems: 'center',
-  },
-  cancelButtonText: {
-    color: colors.destructive,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  driverInfoCard: {
-    backgroundColor: colors.background,
-    borderRadius: radius.lg,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: colors.border,
-    ...shadows.md,
-  },
-  driverComingBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.primary + '10',
-    padding: 12,
-    borderRadius: radius.md,
-    marginBottom: 12,
-  },
-  driverComingIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.primary + '20',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  driverComingTextContainer: {
-    flex: 1,
-  },
-  driverComingTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: colors.primary,
-    marginBottom: 2,
-  },
-  driverComingSubtitle: {
-    fontSize: 13,
-    color: colors.mutedForeground,
-    fontWeight: '500',
-  },
-  driverInfoHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  driverAvatarContainer: {
-    marginRight: 12,
-  },
-  driverAvatar: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-  },
-  driverAvatarPlaceholder: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: colors.secondary,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  driverInfoMain: {
-    flex: 1,
-  },
-  driverName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.foreground,
-    marginBottom: 4,
-  },
-  driverRatingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  driverRating: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: colors.foreground,
-    marginLeft: 4,
-  },
-  driverTrips: {
-    fontSize: 13,
-    color: colors.mutedForeground,
-    marginLeft: 4,
-  },
-  callButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.secondary,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  divider: {
-    height: 1,
-    backgroundColor: colors.border,
-    marginBottom: 12,
-  },
-  vehicleInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  vehicleIconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: colors.secondary,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  vehicleDetails: {
-    flex: 1,
-  },
-  vehicleName: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: colors.foreground,
-    marginBottom: 6,
-  },
-  vehicleMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  vehiclePlate: {
-    backgroundColor: colors.secondary,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: radius.md,
-    marginRight: 12,
-  },
-  vehiclePlateText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.foreground,
-    letterSpacing: 1,
-  },
-  vehicleColor: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  colorDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    marginRight: 6,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  vehicleColorText: {
-    fontSize: 12,
-    color: colors.mutedForeground,
-    textTransform: 'capitalize',
-  },
-  // Waiting time styles
-  waitingContainer: {
-    backgroundColor: colors.warning + '15',
-    borderRadius: radius.lg,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: colors.warning + '30',
-  },
-  waitingHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  waitingTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.foreground,
-    marginLeft: 8,
+    marginLeft: 10,
   },
-  waitingTimeRow: {
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  waitingTimeValue: {
-    fontSize: 36,
-    fontWeight: '700',
-    color: colors.warning,
-  },
-  waitingTimeUrgent: {
-    color: colors.destructive,
-  },
-  waitingTimeLabel: {
-    fontSize: 12,
-    color: colors.mutedForeground,
-    marginTop: 4,
-  },
-  waitingProgressBar: {
-    height: 6,
-    backgroundColor: colors.secondary,
-    borderRadius: radius.full,
-    overflow: 'hidden',
-    marginBottom: 12,
-  },
-  waitingProgressFill: {
-    height: '100%',
-    backgroundColor: colors.warning,
-    borderRadius: radius.full,
-  },
-  waitingProgressUrgent: {
-    backgroundColor: colors.destructive,
-  },
-  waitingFeeRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  waitingFeeLabel: {
-    fontSize: 13,
-    color: colors.mutedForeground,
-  },
-  waitingFeeValue: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.warning,
-  },
-  waitingWarning: {
-    fontSize: 13,
-    color: colors.destructive,
-    textAlign: 'center',
-    marginTop: 8,
-    fontWeight: '500',
-  },
-  inProgressContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.primary + '15',
-    borderRadius: radius.lg,
-    padding: 16,
-    marginBottom: 16,
-  },
-  inProgressText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.primary,
-    marginLeft: 8,
+  mapSelectionCancel: {
+    padding: 4,
   },
 });

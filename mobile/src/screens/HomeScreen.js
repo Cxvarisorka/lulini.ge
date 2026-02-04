@@ -85,10 +85,10 @@ export default function HomeScreen({ navigation }) {
             <Ionicons name="menu" size={26} color={colors.foreground} />
           </TouchableOpacity>
           <View style={styles.welcomeContent}>
-            <Text style={styles.greeting}>
+            <Text style={styles.greeting} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
               {t('home.greeting')}, {user?.firstName || t('home.guest')}
             </Text>
-            <Text style={styles.subGreeting}>{t('home.whereToGo')}</Text>
+            <Text style={styles.subGreeting} numberOfLines={1}>{t('home.whereToGo')}</Text>
           </View>
           <TouchableOpacity
             style={styles.avatarButton}
@@ -115,10 +115,10 @@ export default function HomeScreen({ navigation }) {
               <View style={styles.ctaIconBadge}>
                 <Ionicons name="car-sport" size={24} color={colors.primaryForeground} />
               </View>
-              <Text style={styles.ctaTitle}>{t('home.bookTaxi')}</Text>
-              <Text style={styles.ctaSubtitle}>{t('home.taxiSubtitle')}</Text>
+              <Text style={styles.ctaTitle} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{t('home.bookTaxi')}</Text>
+              <Text style={styles.ctaSubtitle} numberOfLines={2}>{t('home.taxiSubtitle')}</Text>
               <View style={styles.ctaButton}>
-                <Text style={styles.ctaButtonText}>{t('home.requestRide')}</Text>
+                <Text style={styles.ctaButtonText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{t('home.requestRide')}</Text>
                 <Ionicons name="arrow-forward" size={18} color={colors.primaryForeground} />
               </View>
             </View>
@@ -130,7 +130,7 @@ export default function HomeScreen({ navigation }) {
 
         {/* Quick Actions */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>{t('home.quickActions')}</Text>
+          <Text style={styles.sectionTitle} numberOfLines={1}>{t('home.quickActions')}</Text>
           <View style={styles.quickActionsGrid}>
             {quickActions.map((action) => (
               <TouchableOpacity
@@ -141,7 +141,7 @@ export default function HomeScreen({ navigation }) {
                 <View style={[styles.quickActionIcon, { backgroundColor: `${action.color}15` }]}>
                   <Ionicons name={action.icon} size={24} color={action.color} />
                 </View>
-                <Text style={styles.quickActionLabel}>{action.label}</Text>
+                <Text style={styles.quickActionLabel} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.8}>{action.label}</Text>
               </TouchableOpacity>
             ))}
           </View>
@@ -149,7 +149,7 @@ export default function HomeScreen({ navigation }) {
 
         {/* Services */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>{t('home.ourFleet')}</Text>
+          <Text style={styles.sectionTitle} numberOfLines={1}>{t('home.ourFleet')}</Text>
           <View style={styles.servicesContainer}>
             {services.map((service, index) => (
               <TouchableOpacity
@@ -171,7 +171,7 @@ export default function HomeScreen({ navigation }) {
                   />
                 </View>
                 <View style={styles.serviceContent}>
-                  <Text style={styles.serviceTitle}>{service.title}</Text>
+                  <Text style={styles.serviceTitle} numberOfLines={1}>{service.title}</Text>
                   <Text style={styles.serviceSubtitle} numberOfLines={1}>
                     {service.subtitle}
                   </Text>
@@ -192,8 +192,8 @@ export default function HomeScreen({ navigation }) {
               <Ionicons name="help-buoy" size={24} color={colors.info} />
             </View>
             <View style={styles.supportContent}>
-              <Text style={styles.supportTitle}>{t('drawer.helpCenter')}</Text>
-              <Text style={styles.supportSubtitle}>{t('support.available247')}</Text>
+              <Text style={styles.supportTitle} numberOfLines={1}>{t('drawer.helpCenter')}</Text>
+              <Text style={styles.supportSubtitle} numberOfLines={1}>{t('support.available247')}</Text>
             </View>
             <Ionicons name="chevron-forward" size={20} color={colors.mutedForeground} />
           </TouchableOpacity>

@@ -67,8 +67,8 @@ export default function ProfileScreen({ navigation }) {
             </View>
           )}
         </View>
-        <Text style={styles.name}>{user.firstName} {user.lastName}</Text>
-        <Text style={styles.email}>{user.email}</Text>
+        <Text style={styles.name} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{user.firstName} {user.lastName}</Text>
+        <Text style={styles.email} numberOfLines={1}>{user.email}</Text>
         {user.role === 'admin' && (
           <View style={styles.badge}>
             <Text style={styles.badgeText}>{t('profile.admin')}</Text>
@@ -77,7 +77,7 @@ export default function ProfileScreen({ navigation }) {
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>{t('profile.accountInfo')}</Text>
+        <Text style={styles.sectionTitle} numberOfLines={1}>{t('profile.accountInfo')}</Text>
 
         <View style={styles.infoCard}>
           <View style={styles.infoRow}>
@@ -85,22 +85,35 @@ export default function ProfileScreen({ navigation }) {
               <Ionicons name="mail-outline" size={20} color={colors.primary} />
             </View>
             <View style={styles.infoContent}>
-              <Text style={styles.infoLabel}>{t('profile.emailLabel')}</Text>
-              <Text style={styles.infoValue}>{user.email}</Text>
+              <Text style={styles.infoLabel} numberOfLines={1}>{t('profile.emailLabel')}</Text>
+              <Text style={styles.infoValue} numberOfLines={1}>{user.email}</Text>
             </View>
           </View>
 
           <View style={styles.divider} />
 
-          <View style={styles.infoRow}>
+          <TouchableOpacity
+            style={styles.infoRow}
+            onPress={() => navigation.navigate('UpdatePhone')}
+            activeOpacity={0.7}
+          >
             <View style={styles.infoIconContainer}>
               <Ionicons name="call-outline" size={20} color={colors.primary} />
             </View>
             <View style={styles.infoContent}>
-              <Text style={styles.infoLabel}>{t('profile.phoneLabel')}</Text>
-              <Text style={styles.infoValue}>{user.phone || t('profile.notProvided')}</Text>
+              <Text style={styles.infoLabel} numberOfLines={1}>{t('profile.phoneLabel')}</Text>
+              <Text style={[styles.infoValue, !user.phone && styles.notProvidedText]} numberOfLines={1}>
+                {user.phone || t('profile.notProvided')}
+              </Text>
             </View>
-          </View>
+            <View style={styles.editIconContainer}>
+              <Ionicons
+                name={user.phone ? "create-outline" : "add-circle-outline"}
+                size={20}
+                color={user.phone ? colors.mutedForeground : colors.primary}
+              />
+            </View>
+          </TouchableOpacity>
 
           <View style={styles.divider} />
 
@@ -109,8 +122,8 @@ export default function ProfileScreen({ navigation }) {
               <Ionicons name="shield-checkmark-outline" size={20} color={colors.primary} />
             </View>
             <View style={styles.infoContent}>
-              <Text style={styles.infoLabel}>{t('profile.accountStatus')}</Text>
-              <Text style={[styles.infoValue, { color: user.isVerified ? colors.success : colors.warning }]}>
+              <Text style={styles.infoLabel} numberOfLines={1}>{t('profile.accountStatus')}</Text>
+              <Text style={[styles.infoValue, { color: user.isVerified ? colors.success : colors.warning }]} numberOfLines={1}>
                 {user.isVerified ? t('profile.verified') : t('profile.unverified')}
               </Text>
             </View>
@@ -123,8 +136,8 @@ export default function ProfileScreen({ navigation }) {
               <Ionicons name="calendar-outline" size={20} color={colors.primary} />
             </View>
             <View style={styles.infoContent}>
-              <Text style={styles.infoLabel}>{t('profile.memberSince')}</Text>
-              <Text style={styles.infoValue}>{formatDate(user.createdAt)}</Text>
+              <Text style={styles.infoLabel} numberOfLines={1}>{t('profile.memberSince')}</Text>
+              <Text style={styles.infoValue} numberOfLines={1}>{formatDate(user.createdAt)}</Text>
             </View>
           </View>
 
@@ -135,8 +148,8 @@ export default function ProfileScreen({ navigation }) {
               <Ionicons name="key-outline" size={20} color={colors.primary} />
             </View>
             <View style={styles.infoContent}>
-              <Text style={styles.infoLabel}>{t('profile.loginProvider')}</Text>
-              <Text style={styles.infoValue}>
+              <Text style={styles.infoLabel} numberOfLines={1}>{t('profile.loginProvider')}</Text>
+              <Text style={styles.infoValue} numberOfLines={1}>
                 {user.provider === 'local' ? t('profile.emailPassword') :
                  user.provider?.charAt(0).toUpperCase() + user.provider?.slice(1)}
               </Text>
@@ -146,7 +159,7 @@ export default function ProfileScreen({ navigation }) {
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>{t('profile.quickActions')}</Text>
+        <Text style={styles.sectionTitle} numberOfLines={1}>{t('profile.quickActions')}</Text>
 
         <TouchableOpacity
           style={styles.actionButton}
@@ -154,7 +167,7 @@ export default function ProfileScreen({ navigation }) {
         >
           <View style={styles.actionLeft}>
             <Ionicons name="car-outline" size={24} color={colors.primary} />
-            <Text style={styles.actionText}>{t('profile.myRides')}</Text>
+            <Text style={styles.actionText} numberOfLines={1}>{t('profile.myRides')}</Text>
           </View>
           <Ionicons name="chevron-forward" size={20} color={colors.mutedForeground} />
         </TouchableOpacity>
@@ -165,14 +178,14 @@ export default function ProfileScreen({ navigation }) {
         >
           <View style={styles.actionLeft}>
             <Ionicons name="add-circle-outline" size={24} color={colors.primary} />
-            <Text style={styles.actionText}>{t('profile.bookTaxi')}</Text>
+            <Text style={styles.actionText} numberOfLines={1}>{t('profile.bookTaxi')}</Text>
           </View>
           <Ionicons name="chevron-forward" size={20} color={colors.mutedForeground} />
         </TouchableOpacity>
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>{t('profile.settings')}</Text>
+        <Text style={styles.sectionTitle} numberOfLines={1}>{t('profile.settings')}</Text>
 
         <TouchableOpacity
           style={styles.actionButton}
@@ -180,10 +193,10 @@ export default function ProfileScreen({ navigation }) {
         >
           <View style={styles.actionLeft}>
             <Ionicons name="language-outline" size={24} color={colors.primary} />
-            <Text style={styles.actionText}>{t('profile.language')}</Text>
+            <Text style={styles.actionText} numberOfLines={1}>{t('profile.language')}</Text>
           </View>
           <View style={styles.actionRight}>
-            <Text style={styles.languageText}>{currentLang.nativeName}</Text>
+            <Text style={styles.languageText} numberOfLines={1}>{currentLang.nativeName}</Text>
             <Ionicons name="chevron-forward" size={20} color={colors.mutedForeground} />
           </View>
         </TouchableOpacity>
@@ -191,7 +204,7 @@ export default function ProfileScreen({ navigation }) {
 
       <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
         <Ionicons name="log-out-outline" size={24} color={colors.destructive} />
-        <Text style={styles.logoutText}>{t('profile.logout')}</Text>
+        <Text style={styles.logoutText} numberOfLines={1}>{t('profile.logout')}</Text>
       </TouchableOpacity>
 
       <View style={styles.bottomPadding} />
@@ -297,6 +310,13 @@ const styles = StyleSheet.create({
     color: colors.foreground,
     fontWeight: '500',
   },
+  notProvidedText: {
+    color: colors.warning,
+    fontStyle: 'italic',
+  },
+  editIconContainer: {
+    marginLeft: 8,
+  },
   divider: {
     height: 1,
     backgroundColor: colors.border,
@@ -314,12 +334,14 @@ const styles = StyleSheet.create({
   actionLeft: {
     flexDirection: 'row',
     alignItems: 'center',
+    flex: 1,
   },
   actionText: {
     fontSize: 16,
     color: colors.foreground,
     marginLeft: 12,
     fontWeight: '500',
+    flexShrink: 1,
   },
   actionRight: {
     flexDirection: 'row',
