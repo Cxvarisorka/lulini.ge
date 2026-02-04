@@ -2,24 +2,28 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
 const userSchema = new mongoose.Schema({
+    fullName: {
+        type: String,
+        trim: true,
+        minlength: [2, 'Full name must be at least 2 characters'],
+        maxlength: [100, 'Full name cannot exceed 100 characters']
+    },
     firstName: {
         type: String,
-        required: [true, 'First name is required'],
         trim: true,
         minlength: [2, 'First name must be at least 2 characters'],
         maxlength: [50, 'First name cannot exceed 50 characters']
     },
     lastName: {
         type: String,
-        required: [true, 'Last name is required'],
         trim: true,
         minlength: [2, 'Last name must be at least 2 characters'],
         maxlength: [50, 'Last name cannot exceed 50 characters']
     },
     email: {
         type: String,
-        required: [true, 'Email is required'],
         unique: true,
+        sparse: true,
         lowercase: true,
         trim: true,
         match: [/^\S+@\S+\.\S+$/, 'Please provide a valid email']
@@ -33,8 +37,13 @@ const userSchema = new mongoose.Schema({
     },
     phone: {
         type: String,
-        default: null,
-        match: [/^[\d\s+()-]{7,20}$/, 'Please provide a valid phone number']
+        unique: true,
+        sparse: true,
+        match: [/^\+?[\d\s()-]{7,20}$/, 'Please provide a valid phone number']
+    },
+    isPhoneVerified: {
+        type: Boolean,
+        default: false
     },
     role: {
         type: String,
@@ -46,7 +55,7 @@ const userSchema = new mongoose.Schema({
     },
     provider: {
         type: String,
-        enum: ['local', 'google', 'facebook'],
+        enum: ['local', 'google', 'facebook', 'apple', 'phone'],
         default: 'local'
     },
     providerId: {
@@ -58,6 +67,10 @@ const userSchema = new mongoose.Schema({
         default: null
     },
     isVerified: {
+        type: Boolean,
+        default: false
+    },
+    hasCompletedOnboarding: {
         type: Boolean,
         default: false
     }

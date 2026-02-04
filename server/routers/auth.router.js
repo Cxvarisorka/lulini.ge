@@ -10,7 +10,13 @@ const {
     oauthSuccess,
     oauthSuccessMobile,
     oauthFailure,
-    googleTokenAuth
+    googleTokenAuth,
+    sendPhoneOtp,
+    verifyPhoneOtp,
+    appleTokenAuth,
+    completeOnboarding,
+    sendPhoneUpdateOtp,
+    verifyPhoneUpdateOtp
 } = require('../controllers/auth.controller');
 const { protect } = require('../middlewares/auth.middleware');
 
@@ -43,6 +49,20 @@ router.get('/google/callback',
 
 // Google OAuth for mobile - verify ID token from native Google Sign-In SDK
 router.post('/google/token', googleTokenAuth);
+
+// Phone OTP authentication routes
+router.post('/phone/send-otp', sendPhoneOtp);
+router.post('/phone/verify-otp', verifyPhoneOtp);
+
+// Phone update routes (authenticated)
+router.post('/phone/update-send-otp', protect, sendPhoneUpdateOtp);
+router.post('/phone/update-verify-otp', protect, verifyPhoneUpdateOtp);
+
+// Apple Sign-In route
+router.post('/apple/token', appleTokenAuth);
+
+// Complete onboarding
+router.post('/complete-onboarding', protect, completeOnboarding);
 
 // Google OAuth for mobile (web browser flow - legacy) - starts OAuth flow and passes redirect_uri as state
 router.get('/google/mobile', (req, res, next) => {

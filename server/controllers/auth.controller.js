@@ -1,8 +1,11 @@
 const User = require('../models/user.model');
+const OTP = require('../models/otp.model');
 const { generateToken } = require('../utils/jwt.utils');
 const AppError = require('../utils/AppError');
 const catchAsync = require('../utils/catchAsync');
 const { OAuth2Client } = require('google-auth-library');
+const { generateOTP, sendOTP } = require('../services/sms.service');
+const appleSignin = require('apple-signin-auth');
 
 // Cookie options
 const cookieOptions = {
@@ -14,7 +17,7 @@ const cookieOptions = {
 };
 
 // Helper to send token via cookie AND response body (for mobile clients)
-const sendTokenResponse = (user, statusCode, res, message) => {
+const sendTokenResponse = (user, statusCode, res, message, isNewUser = false) => {
     const token = generateToken(user._id);
 
     res.cookie('token', token, cookieOptions);
@@ -23,9 +26,11 @@ const sendTokenResponse = (user, statusCode, res, message) => {
         success: true,
         message,
         token, // Include token in response body for mobile clients
+        isNewUser,
         data: {
             user: {
                 id: user._id,
+                fullName: user.fullName,
                 firstName: user.firstName,
                 lastName: user.lastName,
                 email: user.email,
@@ -33,6 +38,8 @@ const sendTokenResponse = (user, statusCode, res, message) => {
                 role: user.role,
                 avatar: user.avatar,
                 isVerified: user.isVerified,
+                isPhoneVerified: user.isPhoneVerified,
+                hasCompletedOnboarding: user.hasCompletedOnboarding,
                 createdAt: user.createdAt
             }
         }
@@ -222,6 +229,302 @@ const googleTokenAuth = catchAsync(async (req, res, next) => {
     sendTokenResponse(user, 200, res, 'Google login successful');
 });
 
+// @desc    Send OTP to phone number
+// @route   POST /api/auth/phone/send-otp
+const sendPhoneOtp = catchAsync(async (req, res, next) => {
+    const { phone } = req.body;
+
+    if (!phone) {
+        return next(new AppError('Phone number is required', 400));
+    }
+
+    // Validate phone format
+    const phoneRegex = /^\+?[\d\s()-]{7,20}$/;
+    if (!phoneRegex.test(phone)) {
+        return next(new AppError('Please provide a valid phone number', 400));
+    }
+
+    // Delete any existing OTP for this phone
+    await OTP.deleteMany({ phone });
+
+    // Generate and save OTP
+    const code = generateOTP();
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+
+    await OTP.create({
+        phone,
+        code,
+        expiresAt
+    });
+
+    // Send OTP via SMS
+    await sendOTP(phone, code);
+
+    res.status(200).json({
+        success: true,
+        message: 'OTP sent successfully'
+    });
+});
+
+// @desc    Verify OTP and login/register user
+// @route   POST /api/auth/phone/verify-otp
+const verifyPhoneOtp = catchAsync(async (req, res, next) => {
+    const { phone, code, fullName, email } = req.body;
+
+    if (!phone || !code) {
+        return next(new AppError('Phone number and OTP code are required', 400));
+    }
+
+    // Find the OTP record
+    const otpRecord = await OTP.findOne({ phone });
+
+    if (!otpRecord) {
+        return next(new AppError('OTP not found. Please request a new code', 400));
+    }
+
+    // Check if OTP is expired
+    if (otpRecord.expiresAt < new Date()) {
+        await OTP.deleteOne({ _id: otpRecord._id });
+        return next(new AppError('OTP has expired. Please request a new code', 400));
+    }
+
+    // Check attempts
+    if (otpRecord.attempts >= 3) {
+        await OTP.deleteOne({ _id: otpRecord._id });
+        return next(new AppError('Too many failed attempts. Please request a new code', 400));
+    }
+
+    // Verify OTP code
+    if (otpRecord.code !== code) {
+        otpRecord.attempts += 1;
+        await otpRecord.save();
+        return next(new AppError('Invalid OTP code', 400));
+    }
+
+    // OTP is valid - delete it
+    await OTP.deleteOne({ _id: otpRecord._id });
+
+    // Find or create user
+    let user = await User.findOne({ phone });
+    let isNewUser = false;
+
+    if (!user) {
+        // New user - fullName is required
+        if (!fullName) {
+            return res.status(200).json({
+                success: true,
+                isNewUser: true,
+                requiresRegistration: true,
+                message: 'Phone verified. Please complete registration'
+            });
+        }
+
+        user = await User.create({
+            fullName,
+            phone,
+            email: email || undefined,
+            provider: 'phone',
+            isPhoneVerified: true,
+            isVerified: true
+        });
+        isNewUser = true;
+    } else {
+        // Existing user - update phone verification status
+        user.isPhoneVerified = true;
+        await user.save();
+    }
+
+    sendTokenResponse(user, 200, res, 'Phone verification successful', isNewUser);
+});
+
+// @desc    Verify Apple ID token from mobile app
+// @route   POST /api/auth/apple/token
+const appleTokenAuth = catchAsync(async (req, res, next) => {
+    const { identityToken, fullName, email: providedEmail } = req.body;
+
+    if (!identityToken) {
+        return next(new AppError('Identity token is required', 400));
+    }
+
+    // Verify the Apple identity token
+    let appleUser;
+    try {
+        appleUser = await appleSignin.verifyIdToken(identityToken, {
+            audience: process.env.APPLE_CLIENT_ID,
+            ignoreExpiration: false
+        });
+    } catch (error) {
+        return next(new AppError('Invalid Apple identity token', 401));
+    }
+
+    const { sub: appleId, email: tokenEmail } = appleUser;
+    const email = providedEmail || tokenEmail;
+
+    // Find or create user
+    let user = await User.findOne({
+        $or: [
+            { providerId: appleId, provider: 'apple' },
+            ...(email ? [{ email }] : [])
+        ]
+    });
+
+    let isNewUser = false;
+
+    if (user) {
+        // If user exists with email but different provider, update provider info
+        if (user.provider !== 'apple') {
+            user.provider = 'apple';
+            user.providerId = appleId;
+            await user.save();
+        }
+    } else {
+        // Create new user
+        user = await User.create({
+            fullName: fullName || 'Apple User',
+            email: email || undefined,
+            provider: 'apple',
+            providerId: appleId,
+            isVerified: true
+        });
+        isNewUser = true;
+    }
+
+    sendTokenResponse(user, 200, res, 'Apple login successful', isNewUser);
+});
+
+// @desc    Complete onboarding
+// @route   POST /api/auth/complete-onboarding
+const completeOnboarding = catchAsync(async (req, res, next) => {
+    const user = await User.findById(req.user.id);
+
+    if (!user) {
+        return next(new AppError('User not found', 404));
+    }
+
+    user.hasCompletedOnboarding = true;
+    await user.save();
+
+    res.status(200).json({
+        success: true,
+        message: 'Onboarding completed'
+    });
+});
+
+// @desc    Send OTP for phone number update (authenticated user)
+// @route   POST /api/auth/phone/update-send-otp
+const sendPhoneUpdateOtp = catchAsync(async (req, res, next) => {
+    const { phone } = req.body;
+    const userId = req.user.id;
+
+    if (!phone) {
+        return next(new AppError('Phone number is required', 400));
+    }
+
+    // Validate phone format
+    const phoneRegex = /^\+?[\d\s()-]{7,20}$/;
+    if (!phoneRegex.test(phone)) {
+        return next(new AppError('Please provide a valid phone number', 400));
+    }
+
+    // Check if phone is already used by another user
+    const existingUser = await User.findOne({ phone, _id: { $ne: userId } });
+    if (existingUser) {
+        return next(new AppError('This phone number is already registered to another account', 400));
+    }
+
+    // Delete any existing OTP for this phone
+    await OTP.deleteMany({ phone });
+
+    // Generate and save OTP
+    const code = generateOTP();
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+
+    await OTP.create({
+        phone,
+        code,
+        expiresAt,
+        userId // Link OTP to user for extra security
+    });
+
+    // Send OTP via SMS
+    await sendOTP(phone, code);
+
+    res.status(200).json({
+        success: true,
+        message: 'OTP sent successfully'
+    });
+});
+
+// @desc    Verify OTP and update phone number (authenticated user)
+// @route   POST /api/auth/phone/update-verify-otp
+const verifyPhoneUpdateOtp = catchAsync(async (req, res, next) => {
+    const { phone, code } = req.body;
+    const userId = req.user.id;
+
+    if (!phone || !code) {
+        return next(new AppError('Phone number and OTP code are required', 400));
+    }
+
+    // Find the OTP record
+    const otpRecord = await OTP.findOne({ phone });
+
+    if (!otpRecord) {
+        return next(new AppError('OTP not found. Please request a new code', 400));
+    }
+
+    // Check if OTP is expired
+    if (otpRecord.expiresAt < new Date()) {
+        await OTP.deleteOne({ _id: otpRecord._id });
+        return next(new AppError('OTP has expired. Please request a new code', 400));
+    }
+
+    // Check attempts
+    if (otpRecord.attempts >= 3) {
+        await OTP.deleteOne({ _id: otpRecord._id });
+        return next(new AppError('Too many failed attempts. Please request a new code', 400));
+    }
+
+    // Verify OTP code
+    if (otpRecord.code !== code) {
+        otpRecord.attempts += 1;
+        await otpRecord.save();
+        return next(new AppError('Invalid OTP code', 400));
+    }
+
+    // OTP is valid - delete it
+    await OTP.deleteOne({ _id: otpRecord._id });
+
+    // Update user's phone number
+    const user = await User.findById(userId);
+    if (!user) {
+        return next(new AppError('User not found', 404));
+    }
+
+    user.phone = phone;
+    user.isPhoneVerified = true;
+    await user.save();
+
+    res.status(200).json({
+        success: true,
+        message: 'Phone number updated successfully',
+        data: {
+            user: {
+                id: user._id,
+                firstName: user.firstName,
+                lastName: user.lastName,
+                email: user.email,
+                phone: user.phone,
+                role: user.role,
+                avatar: user.avatar,
+                isVerified: user.isVerified,
+                isPhoneVerified: user.isPhoneVerified,
+                hasCompletedOnboarding: user.hasCompletedOnboarding,
+                createdAt: user.createdAt
+            }
+        }
+    });
+});
+
 module.exports = {
     register,
     login,
@@ -230,5 +533,11 @@ module.exports = {
     oauthSuccess,
     oauthSuccessMobile,
     oauthFailure,
-    googleTokenAuth
+    googleTokenAuth,
+    sendPhoneOtp,
+    verifyPhoneOtp,
+    appleTokenAuth,
+    completeOnboarding,
+    sendPhoneUpdateOtp,
+    verifyPhoneUpdateOtp
 };
