@@ -20,8 +20,11 @@ import { useAuth } from '../context/AuthContext';
 import { colors } from '../theme/colors';
 
 // Auth Screens
-import LoginScreen from '../screens/LoginScreen';
-import SignupScreen from '../screens/SignupScreen';
+import WelcomeScreen from '../screens/WelcomeScreen';
+import PhoneAuthScreen from '../screens/PhoneAuthScreen';
+import OtpVerificationScreen from '../screens/OtpVerificationScreen';
+import PhoneRegistrationScreen from '../screens/PhoneRegistrationScreen';
+import PermissionsScreen from '../screens/PermissionsScreen';
 
 // Main Screens
 import HomeScreen from '../screens/HomeScreen';
@@ -29,6 +32,7 @@ import ProfileScreen from '../screens/ProfileScreen';
 import TaxiScreen from '../screens/TaxiScreen';
 import TaxiHistoryScreen from '../screens/TaxiHistoryScreen';
 import LanguageSelectScreen from '../screens/LanguageSelectScreen';
+import UpdatePhoneScreen from '../screens/UpdatePhoneScreen';
 
 // Drawer Screens
 import SettingsScreen from '../screens/SettingsScreen';
@@ -53,7 +57,7 @@ export const useDrawer = () => useContext(DrawerContext);
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const DRAWER_WIDTH = Math.min(SCREEN_WIDTH * 0.8, 320);
 
-// Auth Stack (Login/Signup)
+// Auth Stack (Welcome/Phone Auth)
 function AuthStack() {
   return (
     <Stack.Navigator
@@ -61,8 +65,10 @@ function AuthStack() {
         headerShown: false,
       }}
     >
-      <Stack.Screen name="Login" component={LoginScreen} />
-      <Stack.Screen name="Signup" component={SignupScreen} />
+      <Stack.Screen name="Welcome" component={WelcomeScreen} />
+      <Stack.Screen name="PhoneAuth" component={PhoneAuthScreen} />
+      <Stack.Screen name="OtpVerification" component={OtpVerificationScreen} />
+      <Stack.Screen name="PhoneRegistration" component={PhoneRegistrationScreen} />
     </Stack.Navigator>
   );
 }
@@ -182,6 +188,14 @@ function MainStackNavigator() {
         }}
       />
       <Stack.Screen
+        name="UpdatePhone"
+        component={UpdatePhoneScreen}
+        options={{
+          headerShown: false,
+          presentation: 'modal',
+        }}
+      />
+      <Stack.Screen
         name="Settings"
         component={SettingsScreen}
         options={{
@@ -238,9 +252,11 @@ function MainStackNavigator() {
 function CustomDrawerModal({ isOpen, onClose, navigation }) {
   const slideAnim = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
+  const [visible, setVisible] = useState(false);
 
   React.useEffect(() => {
     if (isOpen) {
+      setVisible(true);
       Animated.parallel([
         Animated.timing(slideAnim, {
           toValue: 0,
@@ -253,7 +269,7 @@ function CustomDrawerModal({ isOpen, onClose, navigation }) {
           useNativeDriver: true,
         }),
       ]).start();
-    } else {
+    } else if (visible) {
       Animated.parallel([
         Animated.timing(slideAnim, {
           toValue: -DRAWER_WIDTH,
@@ -265,15 +281,19 @@ function CustomDrawerModal({ isOpen, onClose, navigation }) {
           duration: 200,
           useNativeDriver: true,
         }),
-      ]).start();
+      ]).start(({ finished }) => {
+        if (finished) {
+          setVisible(false);
+        }
+      });
     }
   }, [isOpen]);
 
-  if (!isOpen) return null;
+  if (!visible) return null;
 
   return (
     <Modal
-      visible={isOpen}
+      visible={visible}
       transparent
       animationType="none"
       onRequestClose={onClose}
@@ -354,15 +374,30 @@ function AuthenticatedApp() {
   );
 }
 
+// Onboarding Stack (Permissions)
+function OnboardingStack() {
+  return (
+    <NavigationContainer>
+      <Stack.Navigator screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="Permissions" component={PermissionsScreen} />
+      </Stack.Navigator>
+    </NavigationContainer>
+  );
+}
+
 // Main App Navigator
 export default function AppNavigator() {
-  const { isAuthenticated, loading } = useAuth();
+  const { isAuthenticated, loading, user, isNewUser } = useAuth();
 
   if (loading) {
     return <LoadingScreen />;
   }
 
   if (isAuthenticated) {
+    // Check if user needs to complete onboarding (new user who hasn't completed it yet)
+    if (isNewUser || (user && !user.hasCompletedOnboarding)) {
+      return <OnboardingStack />;
+    }
     return <AuthenticatedApp />;
   }
 

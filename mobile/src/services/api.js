@@ -75,6 +75,28 @@ export const authAPI = {
 
   googleAuth: (idToken) =>
     api.post('/auth/google/token', { idToken }),
+
+  // Phone OTP authentication
+  sendPhoneOtp: (phone) =>
+    api.post('/auth/phone/send-otp', { phone }),
+
+  verifyPhoneOtp: (phone, code, fullName, email) =>
+    api.post('/auth/phone/verify-otp', { phone, code, fullName, email }),
+
+  // Phone update (authenticated)
+  sendPhoneUpdateOtp: (phone) =>
+    api.post('/auth/phone/update-send-otp', { phone }),
+
+  verifyPhoneUpdateOtp: (phone, code) =>
+    api.post('/auth/phone/update-verify-otp', { phone, code }),
+
+  // Apple Sign-In
+  appleAuth: (identityToken, fullName, email) =>
+    api.post('/auth/apple/token', { identityToken, fullName, email }),
+
+  // Complete onboarding
+  completeOnboarding: () =>
+    api.post('/auth/complete-onboarding'),
 };
 
 // Taxi API
