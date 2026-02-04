@@ -11,7 +11,9 @@
     "continue": "გაგრძელება",
     "back": "უკან",
     "done": "მზადაა",
-    "close": "დახურვა"
+    "close": "დახურვა",
+    "accept": "მიღება",
+    "decline": "უარყოფა"
   },
   "auth": {
     "login": "შესვლა",
@@ -46,7 +48,9 @@
     "onlineTime": "ონლაინ დრო",
     "last24Hours": "ბოლო 24 საათი",
     "requests": "მოთხოვნები",
-    "totalEarnings": "სრული შემოსავალი"
+    "totalEarnings": "სრული შემოსავალი",
+    "greeting": "გამარჯობა",
+    "todayStats": "დღევანდელი სტატისტიკა"
   },
   "rides": {
     "newRequest": "ახალი მოგზაურობის მოთხოვნა",
@@ -122,7 +126,9 @@
     "freeWaiting": "უფასო მოლოდინის პერიოდი",
     "paidWaiting": "ფასიანი მოლოდინი",
     "rideWillCancel": "მგზავრობა გაუქმდება თუ მგზავრი არ გამოცხადდება",
-    "waitingFeeAdded": "მოლოდინის საფასური დამატებულია"
+    "waitingFeeAdded": "მოლოდინის საფასური დამატებულია",
+    "viewAll": "ყველა მგზავრობის ნახვა",
+    "tryDifferentFilter": "სცადეთ სხვა ფილტრი"
   },
   "earnings": {
     "title": "შემოსავალი",
@@ -133,7 +139,13 @@
     "trips": "სულ მოგზაურობები",
     "averagePerTrip": "საშუალოდ მოგზაურობაზე",
     "history": "შემოსავლის ისტორია",
-    "noEarnings": "შემოსავალი ჯერ არ არის"
+    "noEarnings": "შემოსავალი ჯერ არ არის",
+    "selectPeriod": "პერიოდის არჩევა",
+    "summary": "შეჯამება",
+    "completedTrips": "დასრულებული მგზავრობები",
+    "totalEarnings": "სრული შემოსავალი",
+    "noEarningsDesc": "თქვენი შემოსავლის ისტორია აქ გამოჩნდება",
+    "viewDetails": "დეტალების ნახვა"
   },
   "profile": {
     "title": "პროფილი",
@@ -147,7 +159,17 @@
     "totalTrips": "სულ მოგზაურობები",
     "memberSince": "წევრი",
     "review": "მიმოხილვა",
-    "reviews": "მიმოხილვები"
+    "reviews": "მიმოხილვები",
+    "stats": "თქვენი სტატისტიკა",
+    "accountInfo": "ანგარიშის ინფორმაცია",
+    "emailLabel": "ელ. ფოსტა",
+    "phoneLabel": "ტელეფონი",
+    "notProvided": "არ არის მითითებული",
+    "accountStatus": "სტატუსი",
+    "verified": "ვერიფიცირებული მძღოლი",
+    "quickActions": "სწრაფი მოქმედებები",
+    "logout": "გასვლა",
+    "logoutConfirm": "დარწმუნებული ხართ, რომ გსურთ გასვლა?"
   },
   "settings": {
     "title": "პარამეტრები",

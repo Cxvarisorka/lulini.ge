@@ -11,7 +11,9 @@
     "continue": "Continuar",
     "back": "Atrás",
     "done": "Hecho",
-    "close": "Cerrar"
+    "close": "Cerrar",
+    "accept": "Aceptar",
+    "decline": "Rechazar"
   },
   "auth": {
     "login": "Iniciar sesión",
@@ -46,7 +48,9 @@
     "onlineTime": "Tiempo en línea",
     "last24Hours": "Últimas 24 horas",
     "requests": "Solicitudes",
-    "totalEarnings": "Ganancias totales"
+    "totalEarnings": "Ganancias totales",
+    "greeting": "Hola",
+    "todayStats": "ESTADÍSTICAS DE HOY"
   },
   "rides": {
     "newRequest": "Nueva solicitud de viaje",
@@ -122,7 +126,9 @@
     "freeWaiting": "Período de espera gratuito",
     "paidWaiting": "Espera pagada",
     "rideWillCancel": "El viaje se cancelará si el pasajero no llega",
-    "waitingFeeAdded": "Cargo por espera agregado"
+    "waitingFeeAdded": "Cargo por espera agregado",
+    "viewAll": "Ver todos los viajes",
+    "tryDifferentFilter": "Prueba un filtro diferente"
   },
   "earnings": {
     "title": "Ganancias",
@@ -133,7 +139,13 @@
     "trips": "Viajes totales",
     "averagePerTrip": "Promedio por viaje",
     "history": "Historial de ganancias",
-    "noEarnings": "Aún no hay ganancias"
+    "noEarnings": "Aún no hay ganancias",
+    "selectPeriod": "SELECCIONAR PERÍODO",
+    "summary": "RESUMEN",
+    "completedTrips": "Viajes completados",
+    "totalEarnings": "Ganancias totales",
+    "noEarningsDesc": "Tu historial de ganancias aparecerá aquí",
+    "viewDetails": "Ver detalles"
   },
   "profile": {
     "title": "Perfil",
@@ -147,7 +159,17 @@
     "totalTrips": "Viajes totales",
     "memberSince": "Miembro desde",
     "review": "reseña",
-    "reviews": "reseñas"
+    "reviews": "reseñas",
+    "stats": "TUS ESTADÍSTICAS",
+    "accountInfo": "INFORMACIÓN DE CUENTA",
+    "emailLabel": "Correo",
+    "phoneLabel": "Teléfono",
+    "notProvided": "No proporcionado",
+    "accountStatus": "Estado",
+    "verified": "Conductor verificado",
+    "quickActions": "ACCIONES RÁPIDAS",
+    "logout": "Cerrar sesión",
+    "logoutConfirm": "¿Estás seguro de que deseas cerrar sesión?"
   },
   "settings": {
     "title": "Configuración",

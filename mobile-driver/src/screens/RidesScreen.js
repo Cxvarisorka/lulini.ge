@@ -19,7 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useDriver } from '../context/DriverContext';
 import { useSocket } from '../context/SocketContext';
 import { rideAPI } from '../services/api';
-import { colors, shadows, radius } from '../theme/colors';
+import { colors, shadows, radius, spacing } from '../theme/colors';
 
 export default function RidesScreen({ navigation }) {
   const { t } = useTranslation();
@@ -53,7 +53,6 @@ export default function RidesScreen({ navigation }) {
     setLoading(true);
 
     try {
-      // Use cached data from context - it handles caching automatically
       const { rides, fromCache } = await loadAllRides(forceRefresh);
 
       if (fromCache) {
@@ -62,7 +61,6 @@ export default function RidesScreen({ navigation }) {
         console.log('Fetched fresh rides data');
       }
 
-      // Filter based on selected tab
       if (selectedFilter === 'active') {
         // Active rides are already managed by loadAllRides
       } else {
@@ -72,7 +70,6 @@ export default function RidesScreen({ navigation }) {
         } else if (selectedFilter === 'cancelled') {
           filteredRides = rides.filter(ride => ride.status === 'cancelled');
         }
-        // For 'all' filter, use all rides
         setAllRides(filteredRides);
       }
     } catch (error) {
@@ -89,7 +86,6 @@ export default function RidesScreen({ navigation }) {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    // Force refresh on pull-to-refresh to get fresh data from server
     await loadRides(true);
     setRefreshing(false);
   };
@@ -131,33 +127,42 @@ export default function RidesScreen({ navigation }) {
     <TouchableOpacity
       style={styles.rideCard}
       onPress={() => navigation.navigate('RideDetail', { rideId: item._id })}
+      activeOpacity={0.7}
     >
       <View style={styles.rideHeader}>
-        <View style={[styles.statusBadge, { backgroundColor: colors.status[item.status] + '20' }]}>
-          <Text style={[styles.statusText, { color: colors.status[item.status] }]}>
+        <View style={[styles.statusBadge, { backgroundColor: `${colors.status[item.status]}15` }]}>
+          <View style={[styles.statusDot, { backgroundColor: colors.status[item.status] }]} />
+          <Text style={[styles.statusText, { color: colors.status[item.status] }]} numberOfLines={1}>
             {t(`rides.${item.status}`)}
           </Text>
         </View>
         <Text style={styles.fareText}>${item.quote?.totalPrice?.toFixed(2)}</Text>
       </View>
 
-      <View style={styles.locationRow}>
-        <Ionicons name="radio-button-on" size={16} color={colors.success} />
-        <Text style={styles.locationText} numberOfLines={1}>
-          {item.pickup?.address}
-        </Text>
-      </View>
+      <View style={styles.locationContainer}>
+        <View style={styles.locationRow}>
+          <View style={[styles.locationDot, { backgroundColor: colors.success }]} />
+          <Text style={styles.locationText} numberOfLines={1}>
+            {item.pickup?.address}
+          </Text>
+        </View>
 
-      <View style={styles.locationRow}>
-        <Ionicons name="location" size={16} color={colors.destructive} />
-        <Text style={styles.locationText} numberOfLines={1}>
-          {item.dropoff?.address}
-        </Text>
+        <View style={styles.locationLine} />
+
+        <View style={styles.locationRow}>
+          <View style={[styles.locationDot, { backgroundColor: colors.destructive }]} />
+          <Text style={styles.locationText} numberOfLines={1}>
+            {item.dropoff?.address}
+          </Text>
+        </View>
       </View>
 
       <View style={styles.rideFooter}>
-        <Text style={styles.distanceText}>{item.quote?.distanceText}</Text>
-        <Ionicons name="chevron-forward" size={20} color={colors.mutedForeground} />
+        <View style={styles.rideMetaItem}>
+          <Ionicons name="navigate-outline" size={14} color={colors.mutedForeground} />
+          <Text style={styles.rideMetaText}>{item.quote?.distanceText}</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={18} color={colors.mutedForeground} />
       </View>
     </TouchableOpacity>
   );
@@ -165,7 +170,6 @@ export default function RidesScreen({ navigation }) {
   const applyAdvancedFilters = useCallback((rides) => {
     let filtered = [...rides];
 
-    // Filter by price range
     if (minPrice) {
       const min = parseFloat(minPrice);
       filtered = filtered.filter(ride => (ride.quote?.totalPrice || 0) >= min);
@@ -175,7 +179,6 @@ export default function RidesScreen({ navigation }) {
       filtered = filtered.filter(ride => (ride.quote?.totalPrice || 0) <= max);
     }
 
-    // Filter by date range
     if (dateRange !== 'anytime') {
       const now = new Date();
       const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -199,7 +202,6 @@ export default function RidesScreen({ navigation }) {
       });
     }
 
-    // Sort
     filtered.sort((a, b) => {
       switch (sortBy) {
         case 'oldest':
@@ -230,32 +232,34 @@ export default function RidesScreen({ navigation }) {
   };
 
   const filters = [
-    { key: 'active', label: t('rides.activeTab') },
-    { key: 'all', label: t('rides.allTab') },
-    { key: 'completed', label: t('rides.completedTab') },
-    { key: 'cancelled', label: t('rides.cancelledTab') },
+    { key: 'active', label: t('rides.activeTab'), icon: 'flash' },
+    { key: 'all', label: t('rides.allTab'), icon: 'list' },
+    { key: 'completed', label: t('rides.completedTab'), icon: 'checkmark-circle' },
+    { key: 'cancelled', label: t('rides.cancelledTab'), icon: 'close-circle' },
   ];
 
   const ridesToDisplay = getRidesToDisplay();
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <Text style={styles.title}>{t('rides.myRides')}</Text>
-        <TouchableOpacity
-          style={styles.filterIconButton}
-          onPress={() => setShowFiltersModal(true)}
-        >
-          <Ionicons name="options-outline" size={24} color={colors.foreground} />
-          {activeFiltersCount > 0 && (
-            <View style={styles.filterBadge}>
-              <Text style={styles.filterBadgeText}>{activeFiltersCount}</Text>
-            </View>
-          )}
-        </TouchableOpacity>
-      </View>
+    <View style={styles.container}>
+      {/* Header */}
+      <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
+        <View style={styles.headerContent}>
+          <Text style={styles.title}>{t('rides.myRides')}</Text>
+          <TouchableOpacity
+            style={styles.filterIconButton}
+            onPress={() => setShowFiltersModal(true)}
+          >
+            <Ionicons name="options-outline" size={22} color={colors.foreground} />
+            {activeFiltersCount > 0 && (
+              <View style={styles.filterBadge}>
+                <Text style={styles.filterBadgeText}>{activeFiltersCount}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        </View>
 
-      <View style={styles.filterWrapper}>
+        {/* Filter Tabs */}
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -270,11 +274,17 @@ export default function RidesScreen({ navigation }) {
               ]}
               onPress={() => setSelectedFilter(filter.key)}
             >
+              <Ionicons
+                name={filter.icon}
+                size={16}
+                color={selectedFilter === filter.key ? colors.primaryForeground : colors.mutedForeground}
+              />
               <Text
                 style={[
                   styles.filterText,
                   selectedFilter === filter.key && styles.filterTextActive,
                 ]}
+                numberOfLines={1}
               >
                 {filter.label}
               </Text>
@@ -283,33 +293,49 @@ export default function RidesScreen({ navigation }) {
         </ScrollView>
       </View>
 
-      {ridesToDisplay.length === 0 && !loading ? (
-        <View style={styles.emptyContainer}>
-          <Ionicons name="car-outline" size={64} color={colors.mutedForeground} />
-          <Text style={styles.emptyText}>
-            {selectedFilter === 'active' ? t('home.noActiveRides') : t('rides.noRidesFound')}
-          </Text>
-        </View>
-      ) : (
-        <View style={styles.listContainer}>
+      {/* Content */}
+      <View style={styles.content}>
+        {ridesToDisplay.length === 0 && !loading ? (
+          <View style={styles.emptyContainer}>
+            <View style={styles.emptyIcon}>
+              <Ionicons name="car-outline" size={48} color={colors.mutedForeground} />
+            </View>
+            <Text style={styles.emptyTitle} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.8}>
+              {selectedFilter === 'active' ? t('home.noActiveRides') : t('rides.noRidesFound')}
+            </Text>
+            <Text style={styles.emptySubtitle} numberOfLines={2}>
+              {selectedFilter === 'active'
+                ? t('home.waitingForRides') || 'Waiting for ride requests'
+                : t('rides.tryDifferentFilter') || 'Try a different filter'}
+            </Text>
+          </View>
+        ) : (
           <FlatList
             data={ridesToDisplay}
             renderItem={renderRideItem}
             keyExtractor={(item) => item._id}
             contentContainerStyle={styles.list}
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary]} />}
-            ListEmptyComponent={null}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                colors={[colors.primary]}
+                tintColor={colors.primary}
+              />
+            }
+            showsVerticalScrollIndicator={false}
           />
-          {loading && (
-            <View style={styles.loadingOverlay}>
-              <View style={styles.loadingBox}>
-                <ActivityIndicator size="large" color={colors.primary} />
-                <Text style={styles.loadingText}>{t('common.loading')}</Text>
-              </View>
+        )}
+
+        {loading && (
+          <View style={styles.loadingOverlay}>
+            <View style={styles.loadingBox}>
+              <ActivityIndicator size="large" color={colors.primary} />
+              <Text style={styles.loadingText}>{t('common.loading')}</Text>
             </View>
-          )}
-        </View>
-      )}
+          </View>
+        )}
+      </View>
 
       {/* New Ride Request Modal */}
       <Modal
@@ -319,70 +345,72 @@ export default function RidesScreen({ navigation }) {
         onRequestClose={handleDeclineRide}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+          <View style={[styles.modalContent, { paddingBottom: insets.bottom + spacing['3xl'] }]}>
             <View style={styles.modalHeader}>
-              <Ionicons name="car" size={40} color={colors.primary} />
-              <Text style={styles.modalTitle}>{t('rides.newRequest')}</Text>
+              <View style={styles.modalIconBadge}>
+                <Ionicons name="car" size={28} color={colors.primaryForeground} />
+              </View>
+              <Text style={styles.modalTitle} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{t('rides.newRequest')}</Text>
             </View>
 
             {newRideRequest && (
               <>
                 <View style={styles.rideInfo}>
-                  <View style={styles.locationRow}>
-                    <Ionicons name="radio-button-on" size={20} color={colors.success} />
+                  <View style={styles.modalLocationRow}>
+                    <View style={[styles.locationDot, { backgroundColor: colors.success }]} />
                     <View style={styles.locationTextContainer}>
-                      <Text style={styles.locationLabel}>{t('rides.pickup')}</Text>
-                      <Text style={styles.locationAddress}>{newRideRequest.pickup?.address}</Text>
+                      <Text style={styles.locationLabel} numberOfLines={1}>{t('rides.pickup')}</Text>
+                      <Text style={styles.locationAddress} numberOfLines={2}>{newRideRequest.pickup?.address}</Text>
                     </View>
                   </View>
 
-                  <View style={styles.locationDivider} />
+                  <View style={styles.modalLocationLine} />
 
-                  <View style={styles.locationRow}>
-                    <Ionicons name="location" size={20} color={colors.destructive} />
+                  <View style={styles.modalLocationRow}>
+                    <View style={[styles.locationDot, { backgroundColor: colors.destructive }]} />
                     <View style={styles.locationTextContainer}>
-                      <Text style={styles.locationLabel}>{t('rides.dropoff')}</Text>
-                      <Text style={styles.locationAddress}>{newRideRequest.dropoff?.address}</Text>
+                      <Text style={styles.locationLabel} numberOfLines={1}>{t('rides.dropoff')}</Text>
+                      <Text style={styles.locationAddress} numberOfLines={2}>{newRideRequest.dropoff?.address}</Text>
                     </View>
                   </View>
                 </View>
 
                 <View style={styles.rideDetails}>
                   <View style={styles.detailItem}>
-                    <Text style={styles.detailLabel}>{t('rides.distance')}</Text>
-                    <Text style={styles.detailValue}>{newRideRequest.quote?.distanceText}</Text>
+                    <Text style={styles.detailLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{t('rides.distance')}</Text>
+                    <Text style={styles.detailValue} numberOfLines={1}>{newRideRequest.quote?.distanceText}</Text>
                   </View>
                   <View style={styles.detailItem}>
-                    <Text style={styles.detailLabel}>{t('rides.duration')}</Text>
-                    <Text style={styles.detailValue}>{newRideRequest.quote?.durationText}</Text>
+                    <Text style={styles.detailLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{t('rides.duration')}</Text>
+                    <Text style={styles.detailValue} numberOfLines={1}>{newRideRequest.quote?.durationText}</Text>
                   </View>
                   <View style={styles.detailItem}>
-                    <Text style={styles.detailLabel}>{t('rides.fare')}</Text>
-                    <Text style={styles.fareValue}>${newRideRequest.quote?.totalPrice}</Text>
+                    <Text style={styles.detailLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{t('rides.fare')}</Text>
+                    <Text style={styles.fareValue} numberOfLines={1}>${newRideRequest.quote?.totalPrice}</Text>
                   </View>
                 </View>
 
                 <View style={styles.modalActions}>
                   <TouchableOpacity
-                    style={[styles.actionButton, styles.declineButton]}
+                    style={styles.declineButton}
                     onPress={handleDeclineRide}
                     disabled={accepting}
                   >
-                    <Ionicons name="close-circle" size={20} color={colors.destructive} />
-                    <Text style={styles.declineText}>{t('common.decline')}</Text>
+                    <Ionicons name="close" size={20} color={colors.destructive} />
+                    <Text style={styles.declineText} numberOfLines={1}>{t('common.decline')}</Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity
-                    style={[styles.actionButton, styles.acceptButton]}
+                    style={[styles.acceptButton, accepting && styles.acceptButtonDisabled]}
                     onPress={handleAcceptRide}
                     disabled={accepting}
                   >
                     {accepting ? (
-                      <ActivityIndicator color={colors.background} />
+                      <ActivityIndicator color={colors.primaryForeground} />
                     ) : (
                       <>
-                        <Ionicons name="checkmark-circle" size={20} color={colors.background} />
-                        <Text style={styles.acceptText}>{t('common.accept')}</Text>
+                        <Ionicons name="checkmark" size={20} color={colors.primaryForeground} />
+                        <Text style={styles.acceptText} numberOfLines={1}>{t('common.accept')}</Text>
                       </>
                     )}
                   </TouchableOpacity>
@@ -403,8 +431,11 @@ export default function RidesScreen({ navigation }) {
         <View style={styles.modalOverlay}>
           <View style={styles.filtersModalContent}>
             <View style={styles.filtersModalHeader}>
-              <Text style={styles.filtersModalTitle}>{t('rides.filters')}</Text>
-              <TouchableOpacity onPress={() => setShowFiltersModal(false)}>
+              <Text style={styles.filtersModalTitle} numberOfLines={1}>{t('rides.filters')}</Text>
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={() => setShowFiltersModal(false)}
+              >
                 <Ionicons name="close" size={24} color={colors.foreground} />
               </TouchableOpacity>
             </View>
@@ -412,10 +443,10 @@ export default function RidesScreen({ navigation }) {
             <ScrollView style={styles.filtersScrollView} showsVerticalScrollIndicator={false}>
               {/* Price Range */}
               <View style={styles.filterSection}>
-                <Text style={styles.filterSectionTitle}>{t('rides.priceRange')}</Text>
+                <Text style={styles.filterSectionTitle} numberOfLines={1}>{t('rides.priceRange')}</Text>
                 <View style={styles.priceInputRow}>
                   <View style={styles.priceInputContainer}>
-                    <Text style={styles.priceInputLabel}>{t('rides.minPrice')}</Text>
+                    <Text style={styles.priceInputLabel} numberOfLines={1}>{t('rides.minPrice')}</Text>
                     <TextInput
                       style={styles.priceInput}
                       value={minPrice}
@@ -429,7 +460,7 @@ export default function RidesScreen({ navigation }) {
                     <Text style={styles.priceSeparatorText}>-</Text>
                   </View>
                   <View style={styles.priceInputContainer}>
-                    <Text style={styles.priceInputLabel}>{t('rides.maxPrice')}</Text>
+                    <Text style={styles.priceInputLabel} numberOfLines={1}>{t('rides.maxPrice')}</Text>
                     <TextInput
                       style={styles.priceInput}
                       value={maxPrice}
@@ -444,7 +475,7 @@ export default function RidesScreen({ navigation }) {
 
               {/* Date Range */}
               <View style={styles.filterSection}>
-                <Text style={styles.filterSectionTitle}>{t('rides.dateRange')}</Text>
+                <Text style={styles.filterSectionTitle} numberOfLines={1}>{t('rides.dateRange')}</Text>
                 <View style={styles.optionsGrid}>
                   {[
                     { key: 'anytime', label: t('rides.anytime') },
@@ -475,7 +506,7 @@ export default function RidesScreen({ navigation }) {
 
               {/* Sort By */}
               <View style={styles.filterSection}>
-                <Text style={styles.filterSectionTitle}>{t('rides.sortBy')}</Text>
+                <Text style={styles.filterSectionTitle} numberOfLines={1}>{t('rides.sortBy')}</Text>
                 <View style={styles.optionsGrid}>
                   {[
                     { key: 'newest', label: t('rides.newest') },
@@ -506,18 +537,18 @@ export default function RidesScreen({ navigation }) {
             </ScrollView>
 
             {/* Filter Actions */}
-            <View style={styles.filterActions}>
+            <View style={[styles.filterActions, { paddingBottom: insets.bottom + spacing['2xl'] }]}>
               <TouchableOpacity
                 style={styles.clearFiltersButton}
                 onPress={clearFilters}
               >
-                <Text style={styles.clearFiltersText}>{t('rides.clearFilters')}</Text>
+                <Text style={styles.clearFiltersText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{t('rides.clearFilters')}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.applyFiltersButton}
                 onPress={() => setShowFiltersModal(false)}
               >
-                <Text style={styles.applyFiltersText}>{t('rides.applyFilters')}</Text>
+                <Text style={styles.applyFiltersText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{t('rides.applyFilters')}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -534,15 +565,20 @@ const styles = StyleSheet.create({
   },
   header: {
     backgroundColor: colors.background,
-    padding: 20,
-    paddingTop: 10,
-    paddingBottom: 12,
+    paddingBottom: spacing.md,
+    borderBottomLeftRadius: radius['2xl'],
+    borderBottomRightRadius: radius['2xl'],
+    ...shadows.sm,
+  },
+  headerContent: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    paddingHorizontal: spacing.lg,
+    marginBottom: spacing.md,
   },
   title: {
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: '700',
     color: colors.foreground,
   },
@@ -550,81 +586,83 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: radius.lg,
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.muted,
     justifyContent: 'center',
     alignItems: 'center',
   },
   filterBadge: {
     position: 'absolute',
-    top: -4,
-    right: -4,
+    top: -2,
+    right: -2,
     backgroundColor: colors.primary,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
     justifyContent: 'center',
     alignItems: 'center',
   },
   filterBadgeText: {
-    color: colors.background,
-    fontSize: 11,
+    color: colors.primaryForeground,
+    fontSize: 10,
     fontWeight: '700',
-  },
-  filterWrapper: {
-    backgroundColor: colors.background,
-    paddingBottom: 16,
   },
   filterContainer: {
     flexDirection: 'row',
-    paddingHorizontal: 16,
-    gap: 8,
+    paddingHorizontal: spacing.lg,
+    gap: spacing.sm,
   },
   filterButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
     borderRadius: radius.full,
-    backgroundColor: colors.secondary,
-    borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: colors.muted,
+    gap: spacing.xs,
   },
   filterButtonActive: {
     backgroundColor: colors.primary,
-    borderColor: colors.primary,
   },
   filterText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
     color: colors.mutedForeground,
   },
   filterTextActive: {
-    color: colors.background,
+    color: colors.primaryForeground,
   },
-  listContainer: {
+  content: {
     flex: 1,
   },
   list: {
-    padding: 16,
-    paddingTop: 8,
+    padding: spacing.lg,
+    paddingTop: spacing.md,
   },
   rideCard: {
-    backgroundColor: colors.card,
+    backgroundColor: colors.background,
     borderRadius: radius.lg,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
+    padding: spacing.lg,
+    marginBottom: spacing.sm,
     ...shadows.sm,
   },
   rideHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: spacing.md,
   },
   statusBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: radius.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.full,
+    gap: spacing.xs,
+  },
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
   },
   statusText: {
     fontSize: 12,
@@ -635,27 +673,45 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.foreground,
   },
+  locationContainer: {
+    marginBottom: spacing.md,
+  },
   locationRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
+  },
+  locationDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginRight: spacing.md,
+  },
+  locationLine: {
+    width: 2,
+    height: 16,
+    backgroundColor: colors.border,
+    marginLeft: 4,
+    marginVertical: spacing.xs,
   },
   locationText: {
     flex: 1,
     fontSize: 14,
     color: colors.foreground,
-    marginLeft: 8,
   },
   rideFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 8,
-    paddingTop: 12,
+    paddingTop: spacing.md,
     borderTopWidth: 1,
     borderTopColor: colors.border,
   },
-  distanceText: {
+  rideMetaItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  rideMetaText: {
     fontSize: 12,
     color: colors.mutedForeground,
   },
@@ -663,12 +719,28 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 32,
+    paddingHorizontal: spacing['3xl'],
   },
-  emptyText: {
-    fontSize: 16,
+  emptyIcon: {
+    width: 80,
+    height: 80,
+    borderRadius: radius.full,
+    backgroundColor: colors.background,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: spacing.lg,
+    ...shadows.sm,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: colors.foreground,
+    marginBottom: spacing.xs,
+    textAlign: 'center',
+  },
+  emptySubtitle: {
+    fontSize: 14,
     color: colors.mutedForeground,
-    marginTop: 16,
     textAlign: 'center',
   },
   loadingOverlay: {
@@ -678,15 +750,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   loadingBox: {
-    backgroundColor: colors.card,
-    paddingHorizontal: 32,
-    paddingVertical: 24,
+    backgroundColor: colors.background,
+    paddingHorizontal: spacing['2xl'],
+    paddingVertical: spacing.xl,
     borderRadius: radius.lg,
     alignItems: 'center',
     ...shadows.lg,
   },
   loadingText: {
-    marginTop: 12,
+    marginTop: spacing.md,
     fontSize: 14,
     fontWeight: '500',
     color: colors.mutedForeground,
@@ -700,58 +772,78 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     borderTopLeftRadius: radius['2xl'],
     borderTopRightRadius: radius['2xl'],
-    padding: 24,
-    paddingBottom: 40,
-    ...shadows.lg,
+    padding: spacing.xl,
+    paddingBottom: spacing['3xl'],
   },
   modalHeader: {
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: spacing.xl,
+  },
+  modalIconBadge: {
+    width: 56,
+    height: 56,
+    borderRadius: radius.lg,
+    backgroundColor: colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: spacing.md,
   },
   modalTitle: {
     fontSize: 22,
     fontWeight: '700',
     color: colors.foreground,
-    marginTop: 12,
   },
   rideInfo: {
-    backgroundColor: colors.card,
+    backgroundColor: colors.muted,
     borderRadius: radius.lg,
-    padding: 16,
-    marginBottom: 16,
+    padding: spacing.lg,
+    marginBottom: spacing.lg,
+  },
+  modalLocationRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
   },
   locationTextContainer: {
     flex: 1,
-    marginLeft: 12,
+    marginLeft: spacing.md,
   },
   locationLabel: {
-    fontSize: 12,
+    fontSize: 11,
     color: colors.mutedForeground,
-    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 2,
   },
   locationAddress: {
     fontSize: 15,
     color: colors.foreground,
     fontWeight: '500',
   },
-  locationDivider: {
-    height: 1,
+  modalLocationLine: {
+    width: 2,
+    height: 20,
     backgroundColor: colors.border,
-    marginVertical: 12,
+    marginLeft: 4,
+    marginVertical: spacing.sm,
   },
   rideDetails: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 24,
+    marginBottom: spacing.xl,
+    gap: spacing.sm,
   },
   detailItem: {
     flex: 1,
+    backgroundColor: colors.muted,
+    borderRadius: radius.lg,
+    padding: spacing.md,
     alignItems: 'center',
   },
   detailLabel: {
-    fontSize: 12,
+    fontSize: 11,
     color: colors.mutedForeground,
-    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: spacing.xs,
   },
   detailValue: {
     fontSize: 14,
@@ -759,25 +851,23 @@ const styles = StyleSheet.create({
     color: colors.foreground,
   },
   fareValue: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
-    color: colors.primary,
+    color: colors.success,
   },
   modalActions: {
     flexDirection: 'row',
-    gap: 12,
+    gap: spacing.md,
   },
-  actionButton: {
+  declineButton: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 16,
+    paddingVertical: spacing.lg,
     borderRadius: radius.lg,
-    gap: 8,
-  },
-  declineButton: {
-    backgroundColor: colors.destructive + '15',
+    backgroundColor: `${colors.destructive}15`,
+    gap: spacing.sm,
   },
   declineText: {
     fontSize: 16,
@@ -785,12 +875,22 @@ const styles = StyleSheet.create({
     color: colors.destructive,
   },
   acceptButton: {
-    backgroundColor: colors.primary,
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.lg,
+    borderRadius: radius.lg,
+    backgroundColor: colors.success,
+    gap: spacing.sm,
+  },
+  acceptButtonDisabled: {
+    opacity: 0.6,
   },
   acceptText: {
     fontSize: 16,
     fontWeight: '600',
-    color: colors.background,
+    color: colors.primaryForeground,
   },
   // Filter Modal Styles
   filtersModalContent: {
@@ -798,13 +898,12 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: radius['2xl'],
     borderTopRightRadius: radius['2xl'],
     maxHeight: '85%',
-    ...shadows.lg,
   },
   filtersModalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 20,
+    padding: spacing.lg,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
@@ -813,17 +912,27 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.foreground,
   },
+  closeButton: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.full,
+    backgroundColor: colors.muted,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   filtersScrollView: {
-    padding: 20,
+    padding: spacing.lg,
   },
   filterSection: {
-    marginBottom: 24,
+    marginBottom: spacing.xl,
   },
   filterSectionTitle: {
-    fontSize: 16,
+    fontSize: 13,
     fontWeight: '600',
-    color: colors.foreground,
-    marginBottom: 12,
+    color: colors.mutedForeground,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: spacing.md,
   },
   priceInputRow: {
     flexDirection: 'row',
@@ -835,21 +944,19 @@ const styles = StyleSheet.create({
   priceInputLabel: {
     fontSize: 12,
     color: colors.mutedForeground,
-    marginBottom: 6,
+    marginBottom: spacing.xs,
   },
   priceInput: {
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.muted,
     borderRadius: radius.lg,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
     fontSize: 16,
     color: colors.foreground,
-    borderWidth: 1,
-    borderColor: colors.border,
   },
   priceSeparator: {
-    paddingHorizontal: 12,
-    paddingTop: 18,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.lg,
   },
   priceSeparatorText: {
     fontSize: 18,
@@ -858,19 +965,16 @@ const styles = StyleSheet.create({
   optionsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: spacing.sm,
   },
   optionChip: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
     borderRadius: radius.full,
-    backgroundColor: colors.secondary,
-    borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: colors.muted,
   },
   optionChipActive: {
     backgroundColor: colors.primary,
-    borderColor: colors.primary,
   },
   optionChipText: {
     fontSize: 14,
@@ -878,21 +982,20 @@ const styles = StyleSheet.create({
     color: colors.mutedForeground,
   },
   optionChipTextActive: {
-    color: colors.background,
+    color: colors.primaryForeground,
   },
   filterActions: {
     flexDirection: 'row',
-    padding: 20,
-    paddingBottom: 32,
-    gap: 12,
+    padding: spacing.lg,
+    gap: spacing.md,
     borderTopWidth: 1,
     borderTopColor: colors.border,
   },
   clearFiltersButton: {
     flex: 1,
-    paddingVertical: 14,
+    paddingVertical: spacing.md,
     borderRadius: radius.lg,
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.muted,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -903,7 +1006,7 @@ const styles = StyleSheet.create({
   },
   applyFiltersButton: {
     flex: 1,
-    paddingVertical: 14,
+    paddingVertical: spacing.md,
     borderRadius: radius.lg,
     backgroundColor: colors.primary,
     alignItems: 'center',
@@ -912,6 +1015,6 @@ const styles = StyleSheet.create({
   applyFiltersText: {
     fontSize: 16,
     fontWeight: '600',
-    color: colors.background,
+    color: colors.primaryForeground,
   },
 });

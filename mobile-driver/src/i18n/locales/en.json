@@ -11,7 +11,9 @@
     "continue": "Continue",
     "back": "Back",
     "done": "Done",
-    "close": "Close"
+    "close": "Close",
+    "accept": "Accept",
+    "decline": "Decline"
   },
   "auth": {
     "login": "Login",
@@ -46,7 +48,9 @@
     "onlineTime": "Online Time",
     "last24Hours": "Last 24 Hours",
     "requests": "Requests",
-    "totalEarnings": "Total Earnings"
+    "totalEarnings": "Total Earnings",
+    "greeting": "Hello",
+    "todayStats": "TODAY'S STATS"
   },
   "rides": {
     "newRequest": "New Ride Request",
@@ -122,7 +126,9 @@
     "freeWaiting": "Free waiting period",
     "paidWaiting": "Paid waiting",
     "rideWillCancel": "Ride will be cancelled if passenger doesn't show up",
-    "waitingFeeAdded": "Waiting fee added"
+    "waitingFeeAdded": "Waiting fee added",
+    "viewAll": "View all rides",
+    "tryDifferentFilter": "Try a different filter"
   },
   "earnings": {
     "title": "Earnings",
@@ -133,7 +139,13 @@
     "trips": "Total Trips",
     "averagePerTrip": "Average per Trip",
     "history": "Earnings History",
-    "noEarnings": "No earnings yet"
+    "noEarnings": "No earnings yet",
+    "selectPeriod": "SELECT PERIOD",
+    "summary": "SUMMARY",
+    "completedTrips": "Completed Trips",
+    "totalEarnings": "Total Earnings",
+    "noEarningsDesc": "Your earnings history will appear here",
+    "viewDetails": "View details"
   },
   "profile": {
     "title": "Profile",
@@ -147,7 +159,17 @@
     "totalTrips": "Total Trips",
     "memberSince": "Member Since",
     "review": "review",
-    "reviews": "reviews"
+    "reviews": "reviews",
+    "stats": "YOUR STATS",
+    "accountInfo": "ACCOUNT INFO",
+    "emailLabel": "Email",
+    "phoneLabel": "Phone",
+    "notProvided": "Not provided",
+    "accountStatus": "Status",
+    "verified": "Verified Driver",
+    "quickActions": "QUICK ACTIONS",
+    "logout": "Logout",
+    "logoutConfirm": "Are you sure you want to logout?"
   },
   "settings": {
     "title": "Settings",

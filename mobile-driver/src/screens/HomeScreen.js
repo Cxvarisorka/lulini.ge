@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
+  ScrollView,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,18 +18,20 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useDriver } from '../context/DriverContext';
 import { useLocation } from '../context/LocationContext';
 import { useSocket } from '../context/SocketContext';
+import { useAuth } from '../context/AuthContext';
 import { rideAPI } from '../services/api';
-import { colors, shadows, radius } from '../theme/colors';
+import { colors, shadows, radius, spacing } from '../theme/colors';
 
-const { width, height } = Dimensions.get('window');
+const { height } = Dimensions.get('window');
 
 export default function HomeScreen({ navigation }) {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const webViewRef = useRef(null);
 
+  const { user } = useAuth();
   const { isOnline, goOnline, goOffline, loading, stats, addActiveRide } = useDriver();
-  const { location, isTracking } = useLocation();
+  const { location } = useLocation();
   const { newRideRequest, clearRideRequest, isConnected, fetchPendingRides } = useSocket();
 
   const [showRideRequest, setShowRideRequest] = useState(false);
@@ -38,13 +41,11 @@ export default function HomeScreen({ navigation }) {
     if (newRideRequest) {
       setShowRideRequest(true);
     } else {
-      // Hide modal when ride request is cleared (cancelled by user or accepted by another driver)
       setShowRideRequest(false);
     }
   }, [newRideRequest]);
 
   useEffect(() => {
-    // Update map when location changes
     if (location && webViewRef.current) {
       webViewRef.current.injectJavaScript(`
         updateDriverLocation(${location.latitude}, ${location.longitude});
@@ -64,8 +65,6 @@ export default function HomeScreen({ navigation }) {
       if (!result.success) {
         Alert.alert(t('common.error'), result.message || t('errors.locationError'));
       } else {
-        // Fetch any pending ride requests when going online
-        // Add slight delay to ensure status is updated on backend
         if (fetchPendingRides) {
           setTimeout(() => {
             fetchPendingRides();
@@ -97,9 +96,6 @@ export default function HomeScreen({ navigation }) {
 
   const handleDeclineRide = () => {
     if (!newRideRequest) return;
-
-    // Simply clear the ride request locally
-    // The ride remains available for other drivers
     setShowRideRequest(false);
     clearRideRequest();
   };
@@ -158,6 +154,30 @@ export default function HomeScreen({ navigation }) {
     `;
   };
 
+  const quickStats = [
+    {
+      id: 'earnings',
+      icon: 'cash',
+      value: `$${stats.last24Hours?.earnings?.toFixed(2) || '0.00'}`,
+      label: t('home.last24Hours'),
+      color: colors.success,
+    },
+    {
+      id: 'trips',
+      icon: 'car',
+      value: stats.last24Hours?.trips || 0,
+      label: t('home.requests'),
+      color: colors.primary,
+    },
+    {
+      id: 'total',
+      icon: 'wallet',
+      value: `$${stats.total?.earnings?.toFixed(2) || '0.00'}`,
+      label: t('home.totalEarnings'),
+      color: colors.info,
+    },
+  ];
+
   return (
     <View style={styles.container}>
       {/* Map */}
@@ -169,84 +189,128 @@ export default function HomeScreen({ navigation }) {
           scrollEnabled={false}
         />
 
-        {/* Status Bar */}
-        <View style={[styles.statusBar, { top: insets.top + 10 }]}>
-          <View style={styles.statusLeft}>
-            <View
-              style={[
-                styles.statusDot,
-                { backgroundColor: isOnline ? colors.online : colors.offline },
-              ]}
-            />
-            <Text style={styles.statusText}>
-              {isOnline ? t('home.youAreOnline') : t('home.youAreOffline')}
-            </Text>
-          </View>
-          <View style={styles.connectionStatus}>
-            <Ionicons
-              name={isConnected ? 'wifi' : 'wifi-outline'}
-              size={16}
-              color={isConnected ? colors.success : colors.mutedForeground}
-            />
-          </View>
-        </View>
-
-        {/* Stats Cards */}
-        <View style={styles.statsContainer}>
-          <View style={styles.statCard}>
-            <Ionicons name="cash-outline" size={20} color={colors.primary} />
-            <Text style={styles.statValue}>
-              ${stats.last24Hours?.earnings?.toFixed(2) || '0.00'}
-            </Text>
-            <Text style={styles.statLabel}>{t('home.last24Hours')}</Text>
-          </View>
-          <View style={styles.statCard}>
-            <Ionicons name="car-outline" size={20} color={colors.primary} />
-            <Text style={styles.statValue}>{stats.last24Hours?.trips || 0}</Text>
-            <Text style={styles.statLabel}>{t('home.requests')}</Text>
-          </View>
-          <View style={styles.statCard}>
-            <Ionicons name="wallet-outline" size={20} color={colors.primary} />
-            <Text style={styles.statValue}>
-              ${stats.total?.earnings?.toFixed(2) || '0.00'}
-            </Text>
-            <Text style={styles.statLabel}>{t('home.totalEarnings')}</Text>
+        {/* Top Header */}
+        <View style={[styles.headerOverlay, { paddingTop: insets.top + spacing.sm }]}>
+          <View style={styles.welcomeSection}>
+            <TouchableOpacity
+              style={styles.settingsButton}
+              onPress={() => navigation.navigate('Settings')}
+            >
+              <Ionicons name="settings-outline" size={24} color={colors.foreground} />
+            </TouchableOpacity>
+            <View style={styles.welcomeContent}>
+              <Text style={styles.greeting} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+                {t('home.greeting') || 'Hello'}, {user?.firstName || 'Driver'}
+              </Text>
+              <View style={styles.statusRow}>
+                <View style={[styles.statusDot, { backgroundColor: isOnline ? colors.online : colors.offline }]} />
+                <Text style={styles.statusText} numberOfLines={1}>
+                  {isOnline ? t('home.youAreOnline') : t('home.youAreOffline')}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.connectionBadge}>
+              <Ionicons
+                name={isConnected ? 'wifi' : 'wifi-outline'}
+                size={18}
+                color={isConnected ? colors.success : colors.mutedForeground}
+              />
+            </View>
           </View>
         </View>
       </View>
 
-      {/* Bottom Section */}
-      <View style={styles.bottomContainer}>
-        {/* Main Toggle Button */}
-        <TouchableOpacity
-          style={[
-            styles.toggleButton,
-            isOnline && styles.toggleButtonOnline,
-            loading && styles.toggleButtonDisabled,
-          ]}
-          onPress={handleToggleOnline}
-          disabled={loading}
+      {/* Bottom Panel */}
+      <View style={styles.bottomPanel}>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={[styles.bottomContent, { paddingBottom: insets.bottom + spacing['3xl'] }]}
         >
-          {loading ? (
-            <ActivityIndicator color={colors.background} />
-          ) : (
-            <>
-              <Ionicons
-                name={isOnline ? 'pause' : 'play'}
-                size={32}
-                color={colors.background}
-              />
-              <Text style={styles.toggleButtonText}>
-                {isOnline ? t('home.goOffline') : t('home.goOnline')}
-              </Text>
-            </>
-          )}
-        </TouchableOpacity>
+          {/* Quick Stats */}
+          <View style={styles.statsSection}>
+            <Text style={styles.sectionTitle} numberOfLines={1}>{t('home.todayStats') || 'TODAY\'S STATS'}</Text>
+            <View style={styles.statsGrid}>
+              {quickStats.map((stat) => (
+                <View key={stat.id} style={styles.statCard}>
+                  <View style={[styles.statIcon, { backgroundColor: `${stat.color}15` }]}>
+                    <Ionicons name={stat.icon} size={22} color={stat.color} />
+                  </View>
+                  <Text style={styles.statValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{stat.value}</Text>
+                  <Text style={styles.statLabel} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.8}>{stat.label}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
 
-        {/* Status Message */}
-        <Text style={styles.statusMessage}>
-          {isOnline ? t('home.waitingForRides') : t('home.noActiveRides')}
-        </Text>
+          {/* Toggle Button */}
+          <TouchableOpacity
+            style={[
+              styles.toggleCard,
+              isOnline && styles.toggleCardOnline,
+              loading && styles.toggleCardDisabled,
+            ]}
+            onPress={handleToggleOnline}
+            disabled={loading}
+            activeOpacity={0.9}
+          >
+            {loading ? (
+              <View style={styles.toggleContent}>
+                <ActivityIndicator color={colors.primaryForeground} size="large" />
+                <Text style={styles.toggleText}>{t('common.loading')}</Text>
+              </View>
+            ) : (
+              <View style={styles.toggleContent}>
+                <View style={styles.toggleIconBadge}>
+                  <Ionicons
+                    name={isOnline ? 'pause' : 'play'}
+                    size={28}
+                    color={colors.primaryForeground}
+                  />
+                </View>
+                <View style={styles.toggleTextContainer}>
+                  <Text style={styles.toggleTitle} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+                    {isOnline ? t('home.goOffline') : t('home.goOnline')}
+                  </Text>
+                  <Text style={styles.toggleSubtitle} numberOfLines={1}>
+                    {isOnline ? t('home.waitingForRides') : t('home.noActiveRides')}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={24} color="rgba(255,255,255,0.7)" />
+              </View>
+            )}
+          </TouchableOpacity>
+
+          {/* Quick Actions */}
+          <View style={styles.actionsSection}>
+            <TouchableOpacity
+              style={styles.actionCard}
+              onPress={() => navigation.navigate('Rides')}
+            >
+              <View style={styles.actionIcon}>
+                <Ionicons name="car" size={22} color={colors.foreground} />
+              </View>
+              <View style={styles.actionContent}>
+                <Text style={styles.actionTitle} numberOfLines={1}>{t('rides.myRides')}</Text>
+                <Text style={styles.actionSubtitle} numberOfLines={1}>{t('rides.viewAll') || 'View all rides'}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.mutedForeground} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.actionCard}
+              onPress={() => navigation.navigate('Earnings')}
+            >
+              <View style={styles.actionIcon}>
+                <Ionicons name="trending-up" size={22} color={colors.foreground} />
+              </View>
+              <View style={styles.actionContent}>
+                <Text style={styles.actionTitle} numberOfLines={1}>{t('earnings.title')}</Text>
+                <Text style={styles.actionSubtitle} numberOfLines={1}>{t('earnings.viewDetails') || 'View details'}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.mutedForeground} />
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
       </View>
 
       {/* New Ride Request Modal */}
@@ -257,41 +321,50 @@ export default function HomeScreen({ navigation }) {
         onRequestClose={handleDeclineRide}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.rideRequestModal}>
-            <Text style={styles.modalTitle}>{t('rides.newRequest')}</Text>
+          <View style={[styles.rideRequestModal, { paddingBottom: insets.bottom + spacing['3xl'] }]}>
+            <View style={styles.modalHeader}>
+              <View style={styles.modalIconBadge}>
+                <Ionicons name="car" size={28} color={colors.primaryForeground} />
+              </View>
+              <Text style={styles.modalTitle} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{t('rides.newRequest')}</Text>
+            </View>
 
             {newRideRequest && (
               <View style={styles.rideDetails}>
-                <View style={styles.rideDetailRow}>
-                  <Ionicons name="radio-button-on" size={20} color={colors.success} />
-                  <View style={styles.rideDetailText}>
-                    <Text style={styles.rideDetailLabel}>{t('rides.pickup')}</Text>
-                    <Text style={styles.rideDetailValue} numberOfLines={2}>
-                      {newRideRequest.pickup?.address || 'Unknown'}
-                    </Text>
+                <View style={styles.locationCard}>
+                  <View style={styles.rideDetailRow}>
+                    <View style={[styles.locationDot, { backgroundColor: colors.success }]} />
+                    <View style={styles.rideDetailText}>
+                      <Text style={styles.rideDetailLabel} numberOfLines={1}>{t('rides.pickup')}</Text>
+                      <Text style={styles.rideDetailValue} numberOfLines={2}>
+                        {newRideRequest.pickup?.address || 'Unknown'}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.locationLine} />
+
+                  <View style={styles.rideDetailRow}>
+                    <View style={[styles.locationDot, { backgroundColor: colors.destructive }]} />
+                    <View style={styles.rideDetailText}>
+                      <Text style={styles.rideDetailLabel} numberOfLines={1}>{t('rides.dropoff')}</Text>
+                      <Text style={styles.rideDetailValue} numberOfLines={2}>
+                        {newRideRequest.dropoff?.address || 'Unknown'}
+                      </Text>
+                    </View>
                   </View>
                 </View>
 
-                <View style={styles.rideDetailRow}>
-                  <Ionicons name="location" size={20} color={colors.destructive} />
-                  <View style={styles.rideDetailText}>
-                    <Text style={styles.rideDetailLabel}>{t('rides.dropoff')}</Text>
-                    <Text style={styles.rideDetailValue} numberOfLines={2}>
-                      {newRideRequest.dropoff?.address || 'Unknown'}
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={styles.rideInfoRow}>
+                <View style={styles.rideInfoGrid}>
                   <View style={styles.rideInfoItem}>
-                    <Text style={styles.rideInfoLabel}>{t('rides.distance')}</Text>
-                    <Text style={styles.rideInfoValue}>
+                    <Text style={styles.rideInfoLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{t('rides.distance')}</Text>
+                    <Text style={styles.rideInfoValue} numberOfLines={1}>
                       {newRideRequest.quote?.distanceText || '-'}
                     </Text>
                   </View>
                   <View style={styles.rideInfoItem}>
-                    <Text style={styles.rideInfoLabel}>{t('rides.estimatedFare')}</Text>
-                    <Text style={styles.rideInfoValue}>
+                    <Text style={styles.rideInfoLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{t('rides.estimatedFare')}</Text>
+                    <Text style={[styles.rideInfoValue, styles.fareHighlight]} numberOfLines={1}>
                       ${newRideRequest.quote?.totalPrice?.toFixed(2) || '0.00'}
                     </Text>
                   </View>
@@ -305,7 +378,8 @@ export default function HomeScreen({ navigation }) {
                 onPress={handleDeclineRide}
                 disabled={accepting}
               >
-                <Text style={styles.declineButtonText}>{t('rides.decline')}</Text>
+                <Ionicons name="close" size={20} color={colors.destructive} />
+                <Text style={styles.declineButtonText} numberOfLines={1}>{t('rides.decline')}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -314,9 +388,12 @@ export default function HomeScreen({ navigation }) {
                 disabled={accepting}
               >
                 {accepting ? (
-                  <ActivityIndicator color={colors.background} />
+                  <ActivityIndicator color={colors.primaryForeground} />
                 ) : (
-                  <Text style={styles.acceptButtonText}>{t('rides.accept')}</Text>
+                  <>
+                    <Ionicons name="checkmark" size={20} color={colors.primaryForeground} />
+                    <Text style={styles.acceptButtonText} numberOfLines={1}>{t('rides.accept')}</Text>
+                  </>
                 )}
               </TouchableOpacity>
             </View>
@@ -330,107 +407,201 @@ export default function HomeScreen({ navigation }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: colors.muted,
   },
   mapContainer: {
-    flex: 1,
+    height: height * 0.4,
   },
   map: {
     flex: 1,
   },
-  statusBar: {
+  headerOverlay: {
     position: 'absolute',
-    left: 16,
-    right: 16,
+    top: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: spacing.lg,
+  },
+  welcomeSection: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
     backgroundColor: colors.background,
     borderRadius: radius.lg,
-    padding: 12,
+    padding: spacing.md,
+    gap: spacing.md,
     ...shadows.md,
   },
-  statusLeft: {
+  settingsButton: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.md,
+    backgroundColor: colors.muted,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  welcomeContent: {
+    flex: 1,
+  },
+  greeting: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: colors.foreground,
+    marginBottom: spacing.xs,
+  },
+  statusRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   statusDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    marginRight: 8,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: spacing.sm,
   },
   statusText: {
-    fontSize: 14,
+    fontSize: 13,
+    color: colors.mutedForeground,
+    fontWeight: '500',
+  },
+  connectionBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.full,
+    backgroundColor: colors.muted,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  bottomPanel: {
+    flex: 1,
+    backgroundColor: colors.muted,
+    borderTopLeftRadius: radius['2xl'],
+    borderTopRightRadius: radius['2xl'],
+    marginTop: -radius['2xl'],
+    ...shadows.lg,
+  },
+  bottomContent: {
+    padding: spacing.lg,
+    paddingBottom: spacing['3xl'],
+  },
+  statsSection: {
+    marginBottom: spacing.xl,
+  },
+  sectionTitle: {
+    fontSize: 12,
     fontWeight: '600',
-    color: colors.foreground,
+    color: colors.mutedForeground,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: spacing.sm,
+    paddingHorizontal: spacing.xs,
   },
-  connectionStatus: {
-    padding: 4,
-  },
-  statsContainer: {
-    position: 'absolute',
-    bottom: 20,
-    left: 16,
-    right: 16,
+  statsGrid: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    gap: spacing.sm,
   },
   statCard: {
     flex: 1,
     backgroundColor: colors.background,
     borderRadius: radius.lg,
-    padding: 12,
-    marginHorizontal: 4,
+    padding: spacing.md,
     alignItems: 'center',
-    ...shadows.md,
+    ...shadows.sm,
+  },
+  statIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.full,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: spacing.sm,
   },
   statValue: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '700',
     color: colors.foreground,
-    marginTop: 4,
+    marginBottom: 2,
   },
   statLabel: {
     fontSize: 11,
     color: colors.mutedForeground,
-    marginTop: 2,
+    textAlign: 'center',
   },
-  bottomContainer: {
-    backgroundColor: colors.background,
-    borderTopLeftRadius: radius['2xl'],
-    borderTopRightRadius: radius['2xl'],
-    padding: 24,
-    paddingBottom: 32,
-    alignItems: 'center',
-    ...shadows.lg,
-  },
-  toggleButton: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
+  toggleCard: {
     backgroundColor: colors.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-    ...shadows.lg,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    marginBottom: spacing.xl,
+    ...shadows.md,
   },
-  toggleButtonOnline: {
+  toggleCardOnline: {
     backgroundColor: colors.success,
   },
-  toggleButtonDisabled: {
-    opacity: 0.6,
+  toggleCardDisabled: {
+    opacity: 0.7,
   },
-  toggleButtonText: {
+  toggleContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  toggleIconBadge: {
+    width: 52,
+    height: 52,
+    borderRadius: radius.md,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  toggleTextContainer: {
+    flex: 1,
+  },
+  toggleTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.primaryForeground,
+    marginBottom: 2,
+  },
+  toggleSubtitle: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.8)',
+  },
+  toggleText: {
     fontSize: 14,
-    fontWeight: '600',
-    color: colors.background,
-    marginTop: 8,
+    color: colors.primaryForeground,
+    marginTop: spacing.sm,
   },
-  statusMessage: {
-    fontSize: 16,
+  actionsSection: {
+    gap: spacing.sm,
+  },
+  actionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.background,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    ...shadows.sm,
+  },
+  actionIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.md,
+    backgroundColor: colors.muted,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: spacing.md,
+  },
+  actionContent: {
+    flex: 1,
+  },
+  actionTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.foreground,
+  },
+  actionSubtitle: {
+    fontSize: 13,
     color: colors.mutedForeground,
-    marginTop: 16,
-    textAlign: 'center',
+    marginTop: 2,
   },
   modalOverlay: {
     flex: 1,
@@ -441,81 +612,125 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     borderTopLeftRadius: radius['2xl'],
     borderTopRightRadius: radius['2xl'],
-    padding: 24,
-    paddingBottom: 32,
+    padding: spacing.xl,
+    paddingBottom: spacing['3xl'],
+  },
+  modalHeader: {
+    alignItems: 'center',
+    marginBottom: spacing.xl,
+  },
+  modalIconBadge: {
+    width: 56,
+    height: 56,
+    borderRadius: radius.lg,
+    backgroundColor: colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: spacing.md,
   },
   modalTitle: {
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: '700',
     color: colors.foreground,
-    marginBottom: 20,
-    textAlign: 'center',
   },
   rideDetails: {
-    marginBottom: 20,
+    marginBottom: spacing.xl,
+  },
+  locationCard: {
+    backgroundColor: colors.muted,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
   },
   rideDetailRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginBottom: 16,
+  },
+  locationDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    marginTop: 4,
+    marginRight: spacing.md,
+  },
+  locationLine: {
+    width: 2,
+    height: 24,
+    backgroundColor: colors.border,
+    marginLeft: 5,
+    marginVertical: spacing.sm,
   },
   rideDetailText: {
     flex: 1,
-    marginLeft: 12,
   },
   rideDetailLabel: {
-    fontSize: 12,
+    fontSize: 11,
     color: colors.mutedForeground,
-    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 2,
   },
   rideDetailValue: {
     fontSize: 15,
     fontWeight: '500',
     color: colors.foreground,
+    lineHeight: 20,
   },
-  rideInfoRow: {
+  rideInfoGrid: {
     flexDirection: 'row',
-    marginTop: 8,
+    gap: spacing.sm,
   },
   rideInfoItem: {
     flex: 1,
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.muted,
     borderRadius: radius.lg,
-    padding: 12,
-    marginHorizontal: 4,
+    padding: spacing.md,
+    alignItems: 'center',
   },
   rideInfoLabel: {
     fontSize: 11,
     color: colors.mutedForeground,
-    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: spacing.xs,
   },
   rideInfoValue: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '600',
     color: colors.foreground,
   },
+  fareHighlight: {
+    color: colors.success,
+    fontWeight: '700',
+  },
   modalButtons: {
     flexDirection: 'row',
-    gap: 12,
+    gap: spacing.md,
   },
   declineButton: {
     flex: 1,
-    backgroundColor: colors.secondary,
-    borderRadius: radius.lg,
-    padding: 16,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: `${colors.destructive}15`,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    gap: spacing.sm,
   },
   declineButtonText: {
     fontSize: 16,
     fontWeight: '600',
-    color: colors.foreground,
+    color: colors.destructive,
   },
   acceptButton: {
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: colors.success,
     borderRadius: radius.lg,
-    padding: 16,
-    alignItems: 'center',
+    padding: spacing.lg,
+    gap: spacing.sm,
   },
   acceptButtonDisabled: {
     opacity: 0.6,
@@ -523,6 +738,6 @@ const styles = StyleSheet.create({
   acceptButtonText: {
     fontSize: 16,
     fontWeight: '600',
-    color: colors.background,
+    color: colors.primaryForeground,
   },
 });

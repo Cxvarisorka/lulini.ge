@@ -11,7 +11,9 @@
     "continue": "Продолжить",
     "back": "Назад",
     "done": "Готово",
-    "close": "Закрыть"
+    "close": "Закрыть",
+    "accept": "Принять",
+    "decline": "Отклонить"
   },
   "auth": {
     "login": "Войти",
@@ -46,7 +48,9 @@
     "onlineTime": "Время онлайн",
     "last24Hours": "Последние 24 часа",
     "requests": "Запросы",
-    "totalEarnings": "Общий заработок"
+    "totalEarnings": "Общий заработок",
+    "greeting": "Привет",
+    "todayStats": "СТАТИСТИКА ЗА СЕГОДНЯ"
   },
   "rides": {
     "newRequest": "Новый заказ",
@@ -122,7 +126,9 @@
     "freeWaiting": "Бесплатное ожидание",
     "paidWaiting": "Платное ожидание",
     "rideWillCancel": "Поездка будет отменена, если пассажир не появится",
-    "waitingFeeAdded": "Плата за ожидание добавлена"
+    "waitingFeeAdded": "Плата за ожидание добавлена",
+    "viewAll": "Все поездки",
+    "tryDifferentFilter": "Попробуйте другой фильтр"
   },
   "earnings": {
     "title": "Заработок",
@@ -133,7 +139,13 @@
     "trips": "Всего поездок",
     "averagePerTrip": "Средний за поездку",
     "history": "История заработка",
-    "noEarnings": "Заработка пока нет"
+    "noEarnings": "Заработка пока нет",
+    "selectPeriod": "ВЫБЕРИТЕ ПЕРИОД",
+    "summary": "СВОДКА",
+    "completedTrips": "Завершённые поездки",
+    "totalEarnings": "Общий заработок",
+    "noEarningsDesc": "Здесь появится история вашего заработка",
+    "viewDetails": "Подробнее"
   },
   "profile": {
     "title": "Профиль",
@@ -147,7 +159,17 @@
     "totalTrips": "Всего поездок",
     "memberSince": "Участник с",
     "review": "отзыв",
-    "reviews": "отзывов"
+    "reviews": "отзывов",
+    "stats": "ВАША СТАТИСТИКА",
+    "accountInfo": "ИНФОРМАЦИЯ ОБ АККАУНТЕ",
+    "emailLabel": "Эл. почта",
+    "phoneLabel": "Телефон",
+    "notProvided": "Не указано",
+    "accountStatus": "Статус",
+    "verified": "Верифицированный водитель",
+    "quickActions": "БЫСТРЫЕ ДЕЙСТВИЯ",
+    "logout": "Выйти",
+    "logoutConfirm": "Вы уверены, что хотите выйти?"
   },
   "settings": {
     "title": "Настройки",
