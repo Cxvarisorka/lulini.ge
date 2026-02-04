@@ -28,7 +28,7 @@ export function usePlacesAutocomplete(inputRef, options = {}) {
         input,
         sessionToken: sessionToken.current,
         types: options.types || ['geocode', 'establishment'],
-        componentRestrictions: options.componentRestrictions,
+        componentRestrictions: { country: 'ge' },
         ...options
       },
       (results, status) => {
