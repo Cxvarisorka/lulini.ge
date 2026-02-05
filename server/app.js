@@ -36,6 +36,7 @@ const allowedOrigins = [
     'http://localhost:5173',
     'https://gotours.ge',
     'https://www.gotours.ge',
+    'https://api.gotours.ge',
     'http://192.168.100.3:3000'
 ];
 

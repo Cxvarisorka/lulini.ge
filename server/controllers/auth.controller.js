@@ -188,10 +188,17 @@ const googleTokenAuth = catchAsync(async (req, res, next) => {
 
     const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
+    // Accept tokens from web, Android, and iOS Google OAuth clients
+    const validAudiences = [
+        process.env.GOOGLE_CLIENT_ID,
+        process.env.GOOGLE_ANDROID_CLIENT_ID,
+        process.env.GOOGLE_IOS_CLIENT_ID,
+    ].filter(Boolean);
+
     // Verify the ID token
     const ticket = await client.verifyIdToken({
         idToken,
-        audience: process.env.GOOGLE_CLIENT_ID,
+        audience: validAudiences,
     });
 
     const payload = ticket.getPayload();
