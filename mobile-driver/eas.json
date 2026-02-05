@@ -14,8 +14,7 @@
       "distribution": "internal",
       "env": {
         "EXPO_PUBLIC_API_URL": "https://api.gotours.ge/api",
-        "EXPO_PUBLIC_SOCKET_URL": "https://api.gotours.ge",
-        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "REMOVED_SECRET"
+        "EXPO_PUBLIC_SOCKET_URL": "https://api.gotours.ge"
       },
       "ios": {
         "resourceClass": "m-medium"
@@ -24,8 +23,7 @@
     "production": {
       "env": {
         "EXPO_PUBLIC_API_URL": "https://api.gotours.ge/api",
-        "EXPO_PUBLIC_SOCKET_URL": "https://api.gotours.ge",
-        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "REMOVED_SECRET"
+        "EXPO_PUBLIC_SOCKET_URL": "https://api.gotours.ge"
       },
       "ios": {
         "resourceClass": "m-medium"
