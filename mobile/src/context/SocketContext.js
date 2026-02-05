@@ -6,7 +6,7 @@ import { useAuth } from './AuthContext';
 const SocketContext = createContext();
 
 // Socket URL Configuration
-const API_URL = 'http://192.168.100.3:3000';
+const API_URL = process.env.EXPO_PUBLIC_SOCKET_URL || 'https://api.gotours.ge';
 
 export const SocketProvider = ({ children }) => {
   const [socket, setSocket] = useState(null);

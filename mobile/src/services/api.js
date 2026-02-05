@@ -2,13 +2,7 @@ import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
 
 // API URL Configuration
-// For production:
-// const API_URL = 'https://gotours.ge/api';
-
-// For local development:
-const API_URL = 'http://192.168.100.3:3000/api'; // Your local IP - physical device
-// const API_URL = 'http://10.0.2.2:3000/api'; // Android emulator
-// const API_URL = 'http://localhost:3000/api'; // iOS simulator
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://api.gotours.ge/api';
 
 const api = axios.create({
   baseURL: API_URL,
