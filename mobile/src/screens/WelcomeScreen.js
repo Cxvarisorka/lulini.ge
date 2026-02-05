@@ -114,6 +114,16 @@ export default function WelcomeScreen({ navigation }) {
             <Ionicons name="call-outline" size={22} color={colors.primaryForeground} />
             <Text style={styles.phoneButtonText}>{t('auth.continueWithPhone')}</Text>
           </TouchableOpacity>
+
+          {/* Email Sign-In */}
+          <TouchableOpacity
+            style={styles.emailLinkContainer}
+            onPress={() => navigation.navigate('Login')}
+            disabled={isLoading}
+          >
+            <Ionicons name="mail-outline" size={18} color={colors.primary} />
+            <Text style={styles.emailLinkText}>{t('auth.continueWithEmail')}</Text>
+          </TouchableOpacity>
         </View>
 
         <Text style={styles.termsText}>
@@ -226,6 +236,18 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     marginLeft: 12,
+  },
+  emailLinkContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 16,
+  },
+  emailLinkText: {
+    color: colors.primary,
+    fontSize: 14,
+    fontWeight: '600',
+    marginLeft: 6,
   },
   termsText: {
     marginTop: 24,
