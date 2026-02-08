@@ -38,8 +38,9 @@ export const SocketProvider = ({ children }) => {
           transports: ['websocket'],
           auth: { token },
           reconnection: true,
-          reconnectionAttempts: 5,
+          reconnectionAttempts: Infinity,
           reconnectionDelay: 1000,
+          reconnectionDelayMax: 10000,
         });
 
         socketInstance.on('connect', () => {

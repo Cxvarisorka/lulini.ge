@@ -24,6 +24,7 @@ export const SocketProvider = ({ children }) => {
   const [isConnected, setIsConnected] = useState(false);
   const [newRideRequest, setNewRideRequest] = useState(null);
   const socketRef = useRef(null);
+  const wasConnectedRef = useRef(false);
 
   // Set up notification channel for Android
   useEffect(() => {
@@ -67,21 +68,21 @@ export const SocketProvider = ({ children }) => {
         },
         transports: ['websocket'],
         reconnection: true,
-        reconnectionAttempts: 5,
+        reconnectionAttempts: Infinity,
         reconnectionDelay: 1000,
+        reconnectionDelayMax: 10000,
       });
 
       socketInstance.on('connect', () => {
         console.log('Socket connected:', socketInstance.id);
         setIsConnected(true);
 
-        // Join driver room
-        if (user?.id) {
-          socketInstance.emit('driver:join', user.id);
+        // On reconnect, fetch pending rides to recover any missed during disconnect
+        if (wasConnectedRef.current) {
+          console.log('Socket reconnected - fetching pending rides');
+          fetchPendingRides();
         }
-
-        // Don't fetch pending rides on connection
-        // Only fetch when driver explicitly goes online
+        wasConnectedRef.current = true;
       });
 
       socketInstance.on('disconnect', () => {
@@ -168,27 +169,25 @@ export const SocketProvider = ({ children }) => {
       socketRef.current = null;
       setSocket(null);
       setIsConnected(false);
+      wasConnectedRef.current = false;
     }
   };
 
   const fetchPendingRides = async () => {
     try {
-      console.log('Fetching pending rides...');
       const response = await rideAPI.getAvailableRides();
-      console.log('Pending rides response:', response.data);
 
       if (response.data.success && response.data.data.rides.length > 0) {
-        // Show the most recent pending ride
         const mostRecentRide = response.data.data.rides[0];
-        console.log('Found pending ride:', mostRecentRide);
-        setNewRideRequest(mostRecentRide);
-        showRideNotification(mostRecentRide);
-      } else {
-        console.log('No pending rides found');
+        // Only set if no ride is currently shown (don't overwrite active request)
+        setNewRideRequest((current) => {
+          if (current) return current;
+          showRideNotification(mostRecentRide);
+          return mostRecentRide;
+        });
       }
     } catch (error) {
-      console.log('Error fetching pending rides:', error);
-      console.error('Full error details:', error.response?.data || error.message);
+      console.log('Error fetching pending rides:', error.response?.data?.message || error.message);
     }
   };
 
