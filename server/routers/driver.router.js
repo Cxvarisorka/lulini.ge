@@ -12,13 +12,17 @@ const {
     getDriverStats,
     getDriverEarnings,
     getDriverReviews,
-    getAllDriverStatistics
+    getAllDriverStatistics,
+    getNearbyDrivers
 } = require('../controllers/driver.controller');
 
 const router = express.Router();
 
 // Protect all routes - require authentication
 router.use(protect);
+
+// Passenger route - get nearby online drivers for map display
+router.get('/nearby', getNearbyDrivers);
 
 // Driver routes (for logged in drivers)
 router.get('/profile', isDriver, getDriverProfile);

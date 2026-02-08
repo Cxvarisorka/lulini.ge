@@ -589,6 +589,51 @@ const getAllDriverStatistics = catchAsync(async (req, res, next) => {
     });
 });
 
+// @desc    Get nearby online drivers (for passengers to see on map)
+// @route   GET /api/drivers/nearby
+// @access  Private
+const getNearbyDrivers = catchAsync(async (req, res, next) => {
+    const { lat, lng, vehicleType } = req.query;
+
+    if (!lat || !lng) {
+        return next(new AppError('Latitude and longitude are required', 400));
+    }
+
+    const query = {
+        status: 'online',
+        isActive: true,
+        isApproved: true,
+        location: {
+            $near: {
+                $geometry: {
+                    type: 'Point',
+                    coordinates: [parseFloat(lng), parseFloat(lat)]
+                },
+                $maxDistance: 10000 // 10km radius
+            }
+        }
+    };
+
+    if (vehicleType) {
+        query['vehicle.type'] = vehicleType;
+    }
+
+    const drivers = await Driver.find(query).select('location').lean();
+
+    const locations = drivers
+        .filter(d => d.location && d.location.coordinates)
+        .map(d => ({
+            lat: d.location.coordinates[1],
+            lng: d.location.coordinates[0]
+        }));
+
+    res.json({
+        success: true,
+        count: locations.length,
+        data: { drivers: locations }
+    });
+});
+
 module.exports = {
     createDriver,
     getAllDrivers,
@@ -601,5 +646,6 @@ module.exports = {
     getDriverStats,
     getDriverEarnings,
     getDriverReviews,
-    getAllDriverStatistics
+    getAllDriverStatistics,
+    getNearbyDrivers
 };
