@@ -96,6 +96,53 @@ export async function getDirections(origin, destination) {
 }
 
 /**
+ * Get directions using OSRM (free, no API key needed)
+ * Used as fallback when Google Directions is unavailable
+ * @param {Object} origin - { latitude, longitude }
+ * @param {Object} destination - { latitude, longitude }
+ * @returns {Promise<Object|null>}
+ */
+export async function getDirectionsOSRM(origin, destination) {
+  const cacheKey = `osrm:${origin.latitude},${origin.longitude}-${destination.latitude},${destination.longitude}`;
+
+  if (directionsCache.has(cacheKey)) {
+    return directionsCache.get(cacheKey);
+  }
+
+  try {
+    const url = `https://router.project-osrm.org/route/v1/driving/${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}?overview=full&geometries=geojson`;
+
+    const response = await fetch(url);
+    const data = await response.json();
+
+    if (data.code !== 'Ok' || !data.routes || data.routes.length === 0) {
+      console.warn('OSRM error:', data.code);
+      return null;
+    }
+
+    const route = data.routes[0];
+    const polyline = route.geometry.coordinates.map(coord => [coord[1], coord[0]]); // [lng, lat] -> [lat, lng]
+
+    const result = {
+      distance: route.distance / 1000, // meters to km
+      duration: Math.round(route.duration / 60), // seconds to minutes
+      distanceText: `${(route.distance / 1000).toFixed(1)} km`,
+      durationText: `${Math.round(route.duration / 60)} min`,
+      polyline: polyline,
+      startAddress: '',
+      endAddress: '',
+      steps: [],
+    };
+
+    directionsCache.set(cacheKey, result);
+    return result;
+  } catch (error) {
+    console.error('Error fetching OSRM directions:', error);
+    return null;
+  }
+}
+
+/**
  * Search for places - combines multiple sources for best Georgia/Kutaisi coverage
  * Strategy: Run Google Geocoding + Mapbox in parallel, merge and deduplicate
  * @param {string} query - Search text
@@ -692,6 +739,7 @@ export default {
   getPlaceDetails,
   reverseGeocode,
   decodePolyline,
+  getDirectionsOSRM,
   clearDirectionsCache,
   clearSearchCache,
   clearAllCaches,
