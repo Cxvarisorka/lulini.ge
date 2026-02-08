@@ -109,6 +109,9 @@ export const taxiAPI = {
 
   reviewDriver: (id, rating, review) =>
     api.post(`/rides/${id}/review`, { rating, review }),
+
+  getNearbyDrivers: (lat, lng, vehicleType) =>
+    api.get('/drivers/nearby', { params: { lat, lng, vehicleType } }),
 };
 
 // Rental API

@@ -17,7 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import { taxiAPI } from '../services/api';
-import { getDirections, isGoogleMapsConfigured, reverseGeocode } from '../services/googleMaps';
+import { getDirections, getDirectionsOSRM, isGoogleMapsConfigured, reverseGeocode } from '../services/googleMaps';
 import { colors, shadows, radius } from '../theme/colors';
 import CancelRideModal from '../components/CancelRideModal';
 import RideReviewModal from '../components/RideReviewModal';
@@ -35,8 +35,8 @@ const DEFAULT_LOCATION = {
   longitude: 42.6946,
 };
 
-// Timeout duration for ride request (90 seconds = 1.5 minutes)
-const RIDE_REQUEST_TIMEOUT = 90000;
+// Timeout duration for ride request (30 seconds)
+const RIDE_REQUEST_TIMEOUT = 30000;
 
 // Booking flow steps
 const BOOKING_STEPS = {
@@ -78,7 +78,7 @@ export default function TaxiScreen({ navigation }) {
   const [showReviewModal, setShowReviewModal] = useState(false);
   const [completedRide, setCompletedRide] = useState(null);
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
-  const [timeoutTimer, setTimeoutTimer] = useState(null);
+  const timeoutTimerRef = useRef(null);
   const [progress, setProgress] = useState(0);
 
   // Driver tracking states
@@ -87,6 +87,14 @@ export default function TaxiScreen({ navigation }) {
   const [driverDistance, setDriverDistance] = useState(null);
   const [waitingTimeLeft, setWaitingTimeLeft] = useState(null);
   const [waitingFee, setWaitingFee] = useState(0);
+
+  // Refs for values used inside socket handlers to avoid re-registering listeners
+  const locationRef = useRef(null);
+  const currentRideRef = useRef(null);
+
+  // Saved destination data for restoring after searching state
+  const savedDestinationRef = useRef(null);
+  const savedDestinationCoordsRef = useRef(null);
 
   // Route polyline for directions
   const [routePolyline, setRoutePolyline] = useState(null);
@@ -271,7 +279,11 @@ export default function TaxiScreen({ navigation }) {
     return () => clearInterval(interval);
   }, [bookingStep, currentRide?.waitingExpiresAt, currentRide?.arrivalTime]);
 
-  // Socket event listeners
+  // Keep refs in sync with state so socket handlers always have fresh values
+  useEffect(() => { locationRef.current = location; }, [location]);
+  useEffect(() => { currentRideRef.current = currentRide; }, [currentRide]);
+
+  // Socket event listeners - only re-register when socket instance changes
   useEffect(() => {
     if (!socket) return;
 
@@ -281,9 +293,26 @@ export default function TaxiScreen({ navigation }) {
       setCurrentRide(ride);
       setBookingStep(BOOKING_STEPS.DRIVER_FOUND);
 
+      // Clear nearby driver markers and destination from map
+      if (webViewRef.current) {
+        webViewRef.current.injectJavaScript(`
+          clearNearbyDrivers();
+          clearDestinationMarker();
+          true;
+        `);
+      }
+
+      // Show driver-to-user route on map
       if (ride.driver?.location?.coordinates) {
         const [lng, lat] = ride.driver.location.coordinates;
         setDriverLocation({ latitude: lat, longitude: lng });
+
+        if (webViewRef.current) {
+          webViewRef.current.injectJavaScript(`
+            updateDriverMarker(${lat}, ${lng});
+            true;
+          `);
+        }
       }
 
       Alert.alert(
@@ -294,27 +323,28 @@ export default function TaxiScreen({ navigation }) {
     });
 
     socket.on('driver:locationUpdate', (data) => {
-      console.log('Driver location updated:', data);
-      if (data.rideId === currentRide?._id) {
-        const { latitude, longitude } = data.location;
-        setDriverLocation({ latitude, longitude });
+      const ride = currentRideRef.current;
+      const loc = locationRef.current;
+      if (data.rideId !== ride?._id) return;
 
-        if (webViewRef.current && location) {
-          webViewRef.current.injectJavaScript(`
-            updateDriverMarker(${latitude}, ${longitude});
-            true;
-          `);
+      const { latitude, longitude } = data.location;
+      setDriverLocation({ latitude, longitude });
 
+      if (webViewRef.current) {
+        webViewRef.current.injectJavaScript(`
+          updateDriverMarker(${latitude}, ${longitude});
+          true;
+        `);
+
+        if (loc) {
           const distance = calculateDistance(
             latitude,
             longitude,
-            location.latitude,
-            location.longitude
+            loc.latitude,
+            loc.longitude
           );
           setDriverDistance(distance);
-
-          const eta = Math.round((distance / 30) * 60);
-          setDriverETA(eta);
+          setDriverETA(Math.round((distance / 30) * 60));
         }
       }
     });
@@ -334,6 +364,19 @@ export default function TaxiScreen({ navigation }) {
       console.log('Ride started:', ride);
       setCurrentRide(ride);
       setBookingStep(BOOKING_STEPS.IN_PROGRESS);
+
+      // Switch map to show pickup-to-destination route
+      const savedCoords = savedDestinationCoordsRef.current;
+      const loc = locationRef.current;
+      if (savedCoords && loc && webViewRef.current) {
+        webViewRef.current.injectJavaScript(`
+          clearDriverMarker();
+          updateDestinationMarker(${savedCoords.latitude}, ${savedCoords.longitude});
+          fitBounds(${loc.latitude}, ${loc.longitude}, ${savedCoords.latitude}, ${savedCoords.longitude});
+          true;
+        `);
+      }
+
       Alert.alert(
         t('taxi.rideStarted'),
         t('taxi.enjoyYourRide'),
@@ -352,13 +395,17 @@ export default function TaxiScreen({ navigation }) {
     socket.on('ride:cancelled', (ride) => {
       console.log('Ride cancelled:', ride);
       resetBookingState();
-      Alert.alert(
-        t('taxi.rideCancelled'),
-        ride.cancelledBy === 'driver'
-          ? t('taxi.driverCancelledRide')
-          : t('taxi.rideCancelledMessage'),
-        [{ text: t('common.ok') }]
-      );
+      // Only alert if someone else cancelled (driver/admin).
+      // When the user cancels, handleConfirmCancel / handleRideTimeout already shows an alert.
+      if (ride.cancelledBy !== 'user') {
+        Alert.alert(
+          t('taxi.rideCancelled'),
+          ride.cancelledBy === 'driver'
+            ? t('taxi.driverCancelledRide')
+            : t('taxi.rideCancelledMessage'),
+          [{ text: t('common.ok') }]
+        );
+      }
     });
 
     socket.on('ride:expired', (data) => {
@@ -392,7 +439,7 @@ export default function TaxiScreen({ navigation }) {
       socket.off('ride:expired');
       socket.off('ride:waitingTimeout');
     };
-  }, [socket, navigation, t, currentRide?._id, location]);
+  }, [socket]);
 
   // Progress bar animation for searching
   useEffect(() => {
@@ -427,7 +474,19 @@ export default function TaxiScreen({ navigation }) {
     setDriverETA(null);
     setDriverDistance(null);
     setRoutePolyline(null);
+    savedDestinationRef.current = null;
+    savedDestinationCoordsRef.current = null;
     clearRideTimeout();
+
+    // Clear nearby drivers and destination from map
+    if (webViewRef.current) {
+      webViewRef.current.injectJavaScript(`
+        clearNearbyDrivers();
+        clearDestinationMarker();
+        clearDriverMarker();
+        true;
+      `);
+    }
   };
 
   const requestLocationPermission = async () => {
@@ -505,11 +564,14 @@ export default function TaxiScreen({ navigation }) {
     setIsLoadingDirections(true);
 
     try {
-      // Try to get real directions from Google
-      const directions = await getDirections(location, destCoords);
+      // Try Google Directions first, then OSRM as fallback
+      let directions = await getDirections(location, destCoords);
+      if (!directions) {
+        directions = await getDirectionsOSRM(location, destCoords);
+      }
 
-      if (directions) {
-        // Use real distance and duration from Google Directions
+      if (directions && directions.polyline && directions.polyline.length > 0) {
+        // Use real distance and duration from directions
         const vehicleType = VEHICLE_TYPES.find(v => v.id === selectedVehicle);
         const basePrice = 5 + (directions.distance * 1.5);
         setEstimatedPrice((basePrice * vehicleType.priceMultiplier).toFixed(2));
@@ -517,7 +579,7 @@ export default function TaxiScreen({ navigation }) {
         setRoutePolyline(directions.polyline);
 
         // Update map with actual route polyline
-        if (webViewRef.current && directions.polyline.length > 0) {
+        if (webViewRef.current) {
           const polylineJSON = JSON.stringify(directions.polyline);
           webViewRef.current.injectJavaScript(`
             updateRouteWithPolyline(${destCoords.latitude}, ${destCoords.longitude}, ${polylineJSON});
@@ -526,7 +588,7 @@ export default function TaxiScreen({ navigation }) {
           `);
         }
       } else {
-        // Fallback to straight line and estimated calculations
+        // Last resort fallback to straight line
         const distance = calculateDistance(
           location.latitude,
           location.longitude,
@@ -632,18 +694,19 @@ export default function TaxiScreen({ navigation }) {
   }, [location, destinationCoords]);
 
   const clearRideTimeout = () => {
-    if (timeoutTimer) {
-      clearTimeout(timeoutTimer);
-      setTimeoutTimer(null);
+    if (timeoutTimerRef.current) {
+      clearTimeout(timeoutTimerRef.current);
+      timeoutTimerRef.current = null;
     }
     setProgress(0);
   };
 
   const handleRideTimeout = async () => {
-    if (!currentRide || !currentRide._id) return;
+    const ride = currentRideRef.current;
+    if (!ride || !ride._id) return;
 
     try {
-      await taxiAPI.cancelRide(currentRide._id, 'waiting_time_too_long', 'No driver accepted within the time limit');
+      await taxiAPI.cancelRide(ride._id, 'waiting_time_too_long', 'No driver accepted within the time limit');
       resetBookingState();
       Alert.alert(
         t('taxi.noDriverFound'),
@@ -736,16 +799,41 @@ export default function TaxiScreen({ navigation }) {
         setBookingStep(BOOKING_STEPS.SEARCHING);
         setProgress(0);
 
-        const timeout = setTimeout(() => {
+        // Save destination data for restoring after driver is found
+        savedDestinationRef.current = destination;
+        savedDestinationCoordsRef.current = destinationCoords;
+
+        // Clear destination marker and route, center on user with nearby drivers
+        if (webViewRef.current && location) {
+          webViewRef.current.injectJavaScript(`
+            clearDestinationMarker();
+            map.setView([${location.latitude}, ${location.longitude}], 14);
+            true;
+          `);
+
+          // Fetch and show nearby online drivers on map
+          try {
+            const driversRes = await taxiAPI.getNearbyDrivers(
+              location.latitude,
+              location.longitude,
+              selectedVehicle
+            );
+            const nearbyDrivers = driversRes.data?.data?.drivers || [];
+            if (nearbyDrivers.length > 0) {
+              const driversJSON = JSON.stringify(nearbyDrivers);
+              webViewRef.current.injectJavaScript(`
+                showNearbyDrivers(${driversJSON});
+                true;
+              `);
+            }
+          } catch (err) {
+            console.log('Error fetching nearby drivers:', err);
+          }
+        }
+
+        timeoutTimerRef.current = setTimeout(() => {
           handleRideTimeout();
         }, RIDE_REQUEST_TIMEOUT);
-        setTimeoutTimer(timeout);
-
-        Alert.alert(
-          t('taxi.rideRequested'),
-          t('taxi.searchingForDriver'),
-          [{ text: t('common.ok') }]
-        );
       }
     } catch (error) {
       console.log('Error requesting ride:', error);
@@ -1043,6 +1131,18 @@ export default function TaxiScreen({ navigation }) {
             font-size: 14px;
             animation: pulse-dark 2s ease-out infinite;
           }
+          .nearby-driver-marker {
+            background: #374151;
+            border: 2px solid white;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+          }
         </style>
       </head>
       <body>
@@ -1093,15 +1193,36 @@ export default function TaxiScreen({ navigation }) {
               destinationMarker = L.marker([lat, lng], {icon: destinationIcon}).addTo(map);
             }
 
-            if (routeLine) {
-              map.removeLayer(routeLine);
-            }
+            // Fetch real route from OSRM
             var pickup = pickupMarker.getLatLng();
-            routeLine = L.polyline([[pickup.lat, pickup.lng], [lat, lng]], {
-              color: '#171717',
-              weight: 4,
-              opacity: 0.8
-            }).addTo(map);
+            var url = 'https://router.project-osrm.org/route/v1/driving/' + pickup.lng + ',' + pickup.lat + ';' + lng + ',' + lat + '?overview=full&geometries=geojson';
+            fetch(url)
+              .then(function(res) { return res.json(); })
+              .then(function(data) {
+                if (data.code === 'Ok' && data.routes && data.routes.length > 0) {
+                  var coords = data.routes[0].geometry.coordinates.map(function(c) {
+                    return [c[1], c[0]];
+                  });
+                  if (routeLine) { map.removeLayer(routeLine); }
+                  routeLine = L.polyline(coords, {
+                    color: '#171717',
+                    weight: 4,
+                    opacity: 0.8
+                  }).addTo(map);
+                } else {
+                  // Fallback straight line
+                  if (routeLine) { map.removeLayer(routeLine); }
+                  routeLine = L.polyline([[pickup.lat, pickup.lng], [lat, lng]], {
+                    color: '#171717', weight: 4, opacity: 0.8
+                  }).addTo(map);
+                }
+              })
+              .catch(function() {
+                if (routeLine) { map.removeLayer(routeLine); }
+                routeLine = L.polyline([[pickup.lat, pickup.lng], [lat, lng]], {
+                  color: '#171717', weight: 4, opacity: 0.8
+                }).addTo(map);
+              });
           }
 
           function updateRouteWithPolyline(destLat, destLng, polylineCoords) {
@@ -1157,6 +1278,9 @@ export default function TaxiScreen({ navigation }) {
             map.fitBounds(bounds, {padding: [50, 50]});
           }
 
+          var driverRouteCache = null;
+          var lastDriverRouteFetch = 0;
+
           function updateDriverMarker(lat, lng) {
             if (driverMarker) {
               driverMarker.setLatLng([lat, lng]);
@@ -1164,19 +1288,49 @@ export default function TaxiScreen({ navigation }) {
               driverMarker = L.marker([lat, lng], {icon: driverIcon}).addTo(map);
             }
 
-            if (routeLine) {
-              map.removeLayer(routeLine);
-            }
             var pickup = pickupMarker.getLatLng();
-            routeLine = L.polyline([[lat, lng], [pickup.lat, pickup.lng]], {
-              color: '#171717',
-              weight: 4,
-              opacity: 0.8,
-              dashArray: '10, 10'
-            }).addTo(map);
-
             var bounds = L.latLngBounds([[lat, lng], [pickup.lat, pickup.lng]]);
             map.fitBounds(bounds, {padding: [80, 80]});
+
+            // Fetch real route from OSRM (throttle to once per 5 seconds)
+            var now = Date.now();
+            if (now - lastDriverRouteFetch > 5000) {
+              lastDriverRouteFetch = now;
+              fetchDriverRoute(lat, lng, pickup.lat, pickup.lng);
+            }
+          }
+
+          function fetchDriverRoute(dLat, dLng, pLat, pLng) {
+            var url = 'https://router.project-osrm.org/route/v1/driving/' + dLng + ',' + dLat + ';' + pLng + ',' + pLat + '?overview=full&geometries=geojson';
+            fetch(url)
+              .then(function(res) { return res.json(); })
+              .then(function(data) {
+                if (data.code === 'Ok' && data.routes && data.routes.length > 0) {
+                  var coords = data.routes[0].geometry.coordinates.map(function(c) {
+                    return [c[1], c[0]];
+                  });
+                  if (routeLine) {
+                    map.removeLayer(routeLine);
+                  }
+                  routeLine = L.polyline(coords, {
+                    color: '#171717',
+                    weight: 4,
+                    opacity: 0.8
+                  }).addTo(map);
+                }
+              })
+              .catch(function() {
+                // Fallback to straight line if OSRM fails
+                if (routeLine) {
+                  map.removeLayer(routeLine);
+                }
+                routeLine = L.polyline([[dLat, dLng], [pLat, pLng]], {
+                  color: '#171717',
+                  weight: 4,
+                  opacity: 0.8,
+                  dashArray: '10, 10'
+                }).addTo(map);
+              });
           }
 
           function clearDriverMarker() {
@@ -1184,6 +1338,31 @@ export default function TaxiScreen({ navigation }) {
               map.removeLayer(driverMarker);
               driverMarker = null;
             }
+          }
+
+          // Nearby drivers markers for searching state
+          var nearbyDriverMarkers = [];
+
+          var nearbyDriverIcon = L.divIcon({
+            className: 'nearby-driver-marker',
+            html: '🚗',
+            iconSize: [20, 20],
+            iconAnchor: [10, 10]
+          });
+
+          function showNearbyDrivers(drivers) {
+            clearNearbyDrivers();
+            drivers.forEach(function(d) {
+              var marker = L.marker([d.lat, d.lng], {icon: nearbyDriverIcon}).addTo(map);
+              nearbyDriverMarkers.push(marker);
+            });
+          }
+
+          function clearNearbyDrivers() {
+            nearbyDriverMarkers.forEach(function(m) {
+              map.removeLayer(m);
+            });
+            nearbyDriverMarkers = [];
           }
 
           // Map click mode for pin selection
