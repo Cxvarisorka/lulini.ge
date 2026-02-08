@@ -9,6 +9,3 @@
 # Misc
 nul
 *.log
-
-# EAS config (contains secrets)
-**/eas.json
