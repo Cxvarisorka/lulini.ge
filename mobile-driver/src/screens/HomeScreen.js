@@ -75,7 +75,7 @@ export default function HomeScreen({ navigation }) {
   };
 
   const handleAcceptRide = async () => {
-    if (!newRideRequest) return;
+    if (!newRideRequest || accepting) return;
 
     setAccepting(true);
     try {
@@ -88,7 +88,12 @@ export default function HomeScreen({ navigation }) {
       }
     } catch (error) {
       console.log('Error accepting ride:', error);
-      Alert.alert(t('common.error'), t('errors.somethingWentWrong'));
+      const serverMessage = error.response?.data?.message;
+      clearRideRequest();
+      Alert.alert(
+        t('common.error'),
+        serverMessage || t('errors.somethingWentWrong')
+      );
     } finally {
       setAccepting(false);
     }
