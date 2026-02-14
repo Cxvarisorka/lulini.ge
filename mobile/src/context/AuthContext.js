@@ -79,7 +79,6 @@ export const AuthProvider = ({ children }) => {
         }
       }
     } catch (err) {
-      console.log('Auth check failed:', err.message);
       await SecureStore.deleteItemAsync('token');
     } finally {
       setLoading(false);
@@ -235,31 +234,27 @@ export const AuthProvider = ({ children }) => {
   const sendPhoneOtp = async (phone) => {
     try {
       setError(null);
-      setLoading(true);
 
       const response = await authAPI.sendPhoneOtp(phone);
 
       if (response.data.success) {
         setPendingPhoneVerification(phone);
-        return { success: true };
+        return { success: true, isRegistered: response.data.isRegistered };
       }
       return { success: false, error: 'Failed to send OTP' };
     } catch (err) {
       const message = err.response?.data?.message || 'Failed to send OTP';
       setError(message);
       return { success: false, error: message };
-    } finally {
-      setLoading(false);
     }
   };
 
   // Phone OTP - Verify OTP
-  const verifyPhoneOtp = async (phone, code, fullName = null, email = null) => {
+  const verifyPhoneOtp = async (phone, code, firstName = null, lastName = null) => {
     try {
       setError(null);
-      setLoading(true);
 
-      const response = await authAPI.verifyPhoneOtp(phone, code, fullName, email);
+      const response = await authAPI.verifyPhoneOtp(phone, code, firstName, lastName);
 
       if (response.data.success) {
         // Check if this requires registration (new user without fullName)
@@ -286,8 +281,6 @@ export const AuthProvider = ({ children }) => {
       const message = err.response?.data?.message || 'Verification failed';
       setError(message);
       return { success: false, error: message };
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -300,7 +293,7 @@ export const AuthProvider = ({ children }) => {
         setUser({ ...user, hasCompletedOnboarding: true });
       }
     } catch (err) {
-      console.log('Complete onboarding failed:', err.message);
+      // Complete onboarding failed
     }
   };
 
@@ -308,7 +301,7 @@ export const AuthProvider = ({ children }) => {
     try {
       await authAPI.logout();
     } catch (err) {
-      console.log('Logout API error:', err.message);
+      // Logout API error
     } finally {
       await SecureStore.deleteItemAsync('token');
       setUser(null);
@@ -322,7 +315,7 @@ export const AuthProvider = ({ children }) => {
         setUser(response.data.data.user);
       }
     } catch (err) {
-      console.log('Refresh user failed:', err.message);
+      // Refresh user failed
     }
   };
 

@@ -2,8 +2,8 @@ import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput, ActivityIndicator, Keyboard } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
-import { colors, radius, shadows } from '../../theme/colors';
-import { searchPlaces, getPlaceDetails, isGoogleMapsConfigured, isMapboxConfigured } from '../../services/googleMaps';
+import { colors, radius, useTypography } from '../../theme/colors';
+import { searchPlaces } from '../../services/googleMaps';
 
 export default function LocationSearchSheet({
   pickup,
@@ -15,11 +15,12 @@ export default function LocationSearchSheet({
   userLocation,
   onSelectOnMap, // New prop for map pin selection
 }) {
+  const typography = useTypography();
+  const styles = React.useMemo(() => createStyles(typography), [typography]);
   const { t } = useTranslation();
   const [searchQuery, setSearchQuery] = useState(destination || '');
   const [suggestions, setSuggestions] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [selectedPlace, setSelectedPlace] = useState(null);
   const scrollViewRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -36,12 +37,11 @@ export default function LocationSearchSheet({
         const results = await searchPlaces(searchQuery, userLocation);
         setSuggestions(results);
       } catch (error) {
-        console.log('Search error:', error);
         setSuggestions([]);
       } finally {
         setIsSearching(false);
       }
-    }, 300);
+    }, 500); // 500ms debounce to respect Nominatim rate limits
 
     return () => clearTimeout(timer);
   }, [searchQuery, userLocation]);
@@ -49,46 +49,18 @@ export default function LocationSearchSheet({
   // Handle text change
   const handleTextChange = useCallback((text) => {
     setSearchQuery(text);
-    setSelectedPlace(null);
   }, []);
 
   // Handle place selection from suggestions
-  const handlePlaceSelect = useCallback(async (place) => {
+  const handlePlaceSelect = useCallback((place) => {
     Keyboard.dismiss();
-    setIsSearching(true);
-    try {
-      // Mapbox already returns coordinates, no need for extra API call
-      if (place.coordinates) {
-        setSearchQuery(place.description);
-        setSelectedPlace({
-          ...place,
-          coordinates: place.coordinates,
-        });
-        setSuggestions([]);
-        // Pass the place with coordinates to parent
-        onDestinationSelect(place.description, place.coordinates);
-      } else {
-        // Fallback for Google results - need to get details
-        const details = await getPlaceDetails(place.placeId);
-        if (details) {
-          setSearchQuery(place.description);
-          setSelectedPlace(details);
-          setSuggestions([]);
-          onDestinationSelect(place.description, details.coordinates);
-        } else {
-          // Fallback if place details fail
-          setSearchQuery(place.description);
-          setSuggestions([]);
-          onDestinationChange(place.description);
-        }
-      }
-    } catch (error) {
-      console.log('Error getting place details:', error);
-      setSearchQuery(place.description);
-      setSuggestions([]);
+    setSearchQuery(place.description);
+    setSuggestions([]);
+    // Nominatim always returns coordinates
+    if (place.coordinates) {
+      onDestinationSelect(place.description, place.coordinates);
+    } else {
       onDestinationChange(place.description);
-    } finally {
-      setIsSearching(false);
     }
   }, [onDestinationSelect, onDestinationChange]);
 
@@ -105,9 +77,6 @@ export default function LocationSearchSheet({
     { id: 1, name: t('taxi.home'), address: 'Tsereteli Street, Kutaisi', icon: 'home-outline' },
     { id: 2, name: t('taxi.work'), address: 'Kutaisi Central Park, Kutaisi', icon: 'briefcase-outline' },
   ];
-
-  const googleConfigured = isGoogleMapsConfigured();
-  const mapboxConfigured = isMapboxConfigured();
 
   // Scroll to top when input is focused to ensure visibility
   const handleInputFocus = useCallback(() => {
@@ -209,16 +178,6 @@ export default function LocationSearchSheet({
         </View>
       )}
 
-      {/* Google API Notice (if not configured) */}
-      {!googleConfigured && searchQuery.length > 0 && (
-        <View style={styles.apiNotice}>
-          <Ionicons name="information-circle-outline" size={16} color={colors.mutedForeground} />
-          <Text style={styles.apiNoticeText}>
-            {t('taxi.googleApiNotConfigured') || 'Google Places API not configured. Using manual search.'}
-          </Text>
-        </View>
-      )}
-
       {/* Recent Places Section (show when no suggestions) */}
       {suggestions.length === 0 && (
         <>
@@ -265,11 +224,11 @@ export default function LocationSearchSheet({
         </>
       )}
 
-      {/* Powered by attribution */}
+      {/* OpenStreetMap attribution (required by Nominatim usage policy) */}
       {suggestions.length > 0 && (
         <View style={styles.poweredBy}>
           <Text style={styles.poweredByText}>
-            {mapboxConfigured ? 'Powered by Mapbox' : (googleConfigured ? 'Powered by Google' : '')}
+            {'Powered by OpenStreetMap'}
           </Text>
         </View>
       )}
@@ -277,7 +236,7 @@ export default function LocationSearchSheet({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   container: {
     flex: 1,
   },
@@ -321,7 +280,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   locationLabel: {
-    fontSize: 12,
+    ...typography.captionSmall,
     color: colors.mutedForeground,
     marginBottom: 4,
   },
@@ -331,9 +290,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   locationText: {
-    fontSize: 15,
+    ...typography.bodyMedium,
     color: colors.foreground,
-    fontWeight: '500',
     flex: 1,
     marginRight: 8,
   },
@@ -350,9 +308,8 @@ const styles = StyleSheet.create({
   },
   destinationInput: {
     flex: 1,
-    fontSize: 15,
+    ...typography.bodyMedium,
     color: colors.foreground,
-    fontWeight: '500',
     padding: 0,
     marginTop: 4,
   },
@@ -370,9 +327,8 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   searchButtonText: {
+    ...typography.button,
     color: colors.background,
-    fontSize: 14,
-    fontWeight: '600',
     marginLeft: 6,
   },
   suggestionsContainer: {
@@ -389,7 +345,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -398,28 +354,14 @@ const styles = StyleSheet.create({
     marginLeft: 12,
   },
   suggestionMain: {
-    fontSize: 15,
+    ...typography.bodySmall,
     fontWeight: '500',
     color: colors.foreground,
   },
   suggestionSecondary: {
-    fontSize: 13,
+    ...typography.caption,
     color: colors.mutedForeground,
     marginTop: 2,
-  },
-  apiNotice: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    backgroundColor: colors.secondary,
-    borderRadius: radius.md,
-    marginBottom: 16,
-  },
-  apiNoticeText: {
-    flex: 1,
-    fontSize: 12,
-    color: colors.mutedForeground,
-    marginLeft: 8,
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -428,7 +370,7 @@ const styles = StyleSheet.create({
     paddingTop: 8,
   },
   sectionTitle: {
-    fontSize: 14,
+    ...typography.caption,
     fontWeight: '600',
     color: colors.mutedForeground,
     marginLeft: 8,
@@ -444,7 +386,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -453,12 +395,12 @@ const styles = StyleSheet.create({
     marginLeft: 12,
   },
   placeName: {
-    fontSize: 15,
+    ...typography.bodySmall,
     fontWeight: '500',
     color: colors.foreground,
   },
   placeAddress: {
-    fontSize: 13,
+    ...typography.caption,
     color: colors.mutedForeground,
     marginTop: 2,
   },
@@ -469,12 +411,14 @@ const styles = StyleSheet.create({
     padding: 16,
     marginTop: 20,
     marginBottom: 20,
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.background,
     borderRadius: radius.lg,
+    borderWidth: 2,
+    borderColor: colors.primary,
   },
   mapSelectText: {
     marginLeft: 8,
-    fontSize: 15,
+    ...typography.bodySmall,
     fontWeight: '500',
     color: colors.primary,
   },
@@ -483,7 +427,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   poweredByText: {
-    fontSize: 11,
+    ...typography.captionSmall,
     color: colors.mutedForeground,
   },
 });

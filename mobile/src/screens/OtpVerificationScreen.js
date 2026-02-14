@@ -4,28 +4,35 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  Pressable,
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
   ActivityIndicator,
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../context/AuthContext';
-import { colors, radius } from '../theme/colors';
+import { colors, radius, useTypography } from '../theme/colors';
 
 const OTP_LENGTH = 6;
 const RESEND_COOLDOWN = 60;
 
 export default function OtpVerificationScreen({ navigation, route }) {
+  const typography = useTypography();
+  const styles = React.useMemo(() => createStyles(typography), [typography]);
   const { t } = useTranslation();
-  const { phone } = route.params;
-  const [otp, setOtp] = useState(['', '', '', '', '', '']);
+  const insets = useSafeAreaInsets();
+  const { phone, isRegistered } = route.params;
+  const [otpValue, setOtpValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [resendTimer, setResendTimer] = useState(RESEND_COOLDOWN);
-  const inputRefs = useRef([]);
+  const inputRef = useRef(null);
+  const isSubmittingRef = useRef(false);
   const { verifyPhoneOtp, sendPhoneOtp } = useAuth();
 
   // Countdown timer for resend
@@ -36,56 +43,46 @@ export default function OtpVerificationScreen({ navigation, route }) {
     }
   }, [resendTimer]);
 
-  const handleOtpChange = (value, index) => {
+  // Auto-focus the hidden input on mount
+  useEffect(() => {
+    setTimeout(() => inputRef.current?.focus(), 300);
+  }, []);
+
+  const handleOtpChange = (text) => {
     // Only allow digits
-    if (value && !/^\d$/.test(value)) return;
-
-    const newOtp = [...otp];
-    newOtp[index] = value;
-    setOtp(newOtp);
-
-    // Auto-focus next input
-    if (value && index < OTP_LENGTH - 1) {
-      inputRefs.current[index + 1]?.focus();
-    }
+    const cleaned = text.replace(/\D/g, '').slice(0, OTP_LENGTH);
+    setOtpValue(cleaned);
 
     // Auto-submit when complete
-    if (value && index === OTP_LENGTH - 1) {
-      const code = newOtp.join('');
-      if (code.length === OTP_LENGTH) {
-        handleVerify(code);
-      }
-    }
-  };
-
-  const handleKeyPress = (e, index) => {
-    if (e.nativeEvent.key === 'Backspace' && !otp[index] && index > 0) {
-      inputRefs.current[index - 1]?.focus();
+    if (cleaned.length === OTP_LENGTH) {
+      handleVerify(cleaned);
     }
   };
 
   const handleVerify = async (code = null) => {
-    const otpCode = code || otp.join('');
+    const otpCode = code || otpValue;
     if (otpCode.length !== OTP_LENGTH) {
       Alert.alert(t('errors.error'), t('auth.enterFullCode'));
       return;
     }
 
+    // Prevent double submission (SMS autofill can trigger multiple times)
+    if (isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
+
     setIsLoading(true);
     const result = await verifyPhoneOtp(phone, otpCode);
     setIsLoading(false);
+    isSubmittingRef.current = false;
 
     if (result.success) {
       if (result.requiresRegistration) {
-        // New user - navigate to registration screen
         navigation.replace('PhoneRegistration', { phone });
       }
-      // If not requiresRegistration, user is logged in and navigation will be handled by AppNavigator
     } else {
       Alert.alert(t('errors.error'), result.error);
-      // Clear OTP on error
-      setOtp(['', '', '', '', '', '']);
-      inputRefs.current[0]?.focus();
+      setOtpValue('');
+      inputRef.current?.focus();
     }
   };
 
@@ -98,21 +95,25 @@ export default function OtpVerificationScreen({ navigation, route }) {
 
     if (result.success) {
       setResendTimer(RESEND_COOLDOWN);
-      setOtp(['', '', '', '', '', '']);
+      setOtpValue('');
       Alert.alert(t('common.success'), t('auth.codeSent'));
     } else {
       Alert.alert(t('errors.error'), result.error);
     }
   };
 
-  const otpString = otp.join('');
+  const digits = otpValue.split('');
 
   return (
     <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <View style={styles.content}>
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingTop: insets.top + 24 }]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         <TouchableOpacity
           style={styles.backButton}
           onPress={() => navigation.goBack()}
@@ -128,35 +129,49 @@ export default function OtpVerificationScreen({ navigation, route }) {
           <Text style={styles.subtitle}>
             {t('auth.otpSentTo')} <Text style={styles.phoneText}>{phone}</Text>
           </Text>
+          {!isRegistered && (
+            <Text style={styles.newUserHint}>{t('auth.newUserHint')}</Text>
+          )}
         </View>
 
-        <View style={styles.otpContainer}>
-          {otp.map((digit, index) => (
-            <TextInput
+        {/* Hidden input that captures all typing + SMS autofill */}
+        <TextInput
+          ref={inputRef}
+          style={styles.hiddenInput}
+          value={otpValue}
+          onChangeText={handleOtpChange}
+          keyboardType="number-pad"
+          maxLength={OTP_LENGTH}
+          autoComplete="sms-otp"
+          textContentType="oneTimeCode"
+          caretHidden
+        />
+
+        {/* Visual OTP boxes - tap to focus hidden input */}
+        <Pressable style={styles.otpContainer} onPress={() => inputRef.current?.focus()}>
+          {Array.from({ length: OTP_LENGTH }).map((_, index) => (
+            <View
               key={index}
-              ref={(ref) => (inputRefs.current[index] = ref)}
               style={[
-                styles.otpInput,
-                digit && styles.otpInputFilled,
+                styles.otpBox,
+                digits[index] && styles.otpBoxFilled,
+                index === digits.length && styles.otpBoxActive,
               ]}
-              value={digit}
-              onChangeText={(value) => handleOtpChange(value, index)}
-              onKeyPress={(e) => handleKeyPress(e, index)}
-              keyboardType="number-pad"
-              maxLength={1}
-              selectTextOnFocus
-              autoFocus={index === 0}
-            />
+            >
+              <Text style={styles.otpDigit}>
+                {digits[index] || ''}
+              </Text>
+            </View>
           ))}
-        </View>
+        </Pressable>
 
         <TouchableOpacity
           style={[
             styles.verifyButton,
-            (otpString.length !== OTP_LENGTH || isLoading) && styles.buttonDisabled,
+            (otpValue.length !== OTP_LENGTH || isLoading) && styles.buttonDisabled,
           ]}
           onPress={() => handleVerify()}
-          disabled={otpString.length !== OTP_LENGTH || isLoading}
+          disabled={otpValue.length !== OTP_LENGTH || isLoading}
         >
           {isLoading ? (
             <ActivityIndicator color={colors.primaryForeground} />
@@ -176,28 +191,31 @@ export default function OtpVerificationScreen({ navigation, route }) {
             </TouchableOpacity>
           )}
         </View>
-      </View>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
   },
   content: {
-    flex: 1,
-    padding: 24,
+    flexGrow: 1,
+    paddingHorizontal: 24,
+    paddingBottom: 24,
   },
   backButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 24,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   header: {
     alignItems: 'center',
@@ -207,48 +225,70 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   title: {
-    fontSize: 24,
+    ...typography.display,
     fontWeight: '700',
     color: colors.foreground,
     marginBottom: 8,
     textAlign: 'center',
   },
   subtitle: {
-    fontSize: 15,
+    ...typography.h3,
+    fontWeight: '400',
     color: colors.mutedForeground,
     textAlign: 'center',
-    lineHeight: 22,
   },
   phoneText: {
     fontWeight: '600',
     color: colors.foreground,
   },
+  newUserHint: {
+    ...typography.bodySmall,
+    color: colors.primary,
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  hiddenInput: {
+    position: 'absolute',
+    opacity: 0,
+    height: 0,
+    width: 0,
+  },
   otpContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: 12,
+    gap: 10,
     marginBottom: 32,
   },
-  otpInput: {
+  otpBox: {
     width: 48,
     height: 56,
     borderRadius: radius.md,
     borderWidth: 2,
     borderColor: colors.border,
-    backgroundColor: colors.secondary,
-    fontSize: 24,
-    fontWeight: '700',
-    textAlign: 'center',
-    color: colors.foreground,
+    backgroundColor: colors.background,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  otpInputFilled: {
+  otpBoxFilled: {
     borderColor: colors.primary,
+    backgroundColor: colors.background,
+  },
+  otpBoxActive: {
+    borderColor: colors.primary,
+    borderWidth: 2,
+  },
+  otpDigit: {
+    fontSize: Math.round(typography.display.fontSize * 1.1),
+    fontWeight: '700',
+    color: colors.foreground,
   },
   verifyButton: {
     backgroundColor: colors.primary,
@@ -261,7 +301,7 @@ const styles = StyleSheet.create({
   },
   verifyButtonText: {
     color: colors.primaryForeground,
-    fontSize: 16,
+    ...typography.button,
     fontWeight: '600',
   },
   resendContainer: {
@@ -269,11 +309,11 @@ const styles = StyleSheet.create({
     marginTop: 24,
   },
   resendTimerText: {
-    fontSize: 14,
+    ...typography.body,
     color: colors.mutedForeground,
   },
   resendText: {
-    fontSize: 14,
+    ...typography.body,
     color: colors.primary,
     fontWeight: '600',
   },

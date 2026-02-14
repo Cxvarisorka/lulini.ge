@@ -74,8 +74,8 @@ export const authAPI = {
   sendPhoneOtp: (phone) =>
     api.post('/auth/phone/send-otp', { phone }),
 
-  verifyPhoneOtp: (phone, code, fullName, email) =>
-    api.post('/auth/phone/verify-otp', { phone, code, fullName, email }),
+  verifyPhoneOtp: (phone, code, firstName, lastName) =>
+    api.post('/auth/phone/verify-otp', { phone, code, firstName, lastName }),
 
   // Phone update (authenticated)
   sendPhoneUpdateOtp: (phone) =>
@@ -87,6 +87,10 @@ export const authAPI = {
   // Apple Sign-In
   appleAuth: (identityToken, fullName, email) =>
     api.post('/auth/apple/token', { identityToken, fullName, email }),
+
+  // Update email (authenticated)
+  updateEmail: (email) =>
+    api.patch('/auth/email', { email }),
 
   // Complete onboarding
   completeOnboarding: () =>

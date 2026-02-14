@@ -13,36 +13,31 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../context/AuthContext';
-import { colors, radius } from '../theme/colors';
+import { colors, radius, useTypography } from '../theme/colors';
 
 export default function PhoneAuthScreen({ navigation }) {
-  const { t } = useTranslation();
-  const [phone, setPhone] = useState('');
+const typography = useTypography();
+  const styles = React.useMemo(() => createStyles(typography), [typography]);
+    const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
+  const COUNTRY_CODE = '+995';
+  const [localPhone, setLocalPhone] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const { sendPhoneOtp } = useAuth();
 
-  const formatPhoneNumber = (text) => {
-    // Remove non-digit characters except +
-    let cleaned = text.replace(/[^\d+]/g, '');
-
-    // Ensure + is only at the beginning
-    if (cleaned.includes('+') && !cleaned.startsWith('+')) {
-      cleaned = cleaned.replace(/\+/g, '');
-    }
-
-    return cleaned;
-  };
-
   const handlePhoneChange = (text) => {
-    setPhone(formatPhoneNumber(text));
+    // Only allow digits, max 9 for Georgian numbers
+    const cleaned = text.replace(/\D/g, '');
+    setLocalPhone(cleaned.slice(0, 9));
   };
+
+  const getFullPhone = () => `${COUNTRY_CODE}${localPhone}`;
 
   const validatePhone = () => {
-    // Basic phone validation - at least 7 digits
-    const digitsOnly = phone.replace(/\D/g, '');
-    return digitsOnly.length >= 7;
+    return localPhone.length === 9;
   };
 
   const handleSendOtp = async () => {
@@ -51,12 +46,13 @@ export default function PhoneAuthScreen({ navigation }) {
       return;
     }
 
+    const fullPhone = getFullPhone();
     setIsLoading(true);
-    const result = await sendPhoneOtp(phone);
+    const result = await sendPhoneOtp(fullPhone);
     setIsLoading(false);
 
     if (result.success) {
-      navigation.navigate('OtpVerification', { phone });
+      navigation.navigate('OtpVerification', { phone: fullPhone, isRegistered: result.isRegistered });
     } else {
       Alert.alert(t('errors.error'), result.error);
     }
@@ -68,7 +64,7 @@ export default function PhoneAuthScreen({ navigation }) {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 24 }]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
@@ -91,19 +87,22 @@ export default function PhoneAuthScreen({ navigation }) {
           <View style={styles.inputContainer}>
             <Text style={styles.label}>{t('auth.phoneNumber')}</Text>
             <View style={styles.inputWrapper}>
-              <Ionicons name="call-outline" size={20} color={colors.mutedForeground} />
+              <View style={styles.countryCode}>
+                <Text style={styles.countryFlag}>🇬🇪</Text>
+                <Text style={styles.countryCodeText}>{COUNTRY_CODE}</Text>
+              </View>
+              <View style={styles.divider} />
               <TextInput
                 style={styles.input}
-                placeholder={t('auth.phonePlaceholder')}
+                placeholder="5XX XXX XXX"
                 placeholderTextColor={colors.mutedForeground}
-                value={phone}
+                value={localPhone}
                 onChangeText={handlePhoneChange}
                 keyboardType="phone-pad"
                 autoFocus
-                maxLength={20}
+                maxLength={9}
               />
             </View>
-            <Text style={styles.hint}>{t('auth.phoneHint')}</Text>
           </View>
 
           <TouchableOpacity
@@ -123,23 +122,26 @@ export default function PhoneAuthScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
   },
   scrollContent: {
     flexGrow: 1,
-    padding: 24,
+    paddingHorizontal: 24,
+    paddingBottom: 24,
   },
   backButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 24,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   header: {
     alignItems: 'center',
@@ -149,20 +151,22 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   title: {
-    fontSize: 24,
+    ...typography.display,
     fontWeight: '700',
     color: colors.foreground,
     marginBottom: 8,
     textAlign: 'center',
   },
   subtitle: {
-    fontSize: 15,
+    ...typography.h3,
     color: colors.mutedForeground,
     textAlign: 'center',
     lineHeight: 22,
@@ -174,7 +178,7 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   label: {
-    fontSize: 14,
+    ...typography.body,
     fontWeight: '600',
     color: colors.foreground,
     marginBottom: 8,
@@ -182,24 +186,38 @@ const styles = StyleSheet.create({
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.background,
     borderRadius: radius.lg,
     paddingHorizontal: 16,
     borderWidth: 1,
     borderColor: colors.border,
   },
+  countryCode: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 16,
+  },
+  countryFlag: {
+    fontSize: 20,
+  },
+  countryCodeText: {
+    ...typography.h2,
+    color: colors.foreground,
+    fontWeight: '600',
+  },
+  divider: {
+    width: 1,
+    height: 24,
+    backgroundColor: colors.border,
+    marginHorizontal: 12,
+  },
   input: {
     flex: 1,
     paddingVertical: 16,
-    paddingHorizontal: 12,
-    fontSize: 18,
+    ...typography.h1,
     color: colors.foreground,
     letterSpacing: 1,
-  },
-  hint: {
-    marginTop: 8,
-    fontSize: 12,
-    color: colors.mutedForeground,
   },
   button: {
     backgroundColor: colors.primary,
@@ -212,7 +230,7 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     color: colors.primaryForeground,
-    fontSize: 16,
+    ...typography.button,
     fontWeight: '600',
   },
 });

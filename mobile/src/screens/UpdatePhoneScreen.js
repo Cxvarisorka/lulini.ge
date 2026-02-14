@@ -17,7 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../context/AuthContext';
 import { authAPI } from '../services/api';
-import { colors, radius, shadows } from '../theme/colors';
+import { colors, radius, shadows, useTypography } from '../theme/colors';
 
 const OTP_LENGTH = 6;
 const RESEND_COOLDOWN = 60;
@@ -28,12 +28,15 @@ const STEPS = {
 };
 
 export default function UpdatePhoneScreen({ navigation }) {
-  const { t } = useTranslation();
+const typography = useTypography();
+  const styles = React.useMemo(() => createStyles(typography), [typography]);
+    const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { user, refreshUser } = useAuth();
 
+  const COUNTRY_CODE = '+995';
   const [step, setStep] = useState(STEPS.PHONE_INPUT);
-  const [phone, setPhone] = useState('');
+  const [localPhone, setLocalPhone] = useState('');
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [isLoading, setIsLoading] = useState(false);
   const [resendTimer, setResendTimer] = useState(0);
@@ -47,25 +50,26 @@ export default function UpdatePhoneScreen({ navigation }) {
     }
   }, [resendTimer]);
 
-  const validatePhone = (phoneNumber) => {
-    const phoneRegex = /^\+?[\d\s()-]{7,20}$/;
-    return phoneRegex.test(phoneNumber);
+  const getFullPhone = () => `${COUNTRY_CODE}${localPhone}`;
+
+  const handlePhoneChange = (text) => {
+    const cleaned = text.replace(/\D/g, '');
+    setLocalPhone(cleaned.slice(0, 9));
+  };
+
+  const validatePhone = () => {
+    return localPhone.length === 9;
   };
 
   const handleSendOtp = async () => {
-    if (!phone.trim()) {
-      Alert.alert(t('errors.error'), t('auth.enterPhone'));
-      return;
-    }
-
-    if (!validatePhone(phone)) {
+    if (!validatePhone()) {
       Alert.alert(t('errors.error'), t('auth.invalidPhone'));
       return;
     }
 
     setIsLoading(true);
     try {
-      const response = await authAPI.sendPhoneUpdateOtp(phone);
+      const response = await authAPI.sendPhoneUpdateOtp(getFullPhone());
       if (response.data.success) {
         setStep(STEPS.OTP_VERIFICATION);
         setResendTimer(RESEND_COOLDOWN);
@@ -116,7 +120,7 @@ export default function UpdatePhoneScreen({ navigation }) {
 
     setIsLoading(true);
     try {
-      const response = await authAPI.verifyPhoneUpdateOtp(phone, otpCode);
+      const response = await authAPI.verifyPhoneUpdateOtp(getFullPhone(), otpCode);
       if (response.data.success) {
         // Refresh user data to get updated phone
         await refreshUser();
@@ -142,7 +146,7 @@ export default function UpdatePhoneScreen({ navigation }) {
 
     setIsLoading(true);
     try {
-      const response = await authAPI.sendPhoneUpdateOtp(phone);
+      const response = await authAPI.sendPhoneUpdateOtp(getFullPhone());
       if (response.data.success) {
         setResendTimer(RESEND_COOLDOWN);
         setOtp(['', '', '', '', '', '']);
@@ -187,24 +191,28 @@ export default function UpdatePhoneScreen({ navigation }) {
       <View style={styles.inputContainer}>
         <Text style={styles.inputLabel}>{t('profile.newPhone')}</Text>
         <View style={styles.phoneInputContainer}>
-          <Ionicons name="call-outline" size={20} color={colors.mutedForeground} />
+          <View style={styles.countryCode}>
+            <Text style={styles.countryFlag}>🇬🇪</Text>
+            <Text style={styles.countryCodeText}>{COUNTRY_CODE}</Text>
+          </View>
+          <View style={styles.phoneDivider} />
           <TextInput
             style={styles.phoneInput}
-            value={phone}
-            onChangeText={setPhone}
-            placeholder={t('auth.phonePlaceholder')}
+            value={localPhone}
+            onChangeText={handlePhoneChange}
+            placeholder="5XX XXX XXX"
             placeholderTextColor={colors.mutedForeground}
             keyboardType="phone-pad"
             autoFocus
+            maxLength={9}
           />
         </View>
-        <Text style={styles.inputHint}>{t('auth.phoneHint')}</Text>
       </View>
 
       <TouchableOpacity
-        style={[styles.submitButton, (!phone.trim() || isLoading) && styles.buttonDisabled]}
+        style={[styles.submitButton, (!validatePhone() || isLoading) && styles.buttonDisabled]}
         onPress={handleSendOtp}
-        disabled={!phone.trim() || isLoading}
+        disabled={!validatePhone() || isLoading}
       >
         {isLoading ? (
           <ActivityIndicator color={colors.primaryForeground} />
@@ -223,7 +231,7 @@ export default function UpdatePhoneScreen({ navigation }) {
         </View>
         <Text style={styles.title}>{t('auth.verifyPhone')}</Text>
         <Text style={styles.subtitle}>
-          {t('auth.otpSentTo')} <Text style={styles.phoneText}>{phone}</Text>
+          {t('auth.otpSentTo')} <Text style={styles.phoneText}>{getFullPhone()}</Text>
         </Text>
       </View>
 
@@ -304,7 +312,7 @@ export default function UpdatePhoneScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
@@ -320,10 +328,12 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 24,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   header: {
     alignItems: 'center',
@@ -333,49 +343,52 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   title: {
-    fontSize: 24,
+    ...typography.display,
     fontWeight: '700',
     color: colors.foreground,
     marginBottom: 8,
     textAlign: 'center',
   },
   subtitle: {
-    fontSize: 15,
+    ...typography.h3,
+    fontWeight: '400',
     color: colors.mutedForeground,
     textAlign: 'center',
-    lineHeight: 22,
   },
   phoneText: {
     fontWeight: '600',
     color: colors.foreground,
   },
   currentPhoneContainer: {
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.background,
     borderRadius: radius.lg,
     padding: 16,
     marginBottom: 24,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   currentPhoneLabel: {
-    fontSize: 12,
+    ...typography.caption,
     color: colors.mutedForeground,
     marginBottom: 4,
   },
   currentPhoneValue: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...typography.h2,
     color: colors.foreground,
   },
   inputContainer: {
     marginBottom: 24,
   },
   inputLabel: {
-    fontSize: 14,
+    ...typography.bodyMedium,
     fontWeight: '600',
     color: colors.foreground,
     marginBottom: 8,
@@ -383,23 +396,37 @@ const styles = StyleSheet.create({
   phoneInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.background,
     borderRadius: radius.lg,
     paddingHorizontal: 16,
     borderWidth: 1,
     borderColor: colors.border,
   },
+  countryCode: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 16,
+  },
+  countryFlag: {
+    fontSize: 20,
+  },
+  countryCodeText: {
+    ...typography.h2,
+    color: colors.foreground,
+    fontWeight: '600',
+  },
+  phoneDivider: {
+    width: 1,
+    height: 24,
+    backgroundColor: colors.border,
+    marginHorizontal: 12,
+  },
   phoneInput: {
     flex: 1,
     paddingVertical: 16,
-    paddingHorizontal: 12,
-    fontSize: 16,
+    ...typography.h2,
     color: colors.foreground,
-  },
-  inputHint: {
-    fontSize: 12,
-    color: colors.mutedForeground,
-    marginTop: 8,
   },
   otpContainer: {
     flexDirection: 'row',
@@ -413,8 +440,9 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     borderWidth: 2,
     borderColor: colors.border,
-    backgroundColor: colors.secondary,
-    fontSize: 24,
+    backgroundColor: colors.background,
+    ...typography.display,
+    fontSize: typography.display.fontSize * 1.2,
     fontWeight: '700',
     textAlign: 'center',
     color: colors.foreground,
@@ -433,28 +461,27 @@ const styles = StyleSheet.create({
   },
   submitButtonText: {
     color: colors.primaryForeground,
-    fontSize: 16,
-    fontWeight: '600',
+    ...typography.h2,
   },
   resendContainer: {
     alignItems: 'center',
     marginTop: 24,
   },
   resendTimerText: {
-    fontSize: 14,
+    ...typography.body,
     color: colors.mutedForeground,
   },
   resendText: {
-    fontSize: 14,
-    color: colors.primary,
+    ...typography.bodyMedium,
     fontWeight: '600',
+    color: colors.primary,
   },
   changeNumberButton: {
     alignItems: 'center',
     marginTop: 16,
   },
   changeNumberText: {
-    fontSize: 14,
+    ...typography.body,
     color: colors.mutedForeground,
   },
 });

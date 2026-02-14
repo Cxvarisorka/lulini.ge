@@ -12,10 +12,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 
 import { useAuth } from '../context/AuthContext';
-import { colors, radius } from '../theme/colors';
+import { colors, radius, useTypography } from '../theme/colors';
 
 export default function WelcomeScreen({ navigation }) {
-  const { t } = useTranslation();
+const typography = useTypography();
+  const styles = React.useMemo(() => createStyles(typography), [typography]);
+    const { t } = useTranslation();
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [isAppleLoading, setIsAppleLoading] = useState(false);
   const { loginWithGoogle, loginWithApple, googleAuthReady } = useAuth();
@@ -114,16 +116,6 @@ export default function WelcomeScreen({ navigation }) {
             <Ionicons name="call-outline" size={22} color={colors.primaryForeground} />
             <Text style={styles.phoneButtonText}>{t('auth.continueWithPhone')}</Text>
           </TouchableOpacity>
-
-          {/* Email Sign-In */}
-          <TouchableOpacity
-            style={styles.emailLinkContainer}
-            onPress={() => navigation.navigate('Login')}
-            disabled={isLoading}
-          >
-            <Ionicons name="mail-outline" size={18} color={colors.primary} />
-            <Text style={styles.emailLinkText}>{t('auth.continueWithEmail')}</Text>
-          </TouchableOpacity>
         </View>
 
         <Text style={styles.termsText}>
@@ -134,7 +126,7 @@ export default function WelcomeScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
@@ -158,7 +150,8 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   brandName: {
-    fontSize: 22,
+    ...typography.h1,
+    fontSize: typography.h1.fontSize * 1.2,
     fontWeight: '700',
     color: colors.foreground,
   },
@@ -167,14 +160,16 @@ const styles = StyleSheet.create({
     marginBottom: 40,
   },
   title: {
-    fontSize: 28,
+    ...typography.display,
+    fontSize: typography.display.fontSize * 1.4,
     fontWeight: '700',
     color: colors.foreground,
     marginBottom: 8,
     textAlign: 'center',
   },
   subtitle: {
-    fontSize: 15,
+    ...typography.h3,
+    fontWeight: '400',
     color: colors.mutedForeground,
     textAlign: 'center',
   },
@@ -197,9 +192,8 @@ const styles = StyleSheet.create({
     borderColor: colors.foreground,
   },
   socialButtonText: {
+    ...typography.h2,
     color: colors.foreground,
-    fontSize: 16,
-    fontWeight: '600',
     marginLeft: 12,
   },
   appleButtonText: {
@@ -219,9 +213,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.border,
   },
   dividerText: {
+    ...typography.body,
     marginHorizontal: 16,
     color: colors.mutedForeground,
-    fontSize: 14,
   },
   phoneButton: {
     flexDirection: 'row',
@@ -232,26 +226,13 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   phoneButtonText: {
+    ...typography.h2,
     color: colors.primaryForeground,
-    fontSize: 16,
-    fontWeight: '600',
     marginLeft: 12,
   },
-  emailLinkContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 16,
-  },
-  emailLinkText: {
-    color: colors.primary,
-    fontSize: 14,
-    fontWeight: '600',
-    marginLeft: 6,
-  },
   termsText: {
+    ...typography.caption,
     marginTop: 24,
-    fontSize: 12,
     color: colors.mutedForeground,
     textAlign: 'center',
     lineHeight: 18,

@@ -13,43 +13,34 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../context/AuthContext';
-import { colors, radius } from '../theme/colors';
+import { colors, radius, useTypography } from '../theme/colors';
 
 export default function PhoneRegistrationScreen({ navigation, route }) {
+  const typography = useTypography();
+  const styles = React.useMemo(() => createStyles(typography), [typography]);
   const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
   const { phone } = route.params;
-  const [fullName, setFullName] = useState('');
-  const [email, setEmail] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const { verifyPhoneOtp } = useAuth();
 
   const validateForm = () => {
-    return fullName.trim().length >= 2;
-  };
-
-  const validateEmail = (emailValue) => {
-    if (!emailValue) return true; // Email is optional
-    const emailRegex = /^\S+@\S+\.\S+$/;
-    return emailRegex.test(emailValue);
+    return firstName.trim().length >= 2 && lastName.trim().length >= 2;
   };
 
   const handleSubmit = async () => {
     if (!validateForm()) {
-      Alert.alert(t('errors.error'), t('auth.fullNameRequired'));
-      return;
-    }
-
-    if (email && !validateEmail(email)) {
-      Alert.alert(t('errors.error'), t('auth.invalidEmail'));
+      Alert.alert(t('errors.error'), t('auth.nameRequired'));
       return;
     }
 
     setIsLoading(true);
-    // We need to re-verify with fullName to complete registration
-    // The backend will see this is a new user registration now
-    const result = await verifyPhoneOtp(phone, null, fullName.trim(), email.trim() || null);
+    const result = await verifyPhoneOtp(phone, null, firstName.trim(), lastName.trim());
     setIsLoading(false);
 
     if (!result.success) {
@@ -64,10 +55,17 @@ export default function PhoneRegistrationScreen({ navigation, route }) {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 24 }]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
+        >
+          <Ionicons name="arrow-back" size={24} color={colors.foreground} />
+        </TouchableOpacity>
+
         <View style={styles.header}>
           <View style={styles.iconContainer}>
             <Ionicons name="person-add-outline" size={32} color={colors.primary} />
@@ -78,15 +76,15 @@ export default function PhoneRegistrationScreen({ navigation, route }) {
 
         <View style={styles.form}>
           <View style={styles.inputContainer}>
-            <Text style={styles.label}>{t('auth.fullName')} *</Text>
+            <Text style={styles.label}>{t('auth.firstName')} *</Text>
             <View style={styles.inputWrapper}>
               <Ionicons name="person-outline" size={20} color={colors.mutedForeground} />
               <TextInput
                 style={styles.input}
-                placeholder={t('auth.fullNamePlaceholder')}
+                placeholder={t('auth.firstNamePlaceholder')}
                 placeholderTextColor={colors.mutedForeground}
-                value={fullName}
-                onChangeText={setFullName}
+                value={firstName}
+                onChangeText={setFirstName}
                 autoCapitalize="words"
                 autoFocus
               />
@@ -94,18 +92,16 @@ export default function PhoneRegistrationScreen({ navigation, route }) {
           </View>
 
           <View style={styles.inputContainer}>
-            <Text style={styles.label}>{t('auth.emailOptional')}</Text>
+            <Text style={styles.label}>{t('auth.lastName')} *</Text>
             <View style={styles.inputWrapper}>
-              <Ionicons name="mail-outline" size={20} color={colors.mutedForeground} />
+              <Ionicons name="person-outline" size={20} color={colors.mutedForeground} />
               <TextInput
                 style={styles.input}
-                placeholder={t('auth.emailPlaceholder')}
+                placeholder={t('auth.lastNamePlaceholder')}
                 placeholderTextColor={colors.mutedForeground}
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoCorrect={false}
+                value={lastName}
+                onChangeText={setLastName}
+                autoCapitalize="words"
               />
             </View>
           </View>
@@ -137,15 +133,26 @@ export default function PhoneRegistrationScreen({ navigation, route }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
   },
   scrollContent: {
     flexGrow: 1,
-    padding: 24,
+    paddingHorizontal: 24,
+    paddingBottom: 24,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.background,
     justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   header: {
     alignItems: 'center',
@@ -155,23 +162,25 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   title: {
-    fontSize: 24,
+    ...typography.display,
     fontWeight: '700',
     color: colors.foreground,
     marginBottom: 8,
     textAlign: 'center',
   },
   subtitle: {
-    fontSize: 15,
+    ...typography.h3,
+    fontWeight: '400',
     color: colors.mutedForeground,
     textAlign: 'center',
-    lineHeight: 22,
   },
   form: {
     width: '100%',
@@ -180,7 +189,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   label: {
-    fontSize: 14,
+    ...typography.bodyMedium,
     fontWeight: '600',
     color: colors.foreground,
     marginBottom: 8,
@@ -188,7 +197,7 @@ const styles = StyleSheet.create({
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.background,
     borderRadius: radius.lg,
     paddingHorizontal: 16,
     borderWidth: 1,
@@ -198,23 +207,24 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 16,
     paddingHorizontal: 12,
-    fontSize: 16,
+    ...typography.h2,
     color: colors.foreground,
   },
   phoneInfo: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.background,
     borderRadius: radius.md,
     padding: 12,
     marginBottom: 24,
     gap: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   phoneInfoText: {
-    fontSize: 14,
+    ...typography.bodyMedium,
     color: colors.foreground,
-    fontWeight: '500',
   },
   button: {
     backgroundColor: colors.primary,
@@ -227,14 +237,12 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     color: colors.primaryForeground,
-    fontSize: 16,
-    fontWeight: '600',
+    ...typography.h2,
   },
   termsText: {
     marginTop: 16,
-    fontSize: 12,
+    ...typography.caption,
     color: colors.mutedForeground,
     textAlign: 'center',
-    lineHeight: 18,
   },
 });

@@ -6,8 +6,12 @@ const MAPBOX_ACCESS_TOKEN = Constants.expoConfig?.extra?.mapboxAccessToken || ''
 /**
  * Maps Services for React Native (Expo Go compatible)
  * Optimized for Georgia/Kutaisi address search
- * Combines Google Geocoding + Mapbox for best coverage
+ * Uses OSM Nominatim for address autocomplete (free, no API key)
  */
+
+// Nominatim rate limiting - max 1 request per second per usage policy
+let lastNominatimRequest = 0;
+const NOMINATIM_MIN_INTERVAL = 1000; // 1 second
 
 // Cache for directions and search results
 const directionsCache = new Map();
@@ -34,6 +38,163 @@ const KUTAISI_CONFIG = {
 };
 
 /**
+ * Search for places using OSM Nominatim (free, no API key needed)
+ * Optimized for Georgia/Kutaisi address search with Georgian language support
+ * @param {string} query - Search text
+ * @param {Object} location - Optional bias location { latitude, longitude }
+ * @returns {Promise<Array>} - Array of place suggestions
+ */
+export async function searchPlacesNominatim(query, location = null) {
+  if (!query || query.length < 2) {
+    return [];
+  }
+
+  // Rate limiting - wait if needed to respect 1 req/sec policy
+  const now = Date.now();
+  const timeSinceLastRequest = now - lastNominatimRequest;
+  if (timeSinceLastRequest < NOMINATIM_MIN_INTERVAL) {
+    await new Promise(resolve => setTimeout(resolve, NOMINATIM_MIN_INTERVAL - timeSinceLastRequest));
+  }
+  lastNominatimRequest = Date.now();
+
+  try {
+    // viewbox format: <x1>,<y1>,<x2>,<y2> (lon1,lat1,lon2,lat2)
+    const viewbox = `${KUTAISI_CONFIG.viewport.southwest.lng},${KUTAISI_CONFIG.viewport.southwest.lat},${KUTAISI_CONFIG.viewport.northeast.lng},${KUTAISI_CONFIG.viewport.northeast.lat}`;
+
+    const params = new URLSearchParams({
+      q: query,
+      format: 'jsonv2',
+      addressdetails: '1',
+      countrycodes: 'ge',
+      viewbox: viewbox,
+      bounded: '0', // prefer viewbox results but don't exclude others
+      limit: '8',
+      dedupe: '1',
+      'accept-language': 'ka,en',
+    });
+
+    const url = `https://nominatim.openstreetmap.org/search?${params.toString()}`;
+
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'LuliniApp/1.0',
+      },
+    });
+
+    const data = await response.json();
+
+    if (!data || data.length === 0) {
+      return [];
+    }
+
+    return data.map(item => {
+      const addr = item.address || {};
+
+      // Build main text - prefer street + house number
+      let mainText = '';
+      if (addr.road) {
+        mainText = addr.house_number ? `${addr.road} ${addr.house_number}` : addr.road;
+      } else if (item.name && item.name !== item.display_name) {
+        mainText = item.name;
+      } else {
+        mainText = item.display_name.split(',')[0].trim();
+      }
+
+      // Build secondary text from address components
+      const secondaryParts = [
+        addr.suburb || addr.neighbourhood || addr.district,
+        addr.city || addr.town || addr.village,
+        addr.state,
+      ].filter(Boolean);
+      const secondaryText = secondaryParts.length > 0
+        ? secondaryParts.join(', ')
+        : item.display_name.split(',').slice(1, 3).join(',').trim();
+
+      return {
+        placeId: `nominatim:${item.place_id}`,
+        description: item.display_name,
+        mainText: mainText,
+        secondaryText: secondaryText,
+        coordinates: {
+          latitude: parseFloat(item.lat),
+          longitude: parseFloat(item.lon),
+        },
+        houseNumber: addr.house_number || '',
+        street: addr.road || '',
+        city: addr.city || addr.town || addr.village || '',
+        district: addr.suburb || addr.neighbourhood || '',
+        placeType: item.type,
+        category: item.category,
+        importance: item.importance,
+      };
+    });
+  } catch (error) {
+    return [];
+  }
+}
+
+/**
+ * Reverse geocode using OSM Nominatim (free, no API key needed)
+ * @param {number} latitude
+ * @param {number} longitude
+ * @returns {Promise<Object|null>} - Address details
+ */
+export async function reverseGeocodeNominatim(latitude, longitude) {
+  // Rate limiting
+  const now = Date.now();
+  const timeSinceLastRequest = now - lastNominatimRequest;
+  if (timeSinceLastRequest < NOMINATIM_MIN_INTERVAL) {
+    await new Promise(resolve => setTimeout(resolve, NOMINATIM_MIN_INTERVAL - timeSinceLastRequest));
+  }
+  lastNominatimRequest = Date.now();
+
+  try {
+    const params = new URLSearchParams({
+      lat: latitude.toString(),
+      lon: longitude.toString(),
+      format: 'jsonv2',
+      addressdetails: '1',
+      zoom: '18',
+      'accept-language': 'ka,en',
+    });
+
+    const url = `https://nominatim.openstreetmap.org/reverse?${params.toString()}`;
+
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'LuliniApp/1.0',
+      },
+    });
+
+    const data = await response.json();
+
+    if (data.error) {
+      return null;
+    }
+
+    const addr = data.address || {};
+    const street = addr.road || '';
+    const houseNumber = addr.house_number || '';
+    const city = addr.city || addr.town || addr.village || '';
+    const district = addr.suburb || addr.neighbourhood || '';
+
+    return {
+      address: data.display_name,
+      street: street,
+      houseNumber: houseNumber,
+      district: district,
+      city: city,
+      mainText: houseNumber ? `${street} ${houseNumber}` : (street || data.display_name.split(',')[0].trim()),
+      secondaryText: [district, city].filter(Boolean).join(', '),
+      coordinates: { latitude, longitude },
+      placeType: data.type,
+    };
+  } catch (error) {
+    return null;
+  }
+}
+
+/**
  * Get directions between two points using Google Directions API
  * @param {Object} origin - { latitude, longitude }
  * @param {Object} destination - { latitude, longitude }
@@ -41,7 +202,6 @@ const KUTAISI_CONFIG = {
  */
 export async function getDirections(origin, destination) {
   if (!GOOGLE_MAPS_API_KEY) {
-    console.warn('Google Maps API key not configured');
     return null;
   }
 
@@ -62,7 +222,6 @@ export async function getDirections(origin, destination) {
     const data = await response.json();
 
     if (data.status !== 'OK') {
-      console.warn('Directions API error:', data.status, data.error_message);
       return null;
     }
 
@@ -90,7 +249,6 @@ export async function getDirections(origin, destination) {
 
     return result;
   } catch (error) {
-    console.error('Error fetching directions:', error);
     return null;
   }
 }
@@ -116,7 +274,6 @@ export async function getDirectionsOSRM(origin, destination) {
     const data = await response.json();
 
     if (data.code !== 'Ok' || !data.routes || data.routes.length === 0) {
-      console.warn('OSRM error:', data.code);
       return null;
     }
 
@@ -137,14 +294,13 @@ export async function getDirectionsOSRM(origin, destination) {
     directionsCache.set(cacheKey, result);
     return result;
   } catch (error) {
-    console.error('Error fetching OSRM directions:', error);
     return null;
   }
 }
 
 /**
- * Search for places - combines multiple sources for best Georgia/Kutaisi coverage
- * Strategy: Run Google Geocoding + Mapbox in parallel, merge and deduplicate
+ * Search for places using OSM Nominatim as primary provider
+ * Free, no API key needed, good coverage for Georgia/Kutaisi
  * @param {string} query - Search text
  * @param {Object} location - Optional bias location { latitude, longitude }
  * @returns {Promise<Array>} - Array of place predictions
@@ -161,68 +317,13 @@ export async function searchPlaces(query, location = null) {
     return cached.results;
   }
 
-  // Run both services in parallel for speed
-  const [googleResults, mapboxResults] = await Promise.all([
-    searchPlacesGoogle(query, location),
-    MAPBOX_ACCESS_TOKEN ? searchPlacesMapbox(query, location) : Promise.resolve([]),
-  ]);
-
-  // Combine and deduplicate results
-  const combined = combineSearchResults(googleResults, mapboxResults);
+  // Use Nominatim as primary search provider
+  const results = await searchPlacesNominatim(query, location);
 
   // Cache the results
-  searchCache.set(cacheKey, { results: combined, timestamp: Date.now() });
+  searchCache.set(cacheKey, { results, timestamp: Date.now() });
 
-  return combined;
-}
-
-/**
- * Combine and deduplicate results from multiple sources
- * Prioritizes results with coordinates and higher relevance
- */
-function combineSearchResults(googleResults, mapboxResults) {
-  const seen = new Set();
-  const combined = [];
-
-  // Helper to create a normalized key for deduplication
-  const normalizeKey = (text) => {
-    return text
-      .toLowerCase()
-      .replace(/[,.\-–]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .substring(0, 50);
-  };
-
-  // Add Mapbox results first (they have coordinates)
-  for (const result of mapboxResults) {
-    const key = normalizeKey(result.mainText);
-    if (!seen.has(key)) {
-      seen.add(key);
-      combined.push({ ...result, source: 'mapbox' });
-    }
-  }
-
-  // Add Google results that aren't duplicates
-  for (const result of googleResults) {
-    const key = normalizeKey(result.mainText);
-    if (!seen.has(key)) {
-      seen.add(key);
-      combined.push({ ...result, source: 'google' });
-    }
-  }
-
-  // Sort: prioritize results with coordinates, then by relevance
-  combined.sort((a, b) => {
-    // Results with coordinates first
-    if (a.coordinates && !b.coordinates) return -1;
-    if (!a.coordinates && b.coordinates) return 1;
-    // Then by relevance if available
-    if (a.relevance && b.relevance) return b.relevance - a.relevance;
-    return 0;
-  });
-
-  return combined.slice(0, 8); // Return top 8 results
+  return results;
 }
 
 /**
@@ -321,7 +422,6 @@ export async function searchPlacesMapbox(query, location = null) {
       };
     });
   } catch (error) {
-    console.error('Error searching Mapbox:', error);
     return [];
   }
 }
@@ -364,7 +464,6 @@ export async function searchPlacesGoogle(query, location = null) {
     const data = await response.json();
 
     if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') {
-      console.warn('Geocoding API error:', data.status, data.error_message);
       // Fallback to Places Autocomplete
       return searchPlacesAutocomplete(query, location);
     }
@@ -424,7 +523,6 @@ export async function searchPlacesGoogle(query, location = null) {
       };
     });
   } catch (error) {
-    console.error('Error searching Google:', error);
     return [];
   }
 }
@@ -467,7 +565,6 @@ async function searchPlacesAutocomplete(query, location = null) {
       coordinates: null, // Need getPlaceDetails for coordinates
     }));
   } catch (error) {
-    console.error('Error in Places Autocomplete:', error);
     return [];
   }
 }
@@ -500,7 +597,6 @@ export async function getPlaceDetails(placeId, existingCoords = null) {
     const data = await response.json();
 
     if (data.status !== 'OK') {
-      console.warn('Place Details API error:', data.status, data.error_message);
       return null;
     }
 
@@ -514,20 +610,23 @@ export async function getPlaceDetails(placeId, existingCoords = null) {
       },
     };
   } catch (error) {
-    console.error('Error fetching place details:', error);
     return null;
   }
 }
 
 /**
  * Reverse geocode coordinates to get address
- * Uses Mapbox first, then Google as fallback
+ * Uses Nominatim first (free), then Mapbox/Google as fallback
  * @param {number} latitude
  * @param {number} longitude
  * @returns {Promise<Object>} - Address details
  */
 export async function reverseGeocode(latitude, longitude) {
-  // Try Mapbox first
+  // Try Nominatim first (free, no API key needed)
+  const nominatimResult = await reverseGeocodeNominatim(latitude, longitude);
+  if (nominatimResult) return nominatimResult;
+
+  // Fallback to Mapbox
   if (MAPBOX_ACCESS_TOKEN) {
     const result = await reverseGeocodeMapbox(latitude, longitude);
     if (result) return result;
@@ -597,7 +696,6 @@ async function reverseGeocodeMapbox(latitude, longitude) {
       placeType: feature.place_type?.[0],
     };
   } catch (error) {
-    console.error('Error reverse geocoding with Mapbox:', error);
     return null;
   }
 }
@@ -645,7 +743,6 @@ async function reverseGeocodeGoogle(latitude, longitude) {
       coordinates: { latitude, longitude },
     };
   } catch (error) {
-    console.error('Error reverse geocoding with Google:', error);
     return null;
   }
 }
@@ -734,10 +831,12 @@ export function isGoogleMapsConfigured() {
 export default {
   getDirections,
   searchPlaces,
+  searchPlacesNominatim,
   searchPlacesMapbox,
   searchPlacesGoogle,
   getPlaceDetails,
   reverseGeocode,
+  reverseGeocodeNominatim,
   decodePolyline,
   getDirectionsOSRM,
   clearDirectionsCache,
