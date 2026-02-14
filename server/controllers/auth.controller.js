@@ -4,7 +4,7 @@ const { generateToken } = require('../utils/jwt.utils');
 const AppError = require('../utils/AppError');
 const catchAsync = require('../utils/catchAsync');
 const { OAuth2Client } = require('google-auth-library');
-const { generateOTP, sendOTP } = require('../services/sms.service');
+const { generateOTP, sendVerification, checkVerification } = require('../services/sms.service');
 const appleSignin = require('apple-signin-auth');
 
 // Cookie options
@@ -245,79 +245,123 @@ const sendPhoneOtp = catchAsync(async (req, res, next) => {
         return next(new AppError('Phone number is required', 400));
     }
 
-    // Validate phone format
+    // Validate phone format (E.164)
     const phoneRegex = /^\+?[\d\s()-]{7,20}$/;
     if (!phoneRegex.test(phone)) {
         return next(new AppError('Please provide a valid phone number', 400));
     }
 
+    // Check if user already exists with this phone
+    const existingUser = await User.findOne({ phone });
+
     // Delete any existing OTP for this phone
     await OTP.deleteMany({ phone });
 
-    // Generate and save OTP
-    const code = generateOTP();
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+    // Send verification via Twilio Verify (or dev fallback)
+    const result = await sendVerification(phone);
 
-    await OTP.create({
-        phone,
-        code,
-        expiresAt
-    });
-
-    // Send OTP via SMS
-    await sendOTP(phone, code);
+    // In dev mode (Twilio not configured), save OTP locally
+    if (result.devCode) {
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+        await OTP.create({ phone, code: result.devCode, expiresAt });
+    }
 
     res.status(200).json({
         success: true,
-        message: 'OTP sent successfully'
+        message: 'OTP sent successfully',
+        isRegistered: !!existingUser
     });
 });
 
 // @desc    Verify OTP and login/register user
 // @route   POST /api/auth/phone/verify-otp
 const verifyPhoneOtp = catchAsync(async (req, res, next) => {
-    const { phone, code, fullName, email } = req.body;
+    const { phone, code, firstName, lastName } = req.body;
 
-    if (!phone || !code) {
-        return next(new AppError('Phone number and OTP code are required', 400));
+    if (!phone) {
+        return next(new AppError('Phone number is required', 400));
     }
 
-    // Find the OTP record
-    const otpRecord = await OTP.findOne({ phone });
+    // Registration completion flow (phone already verified, no code needed)
+    if (!code && firstName) {
+        const verifiedRecord = await OTP.findOne({ phone, verified: true });
+        if (!verifiedRecord) {
+            return next(new AppError('Phone not verified. Please verify your phone first', 400));
+        }
+        await OTP.deleteOne({ _id: verifiedRecord._id });
 
-    if (!otpRecord) {
-        return next(new AppError('OTP not found. Please request a new code', 400));
+        const user = await User.create({
+            firstName,
+            lastName,
+            phone,
+            provider: 'phone',
+            isPhoneVerified: true,
+            isVerified: true
+        });
+        return sendTokenResponse(user, 201, res, 'Registration successful', true);
     }
 
-    // Check if OTP is expired
-    if (otpRecord.expiresAt < new Date()) {
+    if (!code) {
+        return next(new AppError('OTP code is required', 400));
+    }
+
+    // Try Twilio Verify first (returns null if not configured)
+    console.log('verifyPhoneOtp: checking code for phone:', phone, 'code length:', code.length);
+    let isValid = await checkVerification(phone, code);
+
+    // Handle Twilio error responses
+    if (isValid && typeof isValid === 'object' && isValid.error) {
+        if (isValid.error === 'expired') {
+            return next(new AppError('OTP has expired. Please request a new code', 400));
+        }
+        if (isValid.error === 'max_attempts') {
+            return next(new AppError('Too many failed attempts. Please request a new code', 400));
+        }
+        return next(new AppError('Verification failed. Please request a new code', 400));
+    }
+
+    if (isValid === null) {
+        // Dev mode - check local OTP DB
+        const otpRecord = await OTP.findOne({ phone, verified: false });
+
+        if (!otpRecord) {
+            return next(new AppError('OTP not found. Please request a new code', 400));
+        }
+        if (otpRecord.expiresAt < new Date()) {
+            await OTP.deleteOne({ _id: otpRecord._id });
+            return next(new AppError('OTP has expired. Please request a new code', 400));
+        }
+        if (otpRecord.attempts >= 3) {
+            await OTP.deleteOne({ _id: otpRecord._id });
+            return next(new AppError('Too many failed attempts. Please request a new code', 400));
+        }
+        if (otpRecord.code !== code) {
+            otpRecord.attempts += 1;
+            await otpRecord.save();
+            return next(new AppError('Invalid OTP code', 400));
+        }
+
+        isValid = true;
         await OTP.deleteOne({ _id: otpRecord._id });
-        return next(new AppError('OTP has expired. Please request a new code', 400));
     }
 
-    // Check attempts
-    if (otpRecord.attempts >= 3) {
-        await OTP.deleteOne({ _id: otpRecord._id });
-        return next(new AppError('Too many failed attempts. Please request a new code', 400));
-    }
-
-    // Verify OTP code
-    if (otpRecord.code !== code) {
-        otpRecord.attempts += 1;
-        await otpRecord.save();
+    if (!isValid) {
         return next(new AppError('Invalid OTP code', 400));
     }
 
-    // OTP is valid - delete it
-    await OTP.deleteOne({ _id: otpRecord._id });
-
-    // Find or create user
+    // OTP verified - find or create user
     let user = await User.findOne({ phone });
     let isNewUser = false;
 
     if (!user) {
-        // New user - fullName is required
-        if (!fullName) {
+        if (!firstName) {
+            // Save a verified record so registration can complete without re-verifying
+            await OTP.create({
+                phone,
+                code: 'verified',
+                verified: true,
+                expiresAt: new Date(Date.now() + 10 * 60 * 1000) // 10 min to complete registration
+            });
             return res.status(200).json({
                 success: true,
                 isNewUser: true,
@@ -327,16 +371,15 @@ const verifyPhoneOtp = catchAsync(async (req, res, next) => {
         }
 
         user = await User.create({
-            fullName,
+            firstName,
+            lastName,
             phone,
-            email: email || undefined,
             provider: 'phone',
             isPhoneVerified: true,
             isVerified: true
         });
         isNewUser = true;
     } else {
-        // Existing user - update phone verification status
         user.isPhoneVerified = true;
         await user.save();
     }
@@ -442,19 +485,14 @@ const sendPhoneUpdateOtp = catchAsync(async (req, res, next) => {
     // Delete any existing OTP for this phone
     await OTP.deleteMany({ phone });
 
-    // Generate and save OTP
-    const code = generateOTP();
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+    // Send verification via Twilio Verify (or dev fallback)
+    const result = await sendVerification(phone);
 
-    await OTP.create({
-        phone,
-        code,
-        expiresAt,
-        userId // Link OTP to user for extra security
-    });
-
-    // Send OTP via SMS
-    await sendOTP(phone, code);
+    // In dev mode, save OTP locally
+    if (result.devCode) {
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+        await OTP.create({ phone, code: result.devCode, expiresAt });
+    }
 
     res.status(200).json({
         success: true,
@@ -472,34 +510,48 @@ const verifyPhoneUpdateOtp = catchAsync(async (req, res, next) => {
         return next(new AppError('Phone number and OTP code are required', 400));
     }
 
-    // Find the OTP record
-    const otpRecord = await OTP.findOne({ phone });
+    // Try Twilio Verify first
+    let isValid = await checkVerification(phone, code);
 
-    if (!otpRecord) {
-        return next(new AppError('OTP not found. Please request a new code', 400));
+    // Handle Twilio error responses
+    if (isValid && typeof isValid === 'object' && isValid.error) {
+        if (isValid.error === 'expired') {
+            return next(new AppError('OTP has expired. Please request a new code', 400));
+        }
+        if (isValid.error === 'max_attempts') {
+            return next(new AppError('Too many failed attempts. Please request a new code', 400));
+        }
+        return next(new AppError('Verification failed. Please request a new code', 400));
     }
 
-    // Check if OTP is expired
-    if (otpRecord.expiresAt < new Date()) {
+    if (isValid === null) {
+        // Dev mode - check local OTP DB
+        const otpRecord = await OTP.findOne({ phone });
+
+        if (!otpRecord) {
+            return next(new AppError('OTP not found. Please request a new code', 400));
+        }
+        if (otpRecord.expiresAt < new Date()) {
+            await OTP.deleteOne({ _id: otpRecord._id });
+            return next(new AppError('OTP has expired. Please request a new code', 400));
+        }
+        if (otpRecord.attempts >= 3) {
+            await OTP.deleteOne({ _id: otpRecord._id });
+            return next(new AppError('Too many failed attempts. Please request a new code', 400));
+        }
+        if (otpRecord.code !== code) {
+            otpRecord.attempts += 1;
+            await otpRecord.save();
+            return next(new AppError('Invalid OTP code', 400));
+        }
+
+        isValid = true;
         await OTP.deleteOne({ _id: otpRecord._id });
-        return next(new AppError('OTP has expired. Please request a new code', 400));
     }
 
-    // Check attempts
-    if (otpRecord.attempts >= 3) {
-        await OTP.deleteOne({ _id: otpRecord._id });
-        return next(new AppError('Too many failed attempts. Please request a new code', 400));
-    }
-
-    // Verify OTP code
-    if (otpRecord.code !== code) {
-        otpRecord.attempts += 1;
-        await otpRecord.save();
+    if (!isValid) {
         return next(new AppError('Invalid OTP code', 400));
     }
-
-    // OTP is valid - delete it
-    await OTP.deleteOne({ _id: otpRecord._id });
 
     // Update user's phone number
     const user = await User.findById(userId);
@@ -532,6 +584,56 @@ const verifyPhoneUpdateOtp = catchAsync(async (req, res, next) => {
     });
 });
 
+// @desc    Update user email
+// @route   PATCH /api/auth/email
+const updateEmail = catchAsync(async (req, res, next) => {
+    const { email } = req.body;
+    const userId = req.user.id;
+
+    if (!email) {
+        return next(new AppError('Email is required', 400));
+    }
+
+    const emailRegex = /^\S+@\S+\.\S+$/;
+    if (!emailRegex.test(email)) {
+        return next(new AppError('Please provide a valid email address', 400));
+    }
+
+    // Check if email is already used by another user
+    const existingUser = await User.findOne({ email, _id: { $ne: userId } });
+    if (existingUser) {
+        return next(new AppError('This email is already registered to another account', 400));
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+        return next(new AppError('User not found', 404));
+    }
+
+    user.email = email.toLowerCase().trim();
+    await user.save();
+
+    res.status(200).json({
+        success: true,
+        message: 'Email updated successfully',
+        data: {
+            user: {
+                id: user._id,
+                firstName: user.firstName,
+                lastName: user.lastName,
+                email: user.email,
+                phone: user.phone,
+                role: user.role,
+                avatar: user.avatar,
+                isVerified: user.isVerified,
+                isPhoneVerified: user.isPhoneVerified,
+                hasCompletedOnboarding: user.hasCompletedOnboarding,
+                createdAt: user.createdAt
+            }
+        }
+    });
+});
+
 module.exports = {
     register,
     login,
@@ -546,5 +648,6 @@ module.exports = {
     appleTokenAuth,
     completeOnboarding,
     sendPhoneUpdateOtp,
-    verifyPhoneUpdateOtp
+    verifyPhoneUpdateOtp,
+    updateEmail
 };

@@ -16,7 +16,8 @@ const {
     appleTokenAuth,
     completeOnboarding,
     sendPhoneUpdateOtp,
-    verifyPhoneUpdateOtp
+    verifyPhoneUpdateOtp,
+    updateEmail
 } = require('../controllers/auth.controller');
 const { protect } = require('../middlewares/auth.middleware');
 
@@ -63,6 +64,9 @@ router.post('/apple/token', appleTokenAuth);
 
 // Complete onboarding
 router.post('/complete-onboarding', protect, completeOnboarding);
+
+// Update email (authenticated)
+router.patch('/email', protect, updateEmail);
 
 // Google OAuth for mobile (web browser flow - legacy) - starts OAuth flow and passes redirect_uri as state
 router.get('/google/mobile', (req, res, next) => {

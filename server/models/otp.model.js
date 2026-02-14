@@ -15,6 +15,10 @@ const otpSchema = new mongoose.Schema({
         enum: ['registration', 'login'],
         default: 'login'
     },
+    verified: {
+        type: Boolean,
+        default: false
+    },
     attempts: {
         type: Number,
         default: 0
