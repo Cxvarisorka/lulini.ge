@@ -43,10 +43,12 @@ export default function RouteSummary({ pickup, destination, duration }) {
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.background,
     borderRadius: radius.lg,
     padding: 16,
     marginBottom: 8,
+    borderWidth: 2,
+    borderColor: colors.primary,
   },
   locationRow: {
     flexDirection: 'row',

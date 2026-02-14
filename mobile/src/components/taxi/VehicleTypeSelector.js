@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
-import { colors, radius } from '../../theme/colors';
+import { colors, radius, useTypography } from '../../theme/colors';
 
 const VEHICLE_TYPES = [
   { id: 'economy', icon: 'car-outline', priceMultiplier: 1 },
@@ -11,7 +11,9 @@ const VEHICLE_TYPES = [
 ];
 
 export default function VehicleTypeSelector({ selectedVehicle, onSelect }) {
-  const { t } = useTranslation();
+const typography = useTypography();
+  const styles = React.useMemo(() => createStyles(typography), [typography]);
+    const { t } = useTranslation();
 
   return (
     <View style={styles.container}>
@@ -48,7 +50,7 @@ export default function VehicleTypeSelector({ selectedVehicle, onSelect }) {
 
 export { VEHICLE_TYPES };
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   container: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -59,13 +61,14 @@ const styles = StyleSheet.create({
     padding: 12,
     marginHorizontal: 4,
     borderRadius: radius.lg,
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.background,
     borderWidth: 2,
-    borderColor: 'transparent',
+    borderColor: colors.primary,
   },
   vehicleCardSelected: {
     borderColor: colors.primary,
     backgroundColor: colors.background,
+    borderWidth: 3,
   },
   vehicleIconContainer: {
     width: 52,
@@ -80,7 +83,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
   },
   vehicleName: {
-    fontSize: 12,
+    ...typography.caption,
     fontWeight: '500',
     color: colors.mutedForeground,
   },

@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 
 import VehicleTypeSelector from './VehicleTypeSelector';
 import PaymentMethodSelector from './PaymentMethodSelector';
-import { colors, radius } from '../../theme/colors';
+import { colors, radius, useTypography } from '../../theme/colors';
 
 export default function RideOptionsSheet({
   selectedVehicle,
@@ -18,6 +18,8 @@ export default function RideOptionsSheet({
   onBack,
   isRequesting,
 }) {
+  const typography = useTypography();
+  const styles = React.useMemo(() => createStyles(typography), [typography]);
   const { t } = useTranslation();
 
   return (
@@ -74,7 +76,7 @@ export default function RideOptionsSheet({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   container: {
     flex: 1,
   },
@@ -88,21 +90,19 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center',
   },
   headerTitle: {
-    fontSize: 18,
-    fontWeight: '600',
+    ...typography.h1,
     color: colors.foreground,
   },
   headerSpacer: {
     width: 36,
   },
   sectionTitle: {
-    fontSize: 14,
-    fontWeight: '600',
+    ...typography.h3,
     color: colors.foreground,
     marginTop: 12,
     marginBottom: 8,
@@ -120,16 +120,15 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   priceLabel: {
-    fontSize: 12,
+    ...typography.caption,
     color: colors.mutedForeground,
   },
   priceValue: {
-    fontSize: 20,
-    fontWeight: '700',
+    ...typography.display,
     color: colors.foreground,
   },
   durationText: {
-    fontSize: 12,
+    ...typography.caption,
     color: colors.mutedForeground,
     marginTop: 2,
   },
@@ -146,9 +145,8 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   requestButtonText: {
+    ...typography.h2,
     color: colors.background,
-    fontSize: 16,
-    fontWeight: '600',
     marginLeft: 8,
   },
 });

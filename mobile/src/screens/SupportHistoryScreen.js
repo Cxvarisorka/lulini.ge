@@ -10,10 +10,12 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
-import { colors, shadows, radius, spacing } from '../theme/colors';
+import { colors, shadows, radius, spacing, useTypography } from '../theme/colors';
 
 export default function SupportHistoryScreen({ navigation }) {
-  const { t } = useTranslation();
+const typography = useTypography();
+  const styles = React.useMemo(() => createStyles(typography), [typography]);
+    const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const [refreshing, setRefreshing] = useState(false);
 
@@ -214,7 +216,7 @@ export default function SupportHistoryScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.muted,
@@ -227,8 +229,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   headerText: {
-    fontSize: 13,
-    fontWeight: '500',
+    ...typography.buttonSmall,
     color: colors.mutedForeground,
     marginBottom: spacing.md,
     paddingHorizontal: spacing.sm,
@@ -257,12 +258,11 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   ticketSubject: {
-    fontSize: 15,
-    fontWeight: '600',
+    ...typography.h3,
     color: colors.foreground,
   },
   ticketDate: {
-    fontSize: 13,
+    ...typography.bodySmall,
     color: colors.mutedForeground,
     marginTop: 2,
   },
@@ -289,7 +289,7 @@ const styles = StyleSheet.create({
     marginRight: spacing.xs,
   },
   statusText: {
-    fontSize: 12,
+    ...typography.caption,
     fontWeight: '600',
   },
   messagesCount: {
@@ -297,7 +297,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   messagesText: {
-    fontSize: 12,
+    ...typography.caption,
     color: colors.mutedForeground,
     marginLeft: spacing.xs,
   },
@@ -317,16 +317,14 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   emptyTitle: {
-    fontSize: 18,
-    fontWeight: '600',
+    ...typography.h1,
     color: colors.foreground,
     marginBottom: spacing.sm,
   },
   emptySubtitle: {
-    fontSize: 14,
+    ...typography.body,
     color: colors.mutedForeground,
     textAlign: 'center',
-    lineHeight: 20,
     marginBottom: spacing.xl,
   },
   createButton: {
@@ -338,8 +336,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
   },
   createButtonText: {
-    fontSize: 15,
-    fontWeight: '600',
+    ...typography.h3,
     color: colors.primaryForeground,
     marginLeft: spacing.sm,
   },

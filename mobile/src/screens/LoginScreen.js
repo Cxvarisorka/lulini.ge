@@ -15,10 +15,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 
 import { useAuth } from '../context/AuthContext';
-import { colors, shadows, radius } from '../theme/colors';
+import { colors, radius, useTypography } from '../theme/colors';
 
 export default function LoginScreen({ navigation }) {
   const { t } = useTranslation();
+  const typography = useTypography();
+  const styles = React.useMemo(() => createStyles(typography), [typography]);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -161,7 +163,7 @@ export default function LoginScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
@@ -185,21 +187,22 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   brandName: {
-    fontSize: 20,
-    fontWeight: '700',
+    ...typography.h1,
     color: colors.foreground,
   },
   header: {
     marginBottom: 32,
   },
   title: {
-    fontSize: 28,
+    fontSize: typography.display.fontSize * 1.3,
     fontWeight: '700',
+    lineHeight: typography.display.lineHeight * 1.3,
+    letterSpacing: -0.5,
     color: colors.foreground,
     marginBottom: 8,
   },
   subtitle: {
-    fontSize: 15,
+    ...typography.body,
     color: colors.mutedForeground,
   },
   form: {
@@ -209,8 +212,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   label: {
-    fontSize: 14,
-    fontWeight: '600',
+    ...typography.bodyMedium,
     color: colors.foreground,
     marginBottom: 8,
   },
@@ -227,7 +229,7 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 16,
     paddingHorizontal: 12,
-    fontSize: 16,
+    ...typography.h2,
     color: colors.foreground,
   },
   button: {
@@ -241,9 +243,8 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   buttonText: {
+    ...typography.button,
     color: colors.primaryForeground,
-    fontSize: 16,
-    fontWeight: '600',
   },
   dividerContainer: {
     flexDirection: 'row',
@@ -256,9 +257,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.border,
   },
   dividerText: {
+    ...typography.body,
     marginHorizontal: 16,
     color: colors.mutedForeground,
-    fontSize: 14,
   },
   googleButton: {
     flexDirection: 'row',
@@ -271,9 +272,8 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   googleButtonText: {
+    ...typography.button,
     color: colors.foreground,
-    fontSize: 16,
-    fontWeight: '600',
     marginLeft: 12,
   },
   footer: {
@@ -282,12 +282,11 @@ const styles = StyleSheet.create({
     marginTop: 24,
   },
   footerText: {
+    ...typography.body,
     color: colors.mutedForeground,
-    fontSize: 14,
   },
   linkText: {
+    ...typography.bodyMedium,
     color: colors.primary,
-    fontSize: 14,
-    fontWeight: '600',
   },
 });

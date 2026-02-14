@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Image, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
-import { colors, radius, shadows } from '../../theme/colors';
+import { colors, radius, shadows, useTypography } from '../../theme/colors';
 
 // Helper function to convert color names to hex
 const getColorHex = (colorName) => {
@@ -38,6 +38,8 @@ export default function RideStatusSheet({
   waitingFee,
   onCancel,
 }) {
+  const typography = useTypography();
+  const styles = React.useMemo(() => createStyles(typography), [typography]);
   const { t } = useTranslation();
 
   const renderSearchingStatus = () => (
@@ -246,7 +248,7 @@ export default function RideStatusSheet({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   container: {
     flex: 1,
   },
@@ -256,8 +258,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   statusTitle: {
-    fontSize: 18,
-    fontWeight: '600',
+    ...typography.h1,
     color: colors.foreground,
     marginLeft: 10,
   },
@@ -265,14 +266,14 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   progressLabel: {
-    fontSize: 13,
+    ...typography.bodySmall,
     color: colors.mutedForeground,
     marginBottom: 8,
     textAlign: 'center',
   },
   progressBarBackground: {
     height: 6,
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.background,
     borderRadius: radius.full,
     overflow: 'hidden',
   },
@@ -286,8 +287,8 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     padding: 16,
     marginBottom: 16,
-    borderWidth: 1,
-    borderColor: colors.border,
+    borderWidth: 2,
+    borderColor: colors.primary,
     ...shadows.md,
   },
   driverComingBanner: {
@@ -297,6 +298,8 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: radius.md,
     marginBottom: 12,
+    borderWidth: 2,
+    borderColor: colors.primary,
   },
   driverComingIconContainer: {
     width: 40,
@@ -311,13 +314,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   driverComingTitle: {
-    fontSize: 15,
-    fontWeight: '600',
+    ...typography.h3,
     color: colors.primary,
     marginBottom: 2,
   },
   driverComingSubtitle: {
-    fontSize: 13,
+    ...typography.bodySmall,
     color: colors.mutedForeground,
     fontWeight: '500',
   },
@@ -343,7 +345,7 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -351,8 +353,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   driverName: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...typography.h2,
     color: colors.foreground,
     marginBottom: 4,
   },
@@ -361,13 +362,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   driverRating: {
-    fontSize: 13,
+    ...typography.bodySmall,
     fontWeight: '500',
     color: colors.foreground,
     marginLeft: 4,
   },
   driverTrips: {
-    fontSize: 13,
+    ...typography.bodySmall,
     color: colors.mutedForeground,
     marginLeft: 4,
   },
@@ -375,7 +376,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -387,7 +388,7 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
@@ -396,8 +397,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   vehicleName: {
-    fontSize: 15,
-    fontWeight: '600',
+    ...typography.h3,
     color: colors.foreground,
     marginBottom: 6,
   },
@@ -406,14 +406,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   vehiclePlate: {
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.background,
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: radius.md,
     marginRight: 12,
   },
   vehiclePlateText: {
-    fontSize: 12,
+    ...typography.caption,
     fontWeight: '600',
     color: colors.foreground,
     letterSpacing: 1,
@@ -431,7 +431,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   vehicleColorText: {
-    fontSize: 12,
+    ...typography.caption,
     color: colors.mutedForeground,
     textTransform: 'capitalize',
   },
@@ -440,8 +440,8 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     padding: 16,
     marginBottom: 16,
-    borderWidth: 1,
-    borderColor: colors.warning + '30',
+    borderWidth: 2,
+    borderColor: colors.primary,
   },
   waitingHeader: {
     flexDirection: 'row',
@@ -449,7 +449,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   waitingTitle: {
-    fontSize: 14,
+    ...typography.bodyMedium,
     fontWeight: '600',
     color: colors.foreground,
     marginLeft: 8,
@@ -467,13 +467,13 @@ const styles = StyleSheet.create({
     color: colors.destructive,
   },
   waitingTimeLabel: {
-    fontSize: 12,
+    ...typography.caption,
     color: colors.mutedForeground,
     marginTop: 4,
   },
   waitingProgressBar: {
     height: 6,
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.background,
     borderRadius: radius.full,
     overflow: 'hidden',
     marginBottom: 12,
@@ -492,16 +492,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   waitingFeeLabel: {
-    fontSize: 13,
+    ...typography.bodySmall,
     color: colors.mutedForeground,
   },
   waitingFeeValue: {
-    fontSize: 14,
+    ...typography.bodyMedium,
     fontWeight: '600',
     color: colors.warning,
   },
   waitingWarning: {
-    fontSize: 13,
+    ...typography.bodySmall,
     color: colors.destructive,
     textAlign: 'center',
     marginTop: 8,
@@ -515,10 +515,11 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     padding: 16,
     marginBottom: 16,
+    borderWidth: 2,
+    borderColor: colors.primary,
   },
   inProgressText: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...typography.h2,
     color: colors.primary,
     marginLeft: 8,
   },
@@ -528,19 +529,20 @@ const styles = StyleSheet.create({
   },
   rideDetailItem: {
     flex: 1,
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.background,
     padding: 16,
     borderRadius: radius.lg,
     marginHorizontal: 4,
+    borderWidth: 2,
+    borderColor: colors.primary,
   },
   rideDetailLabel: {
-    fontSize: 12,
+    ...typography.caption,
     color: colors.mutedForeground,
     marginBottom: 4,
   },
   rideDetailValue: {
-    fontSize: 18,
-    fontWeight: '600',
+    ...typography.h1,
     color: colors.foreground,
   },
   cancelButton: {
@@ -551,8 +553,7 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   cancelButtonText: {
+    ...typography.h2,
     color: colors.destructive,
-    fontSize: 16,
-    fontWeight: '600',
   },
 });

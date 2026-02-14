@@ -10,7 +10,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 
 import { useLanguage, LANGUAGES } from '../context/LanguageContext';
-import { colors, shadows, radius } from '../theme/colors';
+import { colors, shadows, radius, useTypography } from '../theme/colors';
 
 // Country flag emoji helper
 const FLAGS = {
@@ -21,7 +21,9 @@ const FLAGS = {
 };
 
 export default function LanguageSelectScreen({ navigation }) {
-  const { t } = useTranslation();
+const typography = useTypography();
+  const styles = React.useMemo(() => createStyles(typography), [typography]);
+    const { t } = useTranslation();
   const { currentLanguage, changeLanguage } = useLanguage();
 
   const handleSelectLanguage = async (languageCode) => {
@@ -86,10 +88,10 @@ function getFlagEmoji(countryCode) {
   return String.fromCodePoint(...codePoints);
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.muted,
   },
   listContent: {
     padding: 16,
@@ -103,6 +105,11 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     borderWidth: 2,
     borderColor: 'transparent',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 3,
   },
   languageItemSelected: {
     borderColor: colors.primary,
@@ -117,10 +124,15 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 2,
+    elevation: 1,
   },
   flagText: {
     fontSize: 28,
@@ -129,8 +141,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   languageName: {
-    fontSize: 17,
-    fontWeight: '600',
+    ...typography.h2,
     color: colors.foreground,
     marginBottom: 2,
   },
@@ -138,7 +149,7 @@ const styles = StyleSheet.create({
     color: colors.primary,
   },
   languageNameEn: {
-    fontSize: 14,
+    ...typography.body,
     color: colors.mutedForeground,
   },
   checkContainer: {

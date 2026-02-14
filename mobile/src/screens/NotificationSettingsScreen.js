@@ -9,10 +9,12 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
-import { colors, shadows, radius, spacing } from '../theme/colors';
+import { colors, radius, spacing, useTypography } from '../theme/colors';
 
 export default function NotificationSettingsScreen({ navigation }) {
-  const { t } = useTranslation();
+const typography = useTypography();
+  const styles = React.useMemo(() => createStyles(typography), [typography]);
+    const { t } = useTranslation();
   const insets = useSafeAreaInsets();
 
   // Notification settings state
@@ -205,7 +207,7 @@ export default function NotificationSettingsScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.muted,
@@ -225,7 +227,8 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     padding: spacing.lg,
     marginBottom: spacing.xl,
-    ...shadows.md,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   masterToggleContent: {
     flexDirection: 'row',
@@ -236,21 +239,22 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: radius.md,
-    backgroundColor: colors.muted,
+    backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   masterToggleText: {
     flex: 1,
   },
   masterToggleLabel: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...typography.h2,
     color: colors.foreground,
   },
   masterToggleDescription: {
-    fontSize: 14,
+    ...typography.body,
     color: colors.mutedForeground,
     marginTop: 2,
   },
@@ -258,18 +262,16 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xl,
   },
   sectionTitle: {
-    fontSize: 13,
-    fontWeight: '600',
+    ...typography.label,
     color: colors.mutedForeground,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
     marginBottom: spacing.sm,
     paddingHorizontal: spacing.sm,
   },
   sectionContent: {
     backgroundColor: colors.background,
     borderRadius: radius.lg,
-    ...shadows.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   settingItem: {
     flexDirection: 'row',
@@ -284,22 +286,23 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: radius.md,
-    backgroundColor: colors.muted,
+    backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   settingContent: {
     flex: 1,
     marginRight: spacing.md,
   },
   settingLabel: {
-    fontSize: 15,
-    fontWeight: '500',
+    ...typography.h3,
     color: colors.foreground,
   },
   settingDescription: {
-    fontSize: 13,
+    ...typography.bodySmall,
     color: colors.mutedForeground,
     marginTop: 2,
   },
@@ -312,10 +315,9 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xl,
   },
   infoText: {
+    ...typography.body,
     flex: 1,
-    fontSize: 14,
     color: colors.mutedForeground,
     marginLeft: spacing.md,
-    lineHeight: 20,
   },
 });

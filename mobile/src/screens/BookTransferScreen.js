@@ -15,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { transferAPI } from '../services/api';
+import { useTypography } from '../theme/colors';
 
 const VEHICLE_TYPES = [
   { id: 'economy', label: 'Economy', icon: 'car-outline', price: 1 },
@@ -25,7 +26,9 @@ const VEHICLE_TYPES = [
 ];
 
 export default function BookTransferScreen({ navigation }) {
-  const insets = useSafeAreaInsets();
+const typography = useTypography();
+  const styles = React.useMemo(() => createStyles(typography), [typography]);
+    const insets = useSafeAreaInsets();
   const [step, setStep] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -549,7 +552,7 @@ export default function BookTransferScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fff',
@@ -571,7 +574,7 @@ const styles = StyleSheet.create({
     borderRadius: 2,
   },
   progressText: {
-    fontSize: 12,
+    ...typography.caption,
     color: '#666',
     textAlign: 'center',
   },
@@ -597,7 +600,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#2563eb',
   },
   tripTypeText: {
-    fontSize: 14,
+    ...typography.body,
     fontWeight: '600',
     color: '#666',
     marginLeft: 8,
@@ -609,7 +612,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   label: {
-    fontSize: 14,
+    ...typography.body,
     fontWeight: '600',
     color: '#333',
     marginBottom: 8,
@@ -628,7 +631,8 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     padding: 16,
-    fontSize: 16,
+    ...typography.h2,
+    fontWeight: '400',
     color: '#1a1a1a',
   },
   textArea: {
@@ -657,7 +661,7 @@ const styles = StyleSheet.create({
     borderColor: '#e0e0e0',
   },
   dateText: {
-    fontSize: 14,
+    ...typography.body,
     color: '#1a1a1a',
     marginLeft: 8,
   },
@@ -682,8 +686,7 @@ const styles = StyleSheet.create({
     borderColor: '#e0e0e0',
   },
   counterValue: {
-    fontSize: 18,
-    fontWeight: '600',
+    ...typography.h1,
     color: '#1a1a1a',
   },
   vehicleScroll: {
@@ -706,9 +709,9 @@ const styles = StyleSheet.create({
   },
   vehicleText: {
     marginTop: 8,
-    fontSize: 12,
-    color: '#666',
+    ...typography.caption,
     fontWeight: '500',
+    color: '#666',
   },
   vehicleTextActive: {
     color: '#2563eb',
@@ -720,8 +723,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   summaryTitle: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...typography.h2,
     color: '#1a1a1a',
     marginBottom: 12,
   },
@@ -731,14 +733,13 @@ const styles = StyleSheet.create({
   },
   summaryLabel: {
     width: 80,
-    fontSize: 14,
+    ...typography.body,
     color: '#666',
   },
   summaryValue: {
     flex: 1,
-    fontSize: 14,
+    ...typography.bodyMedium,
     color: '#1a1a1a',
-    fontWeight: '500',
   },
   footer: {
     flexDirection: 'row',
@@ -755,8 +756,7 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   backButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...typography.h2,
     color: '#666',
   },
   nextButton: {
@@ -767,8 +767,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   nextButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...typography.h2,
     color: '#fff',
   },
   bottomPadding: {

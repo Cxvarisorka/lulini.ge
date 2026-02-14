@@ -10,10 +10,12 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
-import { colors, shadows, radius, spacing } from '../theme/colors';
+import { colors, shadows, radius, spacing, useTypography } from '../theme/colors';
 
 export default function PaymentSettingsScreen({ navigation }) {
-  const { t } = useTranslation();
+const typography = useTypography();
+  const styles = React.useMemo(() => createStyles(typography), [typography]);
+    const { t } = useTranslation();
   const insets = useSafeAreaInsets();
 
   // Payment preferences state
@@ -105,7 +107,7 @@ export default function PaymentSettingsScreen({ navigation }) {
                 onPress={() => setDefaultPayment(method.id)}
               >
                 <View style={styles.paymentIcon}>
-                  <Ionicons name={method.icon} size={22} color={colors.foreground} />
+                  <Ionicons name={method.icon} size={22} color={colors.primary} />
                 </View>
                 <View style={styles.paymentContent}>
                   <Text style={styles.paymentLabel}>{method.label}</Text>
@@ -143,7 +145,7 @@ export default function PaymentSettingsScreen({ navigation }) {
                     <Ionicons
                       name={getCardIcon(card.type)}
                       size={22}
-                      color={colors.foreground}
+                      color={colors.primary}
                     />
                   </View>
                   <View style={styles.cardContent}>
@@ -208,7 +210,7 @@ export default function PaymentSettingsScreen({ navigation }) {
         <View style={styles.section}>
           <TouchableOpacity style={styles.historyLink}>
             <View style={styles.historyIcon}>
-              <Ionicons name="receipt" size={22} color={colors.foreground} />
+              <Ionicons name="receipt" size={22} color={colors.primary} />
             </View>
             <Text style={styles.historyText}>{t('payment.viewHistory')}</Text>
             <Ionicons
@@ -223,7 +225,7 @@ export default function PaymentSettingsScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.muted,
@@ -239,18 +241,19 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xl,
   },
   sectionTitle: {
-    fontSize: 13,
-    fontWeight: '600',
+    ...typography.label,
     color: colors.mutedForeground,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
     marginBottom: spacing.sm,
     paddingHorizontal: spacing.sm,
   },
   sectionContent: {
     backgroundColor: colors.background,
     borderRadius: radius.lg,
-    ...shadows.sm,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 3,
     overflow: 'hidden',
   },
   paymentOption: {
@@ -266,21 +269,25 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: radius.md,
-    backgroundColor: colors.muted,
+    backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: spacing.md,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
+    elevation: 2,
   },
   paymentContent: {
     flex: 1,
   },
   paymentLabel: {
-    fontSize: 16,
-    fontWeight: '500',
+    ...typography.h2,
     color: colors.foreground,
   },
   paymentDescription: {
-    fontSize: 13,
+    ...typography.bodySmall,
     color: colors.mutedForeground,
     marginTop: 2,
   },
@@ -315,22 +322,26 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: radius.md,
-    backgroundColor: colors.muted,
+    backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: spacing.md,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
+    elevation: 2,
   },
   cardContent: {
     flex: 1,
   },
   cardNumber: {
-    fontSize: 16,
-    fontWeight: '500',
+    ...typography.h2,
     color: colors.foreground,
     letterSpacing: 1,
   },
   cardExpiry: {
-    fontSize: 13,
+    ...typography.bodySmall,
     color: colors.mutedForeground,
     marginTop: 2,
   },
@@ -342,7 +353,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing['2xl'],
   },
   emptyCardsText: {
-    fontSize: 14,
+    ...typography.body,
     color: colors.mutedForeground,
     marginTop: spacing.sm,
   },
@@ -355,8 +366,7 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
   },
   addCardText: {
-    fontSize: 15,
-    fontWeight: '500',
+    ...typography.h3,
     color: colors.primary,
     marginLeft: spacing.sm,
   },
@@ -366,11 +376,10 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
   },
   tipInfoText: {
+    ...typography.body,
     flex: 1,
-    fontSize: 14,
     color: colors.mutedForeground,
     marginLeft: spacing.md,
-    lineHeight: 20,
   },
   historyLink: {
     flexDirection: 'row',
@@ -378,21 +387,29 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     borderRadius: radius.lg,
     padding: spacing.lg,
-    ...shadows.sm,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 3,
   },
   historyIcon: {
     width: 44,
     height: 44,
     borderRadius: radius.md,
-    backgroundColor: colors.muted,
+    backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: spacing.md,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
+    elevation: 2,
   },
   historyText: {
+    ...typography.h3,
     flex: 1,
-    fontSize: 15,
-    fontWeight: '500',
     color: colors.foreground,
   },
 });

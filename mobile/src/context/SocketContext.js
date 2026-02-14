@@ -30,7 +30,6 @@ export const SocketProvider = ({ children }) => {
         const token = await SecureStore.getItemAsync('token');
 
         if (!token) {
-          console.log('No token found, cannot connect socket');
           return;
         }
 
@@ -44,22 +43,19 @@ export const SocketProvider = ({ children }) => {
         });
 
         socketInstance.on('connect', () => {
-          console.log('Socket connected:', socketInstance.id);
           setConnected(true);
         });
 
         socketInstance.on('disconnect', () => {
-          console.log('Socket disconnected');
           setConnected(false);
         });
 
-        socketInstance.on('connect_error', (error) => {
-          console.error('Socket connection error:', error.message);
+        socketInstance.on('connect_error', () => {
         });
 
         setSocket(socketInstance);
       } catch (error) {
-        console.error('Error setting up socket:', error);
+        // Failed to set up socket
       }
     };
 
@@ -70,7 +66,7 @@ export const SocketProvider = ({ children }) => {
         socketInstance.disconnect();
       }
     };
-  }, [isAuthenticated, user]);
+  }, [isAuthenticated, user?._id]);
 
   return (
     <SocketContext.Provider value={{ socket, connected }}>

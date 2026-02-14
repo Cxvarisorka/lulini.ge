@@ -8,10 +8,12 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
-import { colors, shadows, radius, spacing } from '../theme/colors';
+import { colors, shadows, radius, spacing, useTypography } from '../theme/colors';
 
 export default function FAQDetailScreen({ route }) {
-  const { t } = useTranslation();
+const typography = useTypography();
+  const styles = React.useMemo(() => createStyles(typography), [typography]);
+    const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { question, answer } = route.params;
 
@@ -67,7 +69,7 @@ export default function FAQDetailScreen({ route }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.muted,
@@ -97,11 +99,9 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   questionText: {
-    fontSize: 18,
-    fontWeight: '600',
+    ...typography.h1,
     color: colors.foreground,
     textAlign: 'center',
-    lineHeight: 26,
   },
   answerCard: {
     backgroundColor: colors.background,
@@ -111,15 +111,14 @@ const styles = StyleSheet.create({
     ...shadows.sm,
   },
   answerLabel: {
-    fontSize: 13,
+    ...typography.label,
     fontWeight: '600',
     color: colors.mutedForeground,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
     marginBottom: spacing.md,
   },
   answerText: {
-    fontSize: 16,
+    ...typography.h2,
+    fontWeight: '400',
     color: colors.foreground,
     lineHeight: 26,
   },
@@ -132,7 +131,7 @@ const styles = StyleSheet.create({
     ...shadows.sm,
   },
   helpfulTitle: {
-    fontSize: 15,
+    ...typography.h3,
     fontWeight: '500',
     color: colors.foreground,
     marginBottom: spacing.lg,
@@ -146,7 +145,7 @@ const styles = StyleSheet.create({
     padding: spacing.md,
   },
   helpfulButtonText: {
-    fontSize: 14,
+    ...typography.body,
     color: colors.mutedForeground,
     marginTop: spacing.xs,
   },
@@ -164,12 +163,11 @@ const styles = StyleSheet.create({
     marginLeft: spacing.md,
   },
   needHelpTitle: {
-    fontSize: 15,
-    fontWeight: '600',
+    ...typography.h3,
     color: colors.foreground,
   },
   needHelpText: {
-    fontSize: 13,
+    ...typography.bodySmall,
     color: colors.mutedForeground,
     marginTop: 2,
   },

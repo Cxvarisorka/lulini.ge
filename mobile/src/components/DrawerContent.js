@@ -11,12 +11,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../context/AuthContext';
-import { colors, shadows, radius, spacing } from '../theme/colors';
+import { colors, radius, spacing, useTypography } from '../theme/colors';
 
 export default function DrawerContent({ navigation }) {
   const { t } = useTranslation();
   const { user, logout } = useAuth();
   const insets = useSafeAreaInsets();
+  const typography = useTypography();
+  const styles = React.useMemo(() => createStyles(typography), [typography]);
 
   const menuSections = [
     {
@@ -146,24 +148,32 @@ export default function DrawerContent({ navigation }) {
       {/* Quick Stats */}
       <View style={styles.statsContainer}>
         <View style={styles.statItem}>
-          <Text style={styles.statValue}>{user?.totalRides || 0}</Text>
+          <View style={styles.statIconValue}>
+            <Ionicons name="car" size={18} color={colors.primary} />
+            <Text style={styles.statValue}>{user?.totalRides || 0}</Text>
+          </View>
           <Text style={styles.statLabel}>{t('drawer.totalRides')}</Text>
         </View>
         <View style={styles.statDivider} />
         <View style={styles.statItem}>
-          <Text style={styles.statValue}>{user?.rating || '5.0'}</Text>
+          <View style={styles.statIconValue}>
+            <Ionicons name="star" size={18} color={colors.primary} />
+            <Text style={styles.statValue}>{user?.rating || '5.0'}</Text>
+          </View>
           <Text style={styles.statLabel}>{t('drawer.rating')}</Text>
         </View>
         <View style={styles.statDivider} />
         <View style={styles.statItem}>
-          <Ionicons
-            name={user?.isVerified ? 'checkmark-circle' : 'alert-circle'}
-            size={20}
-            color={user?.isVerified ? colors.success : colors.warning}
-          />
-          <Text style={styles.statLabel}>
-            {user?.isVerified ? t('drawer.verified') : t('drawer.unverified')}
-          </Text>
+          <View style={styles.statIconValue}>
+            <Ionicons
+              name={user?.isVerified ? 'checkmark-circle' : 'alert-circle'}
+              size={18}
+              color={user?.isVerified ? colors.success : colors.warning}
+            />
+            <Text style={styles.statValue}>
+              {user?.isVerified ? t('drawer.verified') : t('drawer.unverified')}
+            </Text>
+          </View>
         </View>
       </View>
 
@@ -217,7 +227,7 @@ export default function DrawerContent({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
@@ -251,41 +261,46 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   userName: {
-    fontSize: 18,
-    fontWeight: '600',
+    ...typography.h1,
     color: colors.foreground,
     marginBottom: 2,
   },
   userEmail: {
-    fontSize: 14,
+    ...typography.body,
     color: colors.mutedForeground,
   },
   statsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-    paddingVertical: spacing.lg,
+    flexDirection: 'column',
+    paddingVertical: spacing.md,
     marginHorizontal: spacing.lg,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
   statItem: {
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+  },
+  statIconValue: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
   },
   statValue: {
-    fontSize: 18,
-    fontWeight: '700',
+    ...typography.h3,
+    fontWeight: '600',
     color: colors.foreground,
   },
   statLabel: {
-    fontSize: 12,
+    ...typography.caption,
     color: colors.mutedForeground,
-    marginTop: 2,
   },
   statDivider: {
-    width: 1,
-    height: 30,
+    height: 1,
     backgroundColor: colors.border,
+    marginHorizontal: spacing.md,
   },
   menuContainer: {
     flex: 1,
@@ -295,11 +310,8 @@ const styles = StyleSheet.create({
     marginTop: spacing.lg,
   },
   sectionTitle: {
-    fontSize: 12,
-    fontWeight: '600',
+    ...typography.label,
     color: colors.mutedForeground,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
     marginBottom: spacing.sm,
     paddingHorizontal: spacing.sm,
   },
@@ -321,9 +333,8 @@ const styles = StyleSheet.create({
   },
   menuItemLabel: {
     flex: 1,
-    fontSize: 15,
+    ...typography.bodyMedium,
     color: colors.foreground,
-    fontWeight: '500',
   },
   promoCard: {
     flexDirection: 'row',
@@ -346,12 +357,11 @@ const styles = StyleSheet.create({
     marginLeft: spacing.md,
   },
   promoTitle: {
-    fontSize: 15,
-    fontWeight: '600',
+    ...typography.h3,
     color: colors.foreground,
   },
   promoSubtitle: {
-    fontSize: 13,
+    ...typography.bodySmall,
     color: colors.mutedForeground,
   },
   footer: {
@@ -366,13 +376,12 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
   },
   logoutText: {
-    fontSize: 15,
+    ...typography.bodyMedium,
     color: colors.destructive,
-    fontWeight: '500',
     marginLeft: spacing.sm,
   },
   versionText: {
-    fontSize: 12,
+    ...typography.caption,
     color: colors.mutedForeground,
     textAlign: 'center',
     marginTop: spacing.sm,

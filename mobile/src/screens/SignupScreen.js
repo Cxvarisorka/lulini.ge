@@ -15,10 +15,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 
 import { useAuth } from '../context/AuthContext';
-import { colors, radius } from '../theme/colors';
+import { colors, radius, useTypography } from '../theme/colors';
 
 export default function SignupScreen({ navigation }) {
-  const { t } = useTranslation();
+const typography = useTypography();
+  const styles = React.useMemo(() => createStyles(typography), [typography]);
+    const { t } = useTranslation();
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
@@ -220,7 +222,7 @@ export default function SignupScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
@@ -243,13 +245,15 @@ const styles = StyleSheet.create({
     marginBottom: 32,
   },
   title: {
-    fontSize: 28,
+    ...typography.display,
+    fontSize: typography.display.fontSize * 1.4,
     fontWeight: '700',
     color: colors.foreground,
     marginBottom: 8,
   },
   subtitle: {
-    fontSize: 15,
+    ...typography.h3,
+    fontWeight: '400',
     color: colors.mutedForeground,
   },
   form: {
@@ -262,7 +266,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   label: {
-    fontSize: 14,
+    ...typography.bodyMedium,
     fontWeight: '600',
     color: colors.foreground,
     marginBottom: 8,
@@ -280,16 +284,16 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 16,
     paddingHorizontal: 12,
-    fontSize: 16,
+    ...typography.h2,
+    fontWeight: '400',
     color: colors.foreground,
   },
   termsContainer: {
     marginBottom: 20,
   },
   termsText: {
-    fontSize: 13,
+    ...typography.bodySmall,
     color: colors.mutedForeground,
-    lineHeight: 20,
   },
   termsLink: {
     color: colors.primary,
@@ -306,9 +310,8 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   buttonText: {
+    ...typography.h2,
     color: colors.primaryForeground,
-    fontSize: 16,
-    fontWeight: '600',
   },
   footer: {
     flexDirection: 'row',
@@ -317,12 +320,12 @@ const styles = StyleSheet.create({
     marginBottom: 32,
   },
   footerText: {
+    ...typography.body,
     color: colors.mutedForeground,
-    fontSize: 14,
   },
   linkText: {
+    ...typography.bodyMedium,
     color: colors.primary,
-    fontSize: 14,
     fontWeight: '600',
   },
 });

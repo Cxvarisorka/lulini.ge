@@ -101,6 +101,11 @@
     "paymentMethod": "Способ оплаты",
     "cash": "Наличные",
     "card": "Карта",
+    "applePay": "Apple Pay",
+    "googlePay": "Google Pay",
+    "selectPaymentMethod": "Выберите способ оплаты",
+    "applePayDesc": "Быстрая и безопасная оплата с Apple Pay",
+    "googlePayDesc": "Быстрая и безопасная оплата с Google Pay",
     "distance": "Расстояние",
     "duration": "Время в пути",
     "cancelRide": "Отменить поездку",
@@ -252,6 +257,7 @@
     "fullName": "Полное имя",
     "fullNamePlaceholder": "Введите ваше полное имя",
     "fullNameRequired": "Полное имя обязательно",
+    "nameRequired": "Имя и фамилия обязательны (минимум 2 символа каждое)",
     "phone": "Номер телефона",
     "phoneNumber": "Номер телефона",
     "phonePlaceholder": "+995 555 123 456",
@@ -285,7 +291,8 @@
     "fillAllFields": "Пожалуйста, заполните все поля",
     "passwordsNotMatch": "Пароли не совпадают",
     "passwordTooShort": "Пароль должен быть не менее 8 символов",
-    "pleaseLogin": "Пожалуйста, войдите для продолжения"
+    "pleaseLogin": "Пожалуйста, войдите для продолжения",
+    "newUserHint": "Новый номер? После верификации вы создадите аккаунт"
   },
   "permissions": {
     "welcome": "Добро пожаловать!",
@@ -326,7 +333,10 @@
     "currentPhone": "Текущий телефон",
     "newPhone": "Новый номер телефона",
     "phoneUpdated": "Номер телефона успешно обновлён",
-    "changeNumber": "Изменить номер"
+    "changeNumber": "Изменить номер",
+    "addEmail": "Добавить эл. почту",
+    "editEmail": "Изменить эл. почту",
+    "emailUpdated": "Эл. почта успешно обновлена"
   },
   "languages": {
     "en": "Английский",
@@ -386,6 +396,7 @@
     "deleteAccount": "Удалить аккаунт"
   },
   "payment": {
+    "payment": "Оплата",
     "defaultMethod": "Способ оплаты по умолчанию",
     "cash": "Наличные",
     "cashDesc": "Оплата водителю наличными",

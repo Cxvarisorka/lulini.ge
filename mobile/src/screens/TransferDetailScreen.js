@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { transferAPI } from '../services/api';
+import { useTypography } from '../theme/colors';
 
 const STATUS_COLORS = {
   pending: { bg: '#fef3c7', text: '#d97706' },
@@ -27,7 +28,9 @@ const VEHICLE_LABELS = {
 };
 
 export default function TransferDetailScreen({ route, navigation }) {
-  const { transfer } = route.params;
+const typography = useTypography();
+  const styles = React.useMemo(() => createStyles(typography), [typography]);
+    const { transfer } = route.params;
   const statusStyle = STATUS_COLORS[transfer.status] || STATUS_COLORS.pending;
 
   const formatDate = (dateString) => {
@@ -284,7 +287,7 @@ export default function TransferDetailScreen({ route, navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
@@ -303,11 +306,10 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   statusText: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...typography.h2,
   },
   bookingId: {
-    fontSize: 14,
+    ...typography.body,
     color: '#666',
   },
   card: {
@@ -323,8 +325,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   cardTitle: {
-    fontSize: 18,
-    fontWeight: '600',
+    ...typography.h1,
     color: '#1a1a1a',
     marginBottom: 16,
   },
@@ -346,14 +347,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   locationLabel: {
-    fontSize: 12,
+    ...typography.caption,
     color: '#666',
     marginBottom: 2,
   },
   locationAddress: {
-    fontSize: 15,
+    ...typography.h3,
     color: '#1a1a1a',
-    fontWeight: '500',
   },
   routeConnector: {
     flexDirection: 'row',
@@ -370,7 +370,7 @@ const styles = StyleSheet.create({
     marginLeft: 30,
   },
   routeInfoText: {
-    fontSize: 13,
+    ...typography.bodySmall,
     color: '#666',
   },
   detailRow: {
@@ -381,15 +381,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   detailLabel: {
-    fontSize: 14,
+    ...typography.body,
     color: '#666',
     marginLeft: 12,
     flex: 1,
   },
   detailValue: {
-    fontSize: 14,
+    ...typography.bodyMedium,
     color: '#1a1a1a',
-    fontWeight: '500',
   },
   divider: {
     height: 1,
@@ -404,14 +403,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   gridValue: {
-    fontSize: 18,
-    fontWeight: '600',
+    ...typography.h1,
     color: '#1a1a1a',
     marginTop: 8,
     marginBottom: 4,
   },
   gridLabel: {
-    fontSize: 12,
+    ...typography.caption,
     color: '#666',
   },
   flightInfo: {
@@ -423,14 +421,13 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   flightLabel: {
-    fontSize: 14,
+    ...typography.body,
     color: '#666',
     marginLeft: 8,
   },
   flightNumber: {
-    fontSize: 14,
+    ...typography.h3,
     color: '#1a1a1a',
-    fontWeight: '600',
     marginLeft: 4,
   },
   contactRow: {
@@ -442,13 +439,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   contactName: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...typography.h2,
     color: '#1a1a1a',
     marginBottom: 4,
   },
   contactDetail: {
-    fontSize: 14,
+    ...typography.body,
     color: '#666',
     marginBottom: 2,
   },
@@ -471,12 +467,12 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   notesLabel: {
-    fontSize: 12,
+    ...typography.caption,
     color: '#666',
     marginBottom: 4,
   },
   notesText: {
-    fontSize: 14,
+    ...typography.body,
     color: '#1a1a1a',
   },
   priceRow: {
@@ -486,11 +482,11 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   priceLabel: {
-    fontSize: 14,
+    ...typography.body,
     color: '#666',
   },
   priceValue: {
-    fontSize: 14,
+    ...typography.body,
     color: '#1a1a1a',
   },
   priceDivider: {
@@ -499,12 +495,11 @@ const styles = StyleSheet.create({
     marginVertical: 12,
   },
   totalLabel: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...typography.h2,
     color: '#1a1a1a',
   },
   totalValue: {
-    fontSize: 24,
+    ...typography.display,
     fontWeight: 'bold',
     color: '#2563eb',
   },
@@ -519,8 +514,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   cancelButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...typography.h2,
     color: '#dc2626',
     marginLeft: 8,
   },

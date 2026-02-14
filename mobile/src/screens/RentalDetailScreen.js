@@ -12,12 +12,14 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 
-import { colors, shadows, radius } from '../theme/colors';
+import { colors, shadows, radius, useTypography } from '../theme/colors';
 
 const { width } = Dimensions.get('window');
 
 export default function RentalDetailScreen({ route, navigation }) {
-  const { t } = useTranslation();
+const typography = useTypography();
+  const styles = React.useMemo(() => createStyles(typography), [typography]);
+    const { t } = useTranslation();
   const { car } = route.params;
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
 
@@ -32,7 +34,7 @@ export default function RentalDetailScreen({ route, navigation }) {
       `${car.brand} ${car.model} - $${car.pricePerDay}/${t('rentals.perDay')}`,
       [
         { text: t('common.cancel'), style: 'cancel' },
-        { text: t('common.confirm'), onPress: () => console.log('Booking confirmed') },
+        { text: t('common.confirm'), onPress: () => {} },
       ]
     );
   };
@@ -208,7 +210,7 @@ export default function RentalDetailScreen({ route, navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
@@ -259,7 +261,7 @@ const styles = StyleSheet.create({
   },
   availabilityText: {
     marginLeft: 4,
-    fontSize: 13,
+    ...typography.bodySmall,
     fontWeight: '600',
   },
   content: {
@@ -272,13 +274,13 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   carName: {
-    fontSize: 24,
+    ...typography.display,
     fontWeight: '700',
     color: colors.foreground,
     marginBottom: 4,
   },
   carYear: {
-    fontSize: 14,
+    ...typography.body,
     color: colors.mutedForeground,
     textTransform: 'capitalize',
   },
@@ -286,20 +288,19 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
   },
   priceValue: {
-    fontSize: 28,
+    fontSize: 28, // Custom large price display
     fontWeight: '700',
     color: colors.foreground,
   },
   priceLabel: {
-    fontSize: 14,
+    ...typography.body,
     color: colors.mutedForeground,
   },
   section: {
     marginBottom: 24,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
+    ...typography.h1,
     color: colors.foreground,
     marginBottom: 16,
   },
@@ -323,12 +324,12 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   specLabel: {
-    fontSize: 12,
+    ...typography.caption,
     color: colors.mutedForeground,
     marginBottom: 2,
   },
   specValue: {
-    fontSize: 14,
+    ...typography.body,
     fontWeight: '600',
     color: colors.foreground,
   },
@@ -344,11 +345,11 @@ const styles = StyleSheet.create({
   },
   featureText: {
     marginLeft: 10,
-    fontSize: 14,
+    ...typography.body,
     color: colors.foreground,
   },
   description: {
-    fontSize: 14,
+    ...typography.body,
     lineHeight: 22,
     color: colors.mutedForeground,
   },
@@ -367,11 +368,11 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   bottomPriceLabel: {
-    fontSize: 12,
+    ...typography.caption,
     color: colors.mutedForeground,
   },
   bottomPriceValue: {
-    fontSize: 24,
+    fontSize: 24, // Custom large price display
     fontWeight: '700',
     color: colors.foreground,
   },
@@ -388,8 +389,7 @@ const styles = StyleSheet.create({
   },
   bookButtonText: {
     color: colors.background,
-    fontSize: 16,
-    fontWeight: '600',
+    ...typography.h2,
     marginRight: 8,
   },
 });

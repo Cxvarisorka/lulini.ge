@@ -13,10 +13,12 @@ import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
 
 import { useAuth } from '../context/AuthContext';
-import { colors, radius } from '../theme/colors';
+import { colors, radius, useTypography } from '../theme/colors';
 
 export default function PermissionsScreen({ navigation }) {
-  const { t } = useTranslation();
+const typography = useTypography();
+  const styles = React.useMemo(() => createStyles(typography), [typography]);
+    const { t } = useTranslation();
   const [isLoading, setIsLoading] = useState(false);
   const [locationGranted, setLocationGranted] = useState(null);
   const [notificationsGranted, setNotificationsGranted] = useState(null);
@@ -28,7 +30,6 @@ export default function PermissionsScreen({ navigation }) {
       setLocationGranted(status === 'granted');
       return status === 'granted';
     } catch (error) {
-      console.log('Location permission error:', error);
       setLocationGranted(false);
       return false;
     }
@@ -40,7 +41,6 @@ export default function PermissionsScreen({ navigation }) {
       setNotificationsGranted(status === 'granted');
       return status === 'granted';
     } catch (error) {
-      console.log('Notification permission error:', error);
       setNotificationsGranted(false);
       return false;
     }
@@ -166,7 +166,7 @@ export default function PermissionsScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
@@ -184,20 +184,26 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 16,
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
   },
   title: {
-    fontSize: 24,
+    ...typography.display,
     fontWeight: '700',
     color: colors.foreground,
     marginBottom: 8,
     textAlign: 'center',
   },
   subtitle: {
-    fontSize: 15,
+    ...typography.h3,
+    fontWeight: '400',
     color: colors.mutedForeground,
     textAlign: 'center',
     lineHeight: 22,
@@ -209,11 +215,16 @@ const styles = StyleSheet.create({
   permissionCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.background,
     borderRadius: radius.lg,
     padding: 16,
     borderWidth: 1,
     borderColor: colors.border,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 3,
   },
   permissionIconContainer: {
     width: 48,
@@ -223,20 +234,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
+    elevation: 2,
   },
   permissionContent: {
     flex: 1,
   },
   permissionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...typography.h2,
     color: colors.foreground,
     marginBottom: 4,
   },
   permissionDescription: {
-    fontSize: 13,
+    ...typography.bodySmall,
     color: colors.mutedForeground,
-    lineHeight: 18,
   },
   buttonsContainer: {
     gap: 12,
@@ -249,22 +263,25 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     padding: 16,
     gap: 8,
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
   },
   buttonDisabled: {
     opacity: 0.7,
   },
   primaryButtonText: {
+    ...typography.h2,
     color: colors.primaryForeground,
-    fontSize: 16,
-    fontWeight: '600',
   },
   skipButton: {
     alignItems: 'center',
     padding: 12,
   },
   skipButtonText: {
+    ...typography.button,
     color: colors.mutedForeground,
-    fontSize: 14,
-    fontWeight: '500',
   },
 });

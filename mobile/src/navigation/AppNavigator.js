@@ -21,8 +21,6 @@ import { colors } from '../theme/colors';
 
 // Auth Screens
 import WelcomeScreen from '../screens/WelcomeScreen';
-import LoginScreen from '../screens/LoginScreen';
-import SignupScreen from '../screens/SignupScreen';
 import PhoneAuthScreen from '../screens/PhoneAuthScreen';
 import OtpVerificationScreen from '../screens/OtpVerificationScreen';
 import PhoneRegistrationScreen from '../screens/PhoneRegistrationScreen';
@@ -68,8 +66,6 @@ function AuthStack() {
       }}
     >
       <Stack.Screen name="Welcome" component={WelcomeScreen} />
-      <Stack.Screen name="Login" component={LoginScreen} />
-      <Stack.Screen name="Signup" component={SignupScreen} />
       <Stack.Screen name="PhoneAuth" component={PhoneAuthScreen} />
       <Stack.Screen name="OtpVerification" component={OtpVerificationScreen} />
       <Stack.Screen name="PhoneRegistration" component={PhoneRegistrationScreen} />
@@ -150,6 +146,7 @@ function MainStackNavigator() {
 
   return (
     <Stack.Navigator
+      initialRouteName="Taxi"
       screenOptions={{
         headerStyle: {
           backgroundColor: colors.background,

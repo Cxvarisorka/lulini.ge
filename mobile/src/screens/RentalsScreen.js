@@ -17,13 +17,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { colors, shadows, radius } from '../theme/colors';
+import { colors, shadows, radius, useTypography } from '../theme/colors';
 import { rentalAPI } from '../services/api';
 
 const CATEGORIES = ['all', 'economy', 'business', 'luxury', 'suv'];
 
 export default function RentalsScreen({ navigation }) {
-  const { t } = useTranslation();
+const typography = useTypography();
+  const styles = React.useMemo(() => createStyles(typography), [typography]);
+    const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const [cars, setCars] = useState([]);
   const [filteredCars, setFilteredCars] = useState([]);
@@ -47,7 +49,7 @@ export default function RentalsScreen({ navigation }) {
         setCars(response.data.data.cars || []);
       }
     } catch (error) {
-      console.log('Error fetching cars:', error);
+      // Error fetching cars
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -243,7 +245,7 @@ export default function RentalsScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.secondary,
@@ -271,7 +273,7 @@ const styles = StyleSheet.create({
   searchInput: {
     flex: 1,
     marginLeft: 8,
-    fontSize: 15,
+    ...typography.h3,
     color: colors.foreground,
   },
   categoriesContainer: {
@@ -291,9 +293,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
   },
   categoryText: {
-    fontSize: 14,
+    ...typography.bodyMedium,
     color: colors.mutedForeground,
-    fontWeight: '500',
   },
   categoryTextActive: {
     color: colors.background,
@@ -332,20 +333,19 @@ const styles = StyleSheet.create({
     borderRadius: radius.full,
   },
   availabilityText: {
-    fontSize: 12,
+    ...typography.caption,
     fontWeight: '600',
   },
   carInfo: {
     padding: 16,
   },
   carName: {
-    fontSize: 18,
-    fontWeight: '600',
+    ...typography.h1,
     color: colors.foreground,
     marginBottom: 4,
   },
   carYear: {
-    fontSize: 14,
+    ...typography.body,
     color: colors.mutedForeground,
     marginBottom: 12,
   },
@@ -360,7 +360,7 @@ const styles = StyleSheet.create({
   },
   specText: {
     marginLeft: 4,
-    fontSize: 13,
+    ...typography.bodySmall,
     color: colors.mutedForeground,
   },
   carFooter: {
@@ -376,12 +376,13 @@ const styles = StyleSheet.create({
     alignItems: 'baseline',
   },
   priceValue: {
+    ...typography.display,
     fontSize: 22,
     fontWeight: '700',
     color: colors.foreground,
   },
   priceLabel: {
-    fontSize: 14,
+    ...typography.body,
     color: colors.mutedForeground,
     marginLeft: 2,
   },
@@ -398,8 +399,7 @@ const styles = StyleSheet.create({
   },
   bookButtonText: {
     color: colors.background,
-    fontSize: 14,
-    fontWeight: '600',
+    ...typography.button,
     marginRight: 4,
   },
   emptyContainer: {
@@ -420,13 +420,12 @@ const styles = StyleSheet.create({
     ...shadows.sm,
   },
   emptyTitle: {
-    fontSize: 20,
-    fontWeight: '600',
+    ...typography.display,
     color: colors.foreground,
     marginBottom: 8,
   },
   emptyDescription: {
-    fontSize: 14,
+    ...typography.body,
     color: colors.mutedForeground,
     textAlign: 'center',
   },

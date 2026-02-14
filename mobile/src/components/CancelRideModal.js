@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
-import { colors, shadows, radius } from '../theme/colors';
+import { colors, shadows, radius, useTypography } from '../theme/colors';
 
 const CANCELLATION_REASONS = [
   {
@@ -54,7 +54,9 @@ export default function CancelRideModal({
   onConfirm,
   isLoading = false,
 }) {
-  const { t } = useTranslation();
+const typography = useTypography();
+  const styles = React.useMemo(() => createStyles(typography), [typography]);
+    const { t } = useTranslation();
   const [selectedReason, setSelectedReason] = useState(null);
   const [additionalNote, setAdditionalNote] = useState('');
 
@@ -201,7 +203,7 @@ export default function CancelRideModal({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   overlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
@@ -224,15 +226,14 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   title: {
-    fontSize: 22,
-    fontWeight: '700',
+    ...typography.display,
     color: colors.foreground,
   },
   closeButton: {
     padding: 4,
   },
   subtitle: {
-    fontSize: 15,
+    ...typography.body,
     color: colors.mutedForeground,
     marginBottom: 20,
   },
@@ -243,7 +244,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.muted,
     padding: 16,
     borderRadius: radius.lg,
     marginBottom: 12,
@@ -272,7 +273,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary + '15',
   },
   reasonText: {
-    fontSize: 15,
+    ...typography.bodyMedium,
     color: colors.foreground,
     flex: 1,
   },
@@ -285,16 +286,16 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   noteLabel: {
-    fontSize: 14,
+    ...typography.bodyMedium,
     fontWeight: '600',
     color: colors.foreground,
     marginBottom: 8,
   },
   noteInput: {
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.background,
     borderRadius: radius.lg,
     padding: 12,
-    fontSize: 15,
+    ...typography.bodyMedium,
     color: colors.foreground,
     minHeight: 80,
     textAlignVertical: 'top',
@@ -302,7 +303,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   characterCount: {
-    fontSize: 12,
+    ...typography.caption,
     color: colors.mutedForeground,
     textAlign: 'right',
     marginTop: 4,
@@ -316,12 +317,13 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 16,
     borderRadius: radius.lg,
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.muted,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   cancelButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...typography.h2,
     color: colors.foreground,
   },
   confirmButton: {
@@ -335,8 +337,7 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   confirmButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...typography.h2,
     color: colors.background,
   },
 });

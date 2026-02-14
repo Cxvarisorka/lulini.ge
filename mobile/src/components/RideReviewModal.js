@@ -12,10 +12,12 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
-import { colors, shadows, radius } from '../theme/colors';
+import { colors, shadows, radius, useTypography } from '../theme/colors';
 
 export default function RideReviewModal({ visible, ride, onClose, onSubmit, isLoading }) {
-  const { t } = useTranslation();
+const typography = useTypography();
+  const styles = React.useMemo(() => createStyles(typography), [typography]);
+    const { t } = useTranslation();
   const [rating, setRating] = useState(0);
   const [review, setReview] = useState('');
   const [scaleValues] = useState([1, 2, 3, 4, 5].map(() => new Animated.Value(1)));
@@ -196,7 +198,7 @@ export default function RideReviewModal({ visible, ride, onClose, onSubmit, isLo
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
@@ -220,13 +222,13 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   title: {
-    fontSize: 24,
+    ...typography.display,
     fontWeight: '700',
     color: colors.foreground,
     marginBottom: 8,
   },
   subtitle: {
-    fontSize: 15,
+    ...typography.body,
     color: colors.mutedForeground,
     textAlign: 'center',
   },
@@ -251,8 +253,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   driverName: {
-    fontSize: 18,
-    fontWeight: '600',
+    ...typography.h1,
     color: colors.foreground,
     marginBottom: 4,
   },
@@ -261,7 +262,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   vehicleText: {
-    fontSize: 14,
+    ...typography.body,
     color: colors.mutedForeground,
     marginLeft: 4,
   },
@@ -270,8 +271,7 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   ratingLabel: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...typography.h2,
     color: colors.foreground,
     marginBottom: 16,
   },
@@ -285,8 +285,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 4,
   },
   ratingText: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...typography.h2,
     color: colors.primary,
     marginTop: 8,
   },
@@ -294,7 +293,7 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   reviewLabel: {
-    fontSize: 14,
+    ...typography.bodyMedium,
     fontWeight: '600',
     color: colors.foreground,
     marginBottom: 8,
@@ -303,7 +302,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.secondary,
     borderRadius: radius.lg,
     padding: 12,
-    fontSize: 15,
+    ...typography.bodyMedium,
     color: colors.foreground,
     minHeight: 100,
   },
@@ -320,12 +319,12 @@ const styles = StyleSheet.create({
   },
   summaryLabel: {
     flex: 1,
-    fontSize: 14,
+    ...typography.body,
     color: colors.mutedForeground,
     marginLeft: 12,
   },
   summaryValue: {
-    fontSize: 14,
+    ...typography.bodyMedium,
     fontWeight: '600',
     color: colors.foreground,
   },
@@ -342,16 +341,15 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   submitButtonText: {
+    ...typography.h2,
     color: colors.background,
-    fontSize: 16,
-    fontWeight: '600',
   },
   skipButton: {
     padding: 12,
     alignItems: 'center',
   },
   skipButtonText: {
+    ...typography.body,
     color: colors.mutedForeground,
-    fontSize: 15,
   },
 });

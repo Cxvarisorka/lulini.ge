@@ -101,6 +101,11 @@
     "paymentMethod": "Payment Method",
     "cash": "Cash",
     "card": "Card",
+    "applePay": "Apple Pay",
+    "googlePay": "Google Pay",
+    "selectPaymentMethod": "Select Payment Method",
+    "applePayDesc": "Fast and secure payment with Apple Pay",
+    "googlePayDesc": "Fast and secure payment with Google Pay",
     "distance": "Distance",
     "duration": "Duration",
     "cancelRide": "Cancel Ride",
@@ -251,6 +256,7 @@
     "fullName": "Full Name",
     "fullNamePlaceholder": "Enter your full name",
     "fullNameRequired": "Full name is required",
+    "nameRequired": "First name and last name are required (at least 2 characters each)",
     "phone": "Phone Number",
     "phoneNumber": "Phone Number",
     "phonePlaceholder": "+995 555 123 456",
@@ -284,7 +290,8 @@
     "fillAllFields": "Please fill in all fields",
     "passwordsNotMatch": "Passwords do not match",
     "passwordTooShort": "Password must be at least 8 characters",
-    "pleaseLogin": "Please login to continue"
+    "pleaseLogin": "Please login to continue",
+    "newUserHint": "New number? You'll create an account after verification"
   },
   "permissions": {
     "welcome": "Welcome!",
@@ -325,7 +332,10 @@
     "currentPhone": "Current Phone",
     "newPhone": "New Phone Number",
     "phoneUpdated": "Phone number updated successfully",
-    "changeNumber": "Change number"
+    "changeNumber": "Change number",
+    "addEmail": "Add Email",
+    "editEmail": "Edit Email",
+    "emailUpdated": "Email updated successfully"
   },
   "languages": {
     "en": "English",
@@ -385,6 +395,7 @@
     "deleteAccount": "Delete Account"
   },
   "payment": {
+    "payment": "Payment",
     "defaultMethod": "Default Payment Method",
     "cash": "Cash",
     "cashDesc": "Pay driver directly with cash",

@@ -31,7 +31,7 @@ export const LanguageProvider = ({ children }) => {
         await i18n.changeLanguage(savedLanguage);
       }
     } catch (error) {
-      console.log('Error loading language:', error);
+      // Error loading language
     } finally {
       setLoading(false);
     }
@@ -43,7 +43,7 @@ export const LanguageProvider = ({ children }) => {
       await i18n.changeLanguage(languageCode);
       setCurrentLanguage(languageCode);
     } catch (error) {
-      console.log('Error changing language:', error);
+      // Error changing language
     }
   };
 

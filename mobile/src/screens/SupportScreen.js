@@ -10,10 +10,12 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
-import { colors, shadows, radius, spacing } from '../theme/colors';
+import { colors, shadows, radius, spacing, useTypography } from '../theme/colors';
 
 export default function SupportScreen({ navigation }) {
-  const { t } = useTranslation();
+const typography = useTypography();
+  const styles = React.useMemo(() => createStyles(typography), [typography]);
+    const { t } = useTranslation();
   const insets = useSafeAreaInsets();
 
   const faqItems = [
@@ -57,7 +59,7 @@ export default function SupportScreen({ navigation }) {
       label: t('support.liveChat'),
       subtitle: t('support.available247'),
       color: colors.info,
-      onPress: () => console.log('Open live chat'),
+      onPress: () => {},
     },
     {
       icon: 'mail',
@@ -199,7 +201,7 @@ export default function SupportScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.muted,
@@ -215,11 +217,9 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xl,
   },
   sectionTitle: {
-    fontSize: 13,
+    ...typography.label,
     fontWeight: '600',
     color: colors.mutedForeground,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
     marginBottom: spacing.sm,
     paddingHorizontal: spacing.sm,
   },
@@ -245,13 +245,13 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   contactLabel: {
-    fontSize: 14,
+    ...typography.bodyMedium,
     fontWeight: '600',
     color: colors.foreground,
     textAlign: 'center',
   },
   contactSubtitle: {
-    fontSize: 11,
+    ...typography.captionSmall,
     color: colors.mutedForeground,
     textAlign: 'center',
     marginTop: 2,
@@ -281,9 +281,9 @@ const styles = StyleSheet.create({
   },
   faqQuestion: {
     flex: 1,
-    fontSize: 15,
-    color: colors.foreground,
+    ...typography.h3,
     fontWeight: '500',
+    color: colors.foreground,
   },
   reportCard: {
     flexDirection: 'row',
@@ -302,12 +302,11 @@ const styles = StyleSheet.create({
     marginLeft: spacing.md,
   },
   reportTitle: {
-    fontSize: 15,
-    fontWeight: '600',
+    ...typography.h3,
     color: colors.foreground,
   },
   reportSubtitle: {
-    fontSize: 13,
+    ...typography.bodySmall,
     color: colors.mutedForeground,
     marginTop: 2,
   },
@@ -332,12 +331,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   historyText: {
-    fontSize: 15,
+    ...typography.h3,
     fontWeight: '500',
     color: colors.foreground,
   },
   historySubtext: {
-    fontSize: 13,
+    ...typography.bodySmall,
     color: colors.mutedForeground,
     marginTop: 2,
   },
@@ -356,12 +355,12 @@ const styles = StyleSheet.create({
     marginHorizontal: spacing.md,
   },
   emergencyTitle: {
-    fontSize: 14,
+    ...typography.bodyMedium,
     fontWeight: '600',
     color: colors.destructive,
   },
   emergencyText: {
-    fontSize: 12,
+    ...typography.caption,
     color: colors.mutedForeground,
     marginTop: 2,
   },
@@ -372,7 +371,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
   },
   emergencyButtonText: {
-    fontSize: 16,
+    ...typography.h2,
     fontWeight: '700',
     color: colors.primaryForeground,
   },

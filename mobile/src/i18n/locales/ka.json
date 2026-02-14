@@ -101,6 +101,11 @@
     "paymentMethod": "გადახდის მეთოდი",
     "cash": "ნაღდი",
     "card": "ბარათი",
+    "applePay": "Apple Pay",
+    "googlePay": "Google Pay",
+    "selectPaymentMethod": "აირჩიეთ გადახდის მეთოდი",
+    "applePayDesc": "სწრაფი და უსაფრთხო გადახდა Apple Pay-ით",
+    "googlePayDesc": "სწრაფი და უსაფრთხო გადახდა Google Pay-ით",
     "distance": "მანძილი",
     "duration": "ხანგრძლივობა",
     "cancelRide": "მგზავრობის გაუქმება",
@@ -252,6 +257,7 @@
     "fullName": "სრული სახელი",
     "fullNamePlaceholder": "შეიყვანეთ სრული სახელი",
     "fullNameRequired": "სრული სახელი სავალდებულოა",
+    "nameRequired": "სახელი და გვარი სავალდებულოა (მინიმუმ 2 სიმბოლო თითოეული)",
     "phone": "ტელეფონის ნომერი",
     "phoneNumber": "ტელეფონის ნომერი",
     "phonePlaceholder": "+995 555 123 456",
@@ -285,7 +291,8 @@
     "fillAllFields": "გთხოვთ შეავსოთ ყველა ველი",
     "passwordsNotMatch": "პაროლები არ ემთხვევა",
     "passwordTooShort": "პაროლი უნდა იყოს მინიმუმ 8 სიმბოლო",
-    "pleaseLogin": "გთხოვთ შეხვიდეთ გასაგრძელებლად"
+    "pleaseLogin": "გთხოვთ შეხვიდეთ გასაგრძელებლად",
+    "newUserHint": "ახალი ნომერი? ვერიფიკაციის შემდეგ შექმნით ანგარიშს"
   },
   "permissions": {
     "welcome": "კეთილი იყოს თქვენი მობრძანება!",
@@ -326,7 +333,10 @@
     "currentPhone": "მიმდინარე ტელეფონი",
     "newPhone": "ახალი ტელეფონის ნომერი",
     "phoneUpdated": "ტელეფონის ნომერი წარმატებით განახლდა",
-    "changeNumber": "ნომრის შეცვლა"
+    "changeNumber": "ნომრის შეცვლა",
+    "addEmail": "ელ. ფოსტის დამატება",
+    "editEmail": "ელ. ფოსტის რედაქტირება",
+    "emailUpdated": "ელ. ფოსტა წარმატებით განახლდა"
   },
   "languages": {
     "en": "ინგლისური",
@@ -386,6 +396,7 @@
     "deleteAccount": "ანგარიშის წაშლა"
   },
   "payment": {
+    "payment": "გადახდის პარამეტრები",
     "defaultMethod": "ნაგულისხმევი გადახდის მეთოდი",
     "cash": "ნაღდი",
     "cashDesc": "მძღოლს პირდაპირ ნაღდით გადახდა",

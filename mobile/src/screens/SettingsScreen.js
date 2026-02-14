@@ -10,10 +10,12 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
-import { colors, shadows, radius, spacing } from '../theme/colors';
+import { colors, shadows, radius, spacing, useTypography } from '../theme/colors';
 
 export default function SettingsScreen({ navigation }) {
-  const { t } = useTranslation();
+const typography = useTypography();
+  const styles = React.useMemo(() => createStyles(typography), [typography]);
+    const { t } = useTranslation();
   const insets = useSafeAreaInsets();
 
   // Settings state (in production, these would be persisted)
@@ -116,19 +118,19 @@ export default function SettingsScreen({ navigation }) {
           icon: 'shield-checkmark',
           label: t('settings.privacyPolicy'),
           type: 'link',
-          onPress: () => console.log('Privacy Policy'),
+          onPress: () => {},
         },
         {
           icon: 'document',
           label: t('settings.termsOfService'),
           type: 'link',
-          onPress: () => console.log('Terms of Service'),
+          onPress: () => {},
         },
         {
           icon: 'trash',
           label: t('settings.deleteAccount'),
           type: 'danger',
-          onPress: () => console.log('Delete Account'),
+          onPress: () => {},
         },
       ],
     },
@@ -154,7 +156,7 @@ export default function SettingsScreen({ navigation }) {
           <Ionicons
             name={item.icon}
             size={20}
-            color={isDanger ? colors.destructive : colors.foreground}
+            color={isDanger ? colors.destructive : colors.primary}
           />
         </View>
         <View style={styles.settingContent}>
@@ -223,7 +225,7 @@ export default function SettingsScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.muted,
@@ -239,18 +241,19 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xl,
   },
   sectionTitle: {
-    fontSize: 13,
-    fontWeight: '600',
+    ...typography.label,
     color: colors.mutedForeground,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
     marginBottom: spacing.sm,
     paddingHorizontal: spacing.sm,
   },
   sectionContent: {
     backgroundColor: colors.background,
     borderRadius: radius.lg,
-    ...shadows.sm,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 3,
   },
   settingItem: {
     flexDirection: 'row',
@@ -265,28 +268,32 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: radius.md,
-    backgroundColor: colors.muted,
+    backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: spacing.md,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
+    elevation: 2,
   },
   settingIconDanger: {
-    backgroundColor: `${colors.destructive}15`,
+    backgroundColor: colors.background,
   },
   settingContent: {
     flex: 1,
     marginRight: spacing.md,
   },
   settingLabel: {
-    fontSize: 15,
-    fontWeight: '500',
+    ...typography.h3,
     color: colors.foreground,
   },
   settingLabelDanger: {
     color: colors.destructive,
   },
   settingDescription: {
-    fontSize: 13,
+    ...typography.bodySmall,
     color: colors.mutedForeground,
     marginTop: 2,
   },
@@ -295,12 +302,11 @@ const styles = StyleSheet.create({
     paddingVertical: spacing['2xl'],
   },
   appName: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...typography.h2,
     color: colors.foreground,
   },
   appVersion: {
-    fontSize: 14,
+    ...typography.body,
     color: colors.mutedForeground,
     marginTop: 4,
   },

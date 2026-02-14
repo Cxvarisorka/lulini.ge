@@ -12,6 +12,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { transferAPI } from '../services/api';
+import { useTypography } from '../theme/colors';
 
 const STATUS_COLORS = {
   pending: { bg: '#fef3c7', text: '#d97706' },
@@ -29,7 +30,9 @@ const VEHICLE_ICONS = {
 };
 
 export default function MyTransfersScreen({ navigation }) {
-  const [transfers, setTransfers] = useState([]);
+const typography = useTypography();
+  const styles = React.useMemo(() => createStyles(typography), [typography]);
+    const [transfers, setTransfers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -40,7 +43,6 @@ export default function MyTransfersScreen({ navigation }) {
         setTransfers(response.data.data.transfers || []);
       }
     } catch (error) {
-      console.log('Error fetching transfers:', error.message);
       Alert.alert('Error', 'Failed to load transfers');
     } finally {
       setLoading(false);
@@ -244,7 +246,7 @@ export default function MyTransfersScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
@@ -284,7 +286,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   statusText: {
-    fontSize: 12,
+    ...typography.caption,
     fontWeight: '600',
   },
   tripTypeBadge: {
@@ -294,7 +296,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#f5f5f5',
   },
   tripTypeText: {
-    fontSize: 12,
+    ...typography.caption,
     color: '#666',
     fontWeight: '500',
   },
@@ -313,9 +315,8 @@ const styles = StyleSheet.create({
   },
   routeAddress: {
     flex: 1,
-    fontSize: 14,
+    ...typography.bodyMedium,
     color: '#1a1a1a',
-    fontWeight: '500',
   },
   routeLine: {
     width: 2,
@@ -339,7 +340,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   detailText: {
-    fontSize: 13,
+    ...typography.bodySmall,
     color: '#666',
     marginLeft: 4,
   },
@@ -353,12 +354,12 @@ const styles = StyleSheet.create({
     alignItems: 'baseline',
   },
   priceLabel: {
-    fontSize: 12,
+    ...typography.caption,
     color: '#666',
     marginRight: 4,
   },
   priceValue: {
-    fontSize: 20,
+    ...typography.display,
     fontWeight: 'bold',
     color: '#1a1a1a',
   },
@@ -368,9 +369,8 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   cancelText: {
-    fontSize: 14,
+    ...typography.bodyMedium,
     color: '#dc2626',
-    fontWeight: '500',
     marginLeft: 4,
   },
   emptyContainer: {
@@ -380,14 +380,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
   },
   emptyTitle: {
-    fontSize: 20,
-    fontWeight: '600',
+    ...typography.display,
     color: '#1a1a1a',
     marginTop: 16,
     marginBottom: 8,
   },
   emptySubtitle: {
-    fontSize: 14,
+    ...typography.body,
     color: '#666',
     textAlign: 'center',
     marginBottom: 24,
@@ -400,8 +399,7 @@ const styles = StyleSheet.create({
   },
   emptyButtonText: {
     color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
+    ...typography.h2,
   },
   fab: {
     position: 'absolute',

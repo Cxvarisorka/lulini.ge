@@ -11,10 +11,12 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
-import { colors, shadows, radius, spacing } from '../theme/colors';
+import { colors, shadows, radius, spacing, useTypography } from '../theme/colors';
 
 export default function AboutScreen({ navigation }) {
-  const { t } = useTranslation();
+const typography = useTypography();
+  const styles = React.useMemo(() => createStyles(typography), [typography]);
+    const { t } = useTranslation();
   const insets = useSafeAreaInsets();
 
   const appInfo = {
@@ -49,17 +51,17 @@ export default function AboutScreen({ navigation }) {
     {
       icon: 'document-text',
       label: t('about.termsOfService'),
-      onPress: () => console.log('Terms'),
+      onPress: () => {},
     },
     {
       icon: 'shield-checkmark',
       label: t('about.privacyPolicy'),
-      onPress: () => console.log('Privacy'),
+      onPress: () => {},
     },
     {
       icon: 'document',
       label: t('about.licenses'),
-      onPress: () => console.log('Licenses'),
+      onPress: () => {},
     },
   ];
 
@@ -188,7 +190,7 @@ export default function AboutScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.muted,
@@ -215,13 +217,14 @@ const styles = StyleSheet.create({
     ...shadows.md,
   },
   appName: {
-    fontSize: 24,
+    ...typography.display,
     fontWeight: '700',
     color: colors.foreground,
     marginBottom: spacing.xs,
   },
   appTagline: {
-    fontSize: 15,
+    ...typography.h3,
+    fontWeight: '400',
     color: colors.mutedForeground,
     marginBottom: spacing.md,
   },
@@ -230,12 +233,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   versionText: {
-    fontSize: 14,
-    fontWeight: '500',
+    ...typography.bodyMedium,
     color: colors.foreground,
   },
   buildText: {
-    fontSize: 14,
+    ...typography.body,
     color: colors.mutedForeground,
     marginLeft: spacing.xs,
   },
@@ -243,7 +245,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xl,
   },
   sectionTitle: {
-    fontSize: 13,
+    ...typography.bodySmall,
     fontWeight: '600',
     color: colors.mutedForeground,
     textTransform: 'uppercase',
@@ -258,7 +260,8 @@ const styles = StyleSheet.create({
     ...shadows.sm,
   },
   descriptionText: {
-    fontSize: 15,
+    ...typography.h3,
+    fontWeight: '400',
     color: colors.foreground,
     lineHeight: 24,
   },
@@ -287,7 +290,7 @@ const styles = StyleSheet.create({
   },
   linkLabel: {
     flex: 1,
-    fontSize: 15,
+    ...typography.h3,
     fontWeight: '500',
     color: colors.foreground,
   },
@@ -310,12 +313,11 @@ const styles = StyleSheet.create({
     marginLeft: spacing.md,
   },
   rateTitle: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...typography.h2,
     color: colors.foreground,
   },
   rateSubtitle: {
-    fontSize: 13,
+    ...typography.bodySmall,
     color: colors.mutedForeground,
     marginTop: 2,
   },
@@ -324,11 +326,11 @@ const styles = StyleSheet.create({
     paddingVertical: spacing['2xl'],
   },
   footerText: {
-    fontSize: 13,
+    ...typography.bodySmall,
     color: colors.mutedForeground,
   },
   footerSubtext: {
-    fontSize: 13,
+    ...typography.bodySmall,
     color: colors.mutedForeground,
     marginTop: spacing.xs,
   },

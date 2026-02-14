@@ -101,6 +101,11 @@
     "paymentMethod": "Metodo de Pago",
     "cash": "Efectivo",
     "card": "Tarjeta",
+    "applePay": "Apple Pay",
+    "googlePay": "Google Pay",
+    "selectPaymentMethod": "Seleccionar Método de Pago",
+    "applePayDesc": "Pago rápido y seguro con Apple Pay",
+    "googlePayDesc": "Pago rápido y seguro con Google Pay",
     "distance": "Distancia",
     "duration": "Duracion",
     "cancelRide": "Cancelar Viaje",
@@ -251,6 +256,7 @@
     "fullName": "Nombre Completo",
     "fullNamePlaceholder": "Ingresa tu nombre completo",
     "fullNameRequired": "El nombre completo es requerido",
+    "nameRequired": "El nombre y apellido son requeridos (minimo 2 caracteres cada uno)",
     "phone": "Numero de Telefono",
     "phoneNumber": "Numero de Telefono",
     "phonePlaceholder": "+995 555 123 456",
@@ -284,7 +290,8 @@
     "fillAllFields": "Por favor completa todos los campos",
     "passwordsNotMatch": "Las contrasenas no coinciden",
     "passwordTooShort": "La contrasena debe tener al menos 8 caracteres",
-    "pleaseLogin": "Por favor inicia sesion para continuar"
+    "pleaseLogin": "Por favor inicia sesion para continuar",
+    "newUserHint": "Numero nuevo? Crearas una cuenta despues de la verificacion"
   },
   "permissions": {
     "welcome": "Bienvenido!",
@@ -325,7 +332,10 @@
     "currentPhone": "Telefono Actual",
     "newPhone": "Nuevo Numero de Telefono",
     "phoneUpdated": "Numero de telefono actualizado exitosamente",
-    "changeNumber": "Cambiar numero"
+    "changeNumber": "Cambiar numero",
+    "addEmail": "Agregar Correo",
+    "editEmail": "Editar Correo",
+    "emailUpdated": "Correo actualizado exitosamente"
   },
   "languages": {
     "en": "Ingles",
@@ -385,6 +395,7 @@
     "deleteAccount": "Eliminar Cuenta"
   },
   "payment": {
+    "payment": "Pago",
     "defaultMethod": "Metodo de Pago Predeterminado",
     "cash": "Efectivo",
     "cashDesc": "Pagar al conductor directamente",

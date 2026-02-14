@@ -11,7 +11,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 
-import { colors, shadows, radius } from '../theme/colors';
+import { colors, shadows, radius, useTypography } from '../theme/colors';
 import { taxiAPI } from '../services/api';
 
 const STATUS_COLORS = {
@@ -25,7 +25,9 @@ const STATUS_COLORS = {
 };
 
 export default function TaxiHistoryScreen({ navigation }) {
-  const { t } = useTranslation();
+const typography = useTypography();
+  const styles = React.useMemo(() => createStyles(typography), [typography]);
+    const { t } = useTranslation();
   const [rides, setRides] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -41,7 +43,7 @@ export default function TaxiHistoryScreen({ navigation }) {
         setRides(response.data.data.rides || []);
       }
     } catch (error) {
-      console.log('Error fetching rides:', error);
+      // Error fetching rides
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -177,7 +179,7 @@ export default function TaxiHistoryScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.secondary,
@@ -211,7 +213,7 @@ const styles = StyleSheet.create({
   },
   dateText: {
     marginLeft: 6,
-    fontSize: 13,
+    ...typography.bodySmall,
     color: colors.mutedForeground,
   },
   statusBadge: {
@@ -220,7 +222,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.full,
   },
   statusText: {
-    fontSize: 12,
+    ...typography.caption,
     fontWeight: '600',
   },
   routeContainer: {
@@ -246,14 +248,13 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   routeLabel: {
-    fontSize: 11,
+    ...typography.captionSmall,
     color: colors.mutedForeground,
     marginBottom: 2,
   },
   routeAddress: {
-    fontSize: 14,
+    ...typography.bodyMedium,
     color: colors.foreground,
-    fontWeight: '500',
   },
   rideFooter: {
     flexDirection: 'row',
@@ -268,7 +269,7 @@ const styles = StyleSheet.create({
   },
   footerText: {
     marginLeft: 4,
-    fontSize: 13,
+    ...typography.bodySmall,
     color: colors.mutedForeground,
   },
   emptyContainer: {
@@ -288,13 +289,12 @@ const styles = StyleSheet.create({
     ...shadows.sm,
   },
   emptyTitle: {
-    fontSize: 20,
-    fontWeight: '600',
+    ...typography.display,
     color: colors.foreground,
     marginBottom: 8,
   },
   emptyDescription: {
-    fontSize: 14,
+    ...typography.body,
     color: colors.mutedForeground,
     textAlign: 'center',
     marginBottom: 24,
@@ -309,8 +309,7 @@ const styles = StyleSheet.create({
   },
   bookButtonText: {
     color: colors.background,
-    fontSize: 16,
-    fontWeight: '600',
+    ...typography.h2,
     marginLeft: 8,
   },
 });
