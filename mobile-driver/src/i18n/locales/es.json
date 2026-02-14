@@ -13,7 +13,8 @@
     "done": "Hecho",
     "close": "Cerrar",
     "accept": "Aceptar",
-    "decline": "Rechazar"
+    "decline": "Rechazar",
+    "unknown": "Desconocido"
   },
   "auth": {
     "login": "Iniciar sesión",
@@ -177,6 +178,7 @@
     "mapProvider": "Mapa de navegación",
     "mapProviderDescription": "Elige qué aplicación de mapas usar para navegar a los puntos de recogida y entrega.",
     "mapNotInstalled": "La aplicación de mapas no está instalada. Abriendo en el navegador.",
+    "builtinMap": "Mapa integrado",
     "notifications": "Notificaciones",
     "rideRequests": "Solicitudes de viaje",
     "messages": "Mensajes",
@@ -199,6 +201,31 @@
     "rideAccepted": "Viaje aceptado",
     "rideCancelled": "Viaje cancelado",
     "rideCompleted": "Viaje completado"
+  },
+  "nav": {
+    "calculatingRoute": "Calculando ruta...",
+    "recalculating": "Recalculando...",
+    "routeError": "No se pudo calcular la ruta. Inténtelo de nuevo.",
+    "arrived": "Has llegado!",
+    "exit": "Salir",
+    "depart": "Diríjase por {{street}}",
+    "arrive": "Ha llegado a su destino",
+    "straight": "Continúe recto",
+    "straight_onto": "Continúe por {{street}}",
+    "left": "Gire a la izquierda",
+    "left_onto": "Gire a la izquierda en {{street}}",
+    "right": "Gire a la derecha",
+    "right_onto": "Gire a la derecha en {{street}}",
+    "slight_left": "Gire ligeramente a la izquierda",
+    "slight_left_onto": "Gire ligeramente a la izquierda en {{street}}",
+    "slight_right": "Gire ligeramente a la derecha",
+    "slight_right_onto": "Gire ligeramente a la derecha en {{street}}",
+    "sharp_left": "Gire bruscamente a la izquierda",
+    "sharp_left_onto": "Gire bruscamente a la izquierda en {{street}}",
+    "sharp_right": "Gire bruscamente a la derecha",
+    "sharp_right_onto": "Gire bruscamente a la derecha en {{street}}",
+    "uturn": "Haga un giro en U",
+    "uturn_onto": "Haga un giro en U en {{street}}"
   },
   "errors": {
     "somethingWentWrong": "Algo salió mal",

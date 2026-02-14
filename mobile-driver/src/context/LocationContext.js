@@ -45,11 +45,8 @@ export const LocationProvider = ({ children }) => {
 
   const requestLocationPermission = async () => {
     try {
-      console.log('Requesting location permissions...');
-
       // First check if location services are enabled
       const locationEnabled = await Location.hasServicesEnabledAsync();
-      console.log('Location services enabled:', locationEnabled);
 
       if (!locationEnabled) {
         if (!isShowingAlert.current) {
@@ -70,10 +67,8 @@ export const LocationProvider = ({ children }) => {
 
       // Request permission
       const { status } = await Location.requestForegroundPermissionsAsync();
-      console.log('Foreground permission status:', status);
 
       if (status !== 'granted') {
-        console.log('Location permission denied');
         if (!isShowingAlert.current) {
           isShowingAlert.current = true;
           Alert.alert(
@@ -91,7 +86,6 @@ export const LocationProvider = ({ children }) => {
       }
 
       // Get initial location with timeout
-      console.log('Getting current position...');
       const currentLocation = await Promise.race([
         Location.getCurrentPositionAsync({
           accuracy: Location.Accuracy.Balanced,
@@ -102,7 +96,6 @@ export const LocationProvider = ({ children }) => {
           setTimeout(() => reject(new Error('Location request timed out')), 15000)
         )
       ]);
-      console.log('Current position:', currentLocation.coords);
 
       const newLocation = {
         latitude: currentLocation.coords.latitude,
@@ -124,14 +117,11 @@ export const LocationProvider = ({ children }) => {
           setAddress(addressString || 'Current Location');
         }
       } catch (err) {
-        console.log('Error getting address:', err);
+        // Failed to reverse geocode
       }
 
       return true;
     } catch (err) {
-      console.log('Error requesting location permission:', err);
-      console.error('Full error:', err);
-
       let errorMessage = 'Failed to get your location. ';
       if (err.message.includes('timeout')) {
         errorMessage += 'Make sure you have a clear view of the sky and try again.';
@@ -160,24 +150,18 @@ export const LocationProvider = ({ children }) => {
 
   const startTracking = async () => {
     try {
-      console.log('Starting location tracking...');
-
       // Check if we already have permission
       const { status } = await Location.getForegroundPermissionsAsync();
-      console.log('Current permission status:', status);
 
       if (status !== 'granted') {
-        console.log('Permission not granted, requesting...');
         const hasPermission = await requestLocationPermission();
         if (!hasPermission) {
           return false;
         }
       } else {
-        console.log('Permission already granted');
         // Get initial location if we don't have one
         if (!location) {
           try {
-            console.log('Getting initial location...');
             const currentLocation = await Promise.race([
               Location.getCurrentPositionAsync({
                 accuracy: Location.Accuracy.Balanced,
@@ -190,12 +174,9 @@ export const LocationProvider = ({ children }) => {
               latitude: currentLocation.coords.latitude,
               longitude: currentLocation.coords.longitude,
             };
-            console.log('Initial location obtained:', coords);
             setLocation(coords);
           } catch (err) {
-            console.log('Error getting initial location:', err);
             // Use default location as fallback
-            console.log('Using default location as fallback');
             setLocation(DEFAULT_LOCATION);
           }
         }
@@ -203,7 +184,6 @@ export const LocationProvider = ({ children }) => {
 
       // Note: Background location tracking removed for now
       // Only using foreground location which works with Expo Go
-      console.log('Starting foreground location tracking...');
 
       // Start watching location (foreground only)
       locationSubscription.current = await Location.watchPositionAsync(
@@ -217,7 +197,6 @@ export const LocationProvider = ({ children }) => {
             latitude: newLocation.coords.latitude,
             longitude: newLocation.coords.longitude,
           };
-          console.log('Location updated:', coords);
           setLocation(coords);
 
           // Send location to backend
@@ -226,11 +205,8 @@ export const LocationProvider = ({ children }) => {
       );
 
       setIsTracking(true);
-      console.log('Location tracking started successfully');
       return true;
     } catch (err) {
-      console.log('Error starting location tracking:', err);
-      console.error('Full error:', err);
       setError('Failed to start tracking');
 
       // Don't show alert for permission errors (already handled)
@@ -261,13 +237,12 @@ export const LocationProvider = ({ children }) => {
     try {
       await driverAPI.updateLocation(coords);
     } catch (err) {
-      console.log('Error updating location on server:', err);
+      // Failed to update location on server
     }
   };
 
   const getCurrentLocation = async () => {
     try {
-      console.log('Getting current location...');
       const currentLocation = await Promise.race([
         Location.getCurrentPositionAsync({
           accuracy: Location.Accuracy.Balanced,
@@ -278,7 +253,6 @@ export const LocationProvider = ({ children }) => {
           setTimeout(() => reject(new Error('Location request timed out')), 15000)
         )
       ]);
-      console.log('Got location:', currentLocation.coords);
 
       const coords = {
         latitude: currentLocation.coords.latitude,
@@ -288,9 +262,6 @@ export const LocationProvider = ({ children }) => {
       setLocation(coords);
       return coords;
     } catch (err) {
-      console.log('Error getting current location:', err);
-      console.error('Full error:', err);
-
       let errorMessage = 'Failed to get your location. ';
       if (err.message.includes('timeout')) {
         errorMessage += 'Make sure you have a clear view of the sky and try again.';

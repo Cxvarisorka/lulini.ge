@@ -20,7 +20,7 @@ export const useDriver = () => {
 export const DriverProvider = ({ children }) => {
   const { isAuthenticated } = useAuth();
   const { startTracking, stopTracking, isTracking } = useLocation();
-  const { socket } = useSocket();
+  const { socket, setDriverOnlineStatus } = useSocket();
 
   const [isOnline, setIsOnline] = useState(false);
   const [activeRides, setActiveRides] = useState([]);
@@ -49,7 +49,6 @@ export const DriverProvider = ({ children }) => {
 
   // Invalidate rides cache
   const invalidateCache = useCallback(() => {
-    console.log('Invalidating rides cache');
     ridesCache.current.isValid = false;
   }, []);
 
@@ -69,7 +68,6 @@ export const DriverProvider = ({ children }) => {
 
     // Handle ride completion event - update trips and earnings
     const handleRideCompleted = (data) => {
-      console.log('Ride completed, updating stats:', data);
       if (data.updatedStats) {
         updateStats({
           trips: data.updatedStats.totalTrips,
@@ -86,7 +84,6 @@ export const DriverProvider = ({ children }) => {
 
     // Handle ride review event - update rating
     const handleRideReviewed = (data) => {
-      console.log('Ride reviewed, updating rating:', data);
       if (data.updatedStats) {
         updateStats({
           rating: data.updatedStats.rating,
@@ -95,20 +92,17 @@ export const DriverProvider = ({ children }) => {
     };
 
     // Handle new ride request - invalidate cache
-    const handleNewRide = (data) => {
-      console.log('New ride received, invalidating cache');
+    const handleNewRide = () => {
       invalidateCache();
     };
 
     // Handle ride cancelled - invalidate cache
-    const handleRideCancelled = (data) => {
-      console.log('Ride cancelled, invalidating cache');
+    const handleRideCancelled = () => {
       invalidateCache();
     };
 
     // Handle ride updated - invalidate cache
-    const handleRideUpdated = (data) => {
-      console.log('Ride updated, invalidating cache');
+    const handleRideUpdated = () => {
       invalidateCache();
     };
 
@@ -135,16 +129,17 @@ export const DriverProvider = ({ children }) => {
 
         // Sync online status with server
         const serverStatus = response.data.data.stats.status;
-        const isDriverOnline = serverStatus === 'online' || serverStatus === 'busy';
-        setIsOnline(isDriverOnline);
+        const driverOnline = serverStatus === 'online' || serverStatus === 'busy';
+        setIsOnline(driverOnline);
+        setDriverOnlineStatus(driverOnline);
 
         // If driver is online on server, restart location tracking
-        if (isDriverOnline && !isTracking) {
+        if (driverOnline && !isTracking) {
           startTracking();
         }
       }
     } catch (error) {
-      console.log('Error loading driver stats:', error);
+      // Failed to load driver stats
     }
   };
 
@@ -152,11 +147,9 @@ export const DriverProvider = ({ children }) => {
   const loadAllRides = useCallback(async (forceRefresh = false) => {
     // Return cached data if valid and not forcing refresh
     if (!forceRefresh && isCacheValid()) {
-      console.log('Using cached rides data');
       return { rides: ridesCache.current.allRides, fromCache: true };
     }
 
-    console.log('Fetching fresh rides data from server');
     try {
       const response = await rideAPI.getMyRides('');
       if (response.data.success) {
@@ -180,10 +173,8 @@ export const DriverProvider = ({ children }) => {
       }
       return { rides: [], fromCache: false };
     } catch (error) {
-      console.log('Error loading rides:', error);
       // Return cached data on error if available
       if (ridesCache.current.allRides.length > 0) {
-        console.log('Returning stale cache due to error');
         return { rides: ridesCache.current.allRides, fromCache: true };
       }
       throw error;
@@ -200,7 +191,7 @@ export const DriverProvider = ({ children }) => {
       );
       setActiveRides(active);
     } catch (error) {
-      console.log('Error loading active rides:', error);
+      // Failed to load active rides
     }
   }, [loadAllRides]);
 
@@ -221,6 +212,7 @@ export const DriverProvider = ({ children }) => {
       const response = await driverAPI.updateStatus('online');
       if (response.data.success) {
         setIsOnline(true);
+        setDriverOnlineStatus(true);
 
         return { success: true };
       }
@@ -229,7 +221,6 @@ export const DriverProvider = ({ children }) => {
       stopTracking();
       return { success: false, message: 'Failed to update status on server. Please try again.' };
     } catch (error) {
-      console.log('Error going online:', error);
       // Make sure to stop tracking if there's an error
       stopTracking();
       return {
@@ -252,13 +243,13 @@ export const DriverProvider = ({ children }) => {
       const response = await driverAPI.updateStatus('offline');
       if (response.data.success) {
         setIsOnline(false);
+        setDriverOnlineStatus(false);
 
         return { success: true };
       }
 
       return { success: false, message: 'Failed to go offline' };
     } catch (error) {
-      console.log('Error going offline:', error);
       return { success: false, message: error.message };
     } finally {
       setLoading(false);

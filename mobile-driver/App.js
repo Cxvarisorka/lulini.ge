@@ -28,11 +28,15 @@ Notifications.setNotificationHandler({
 
 export default function App() {
   useEffect(() => {
-    // Request notification permissions on app load
+    // Check and request notification permissions only if not already granted
     const requestPermissions = async () => {
-      const { status } = await Notifications.requestPermissionsAsync();
-      if (status !== 'granted') {
-        console.log('Notification permissions not granted');
+      try {
+        const { status: existingStatus } = await Notifications.getPermissionsAsync();
+        if (existingStatus !== 'granted') {
+          await Notifications.requestPermissionsAsync();
+        }
+      } catch (error) {
+        // Permission request failed silently
       }
     };
 

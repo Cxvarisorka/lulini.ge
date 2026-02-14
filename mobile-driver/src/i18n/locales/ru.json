@@ -13,7 +13,8 @@
     "done": "Готово",
     "close": "Закрыть",
     "accept": "Принять",
-    "decline": "Отклонить"
+    "decline": "Отклонить",
+    "unknown": "Неизвестно"
   },
   "auth": {
     "login": "Войти",
@@ -177,6 +178,7 @@
     "mapProvider": "Карта навигации",
     "mapProviderDescription": "Выберите приложение карт для навигации к местам посадки и высадки.",
     "mapNotInstalled": "Приложение карт не установлено. Открываем в браузере.",
+    "builtinMap": "Встроенная карта",
     "notifications": "Уведомления",
     "rideRequests": "Запросы на поездки",
     "messages": "Сообщения",
@@ -199,6 +201,31 @@
     "rideAccepted": "Поездка принята",
     "rideCancelled": "Поездка отменена",
     "rideCompleted": "Поездка завершена"
+  },
+  "nav": {
+    "calculatingRoute": "Расчёт маршрута...",
+    "recalculating": "Пересчёт маршрута...",
+    "routeError": "Не удалось рассчитать маршрут. Попробуйте снова.",
+    "arrived": "Вы прибыли!",
+    "exit": "Выход",
+    "depart": "Двигайтесь по {{street}}",
+    "arrive": "Вы прибыли к месту назначения",
+    "straight": "Продолжайте прямо",
+    "straight_onto": "Продолжайте по {{street}}",
+    "left": "Поверните налево",
+    "left_onto": "Поверните налево на {{street}}",
+    "right": "Поверните направо",
+    "right_onto": "Поверните направо на {{street}}",
+    "slight_left": "Возьмите левее",
+    "slight_left_onto": "Возьмите левее на {{street}}",
+    "slight_right": "Возьмите правее",
+    "slight_right_onto": "Возьмите правее на {{street}}",
+    "sharp_left": "Резко налево",
+    "sharp_left_onto": "Резко налево на {{street}}",
+    "sharp_right": "Резко направо",
+    "sharp_right_onto": "Резко направо на {{street}}",
+    "uturn": "Выполните разворот",
+    "uturn_onto": "Выполните разворот на {{street}}"
   },
   "errors": {
     "somethingWentWrong": "Что-то пошло не так",

@@ -38,7 +38,7 @@ export const AuthProvider = ({ children }) => {
         }
       }
     } catch (error) {
-      console.log('Error checking auth status:', error);
+      // Failed to check auth status
     } finally {
       setLoading(false);
     }
@@ -69,7 +69,6 @@ export const AuthProvider = ({ children }) => {
 
       return { success: false, message: response.data.message };
     } catch (error) {
-      console.log('Login error:', error);
       const message = error.message === 'Not authorized as driver'
         ? error.message
         : error.response?.data?.message || 'Invalid credentials';
@@ -81,7 +80,7 @@ export const AuthProvider = ({ children }) => {
     try {
       await authAPI.logout();
     } catch (error) {
-      console.log('Logout error:', error);
+      // Logout API call failed, proceeding with local cleanup
     } finally {
       await SecureStore.deleteItemAsync('token');
       await SecureStore.deleteItemAsync('user');
@@ -96,7 +95,7 @@ export const AuthProvider = ({ children }) => {
       await SecureStore.setItemAsync('user', JSON.stringify(updatedUser));
       setUser(updatedUser);
     } catch (error) {
-      console.log('Error updating user:', error);
+      // Failed to update user data
     }
   };
 

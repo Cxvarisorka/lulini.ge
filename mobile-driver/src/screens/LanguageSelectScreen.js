@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   View,
   Text,
@@ -11,12 +11,14 @@ import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useLanguage } from '../context/LanguageContext';
-import { colors, shadows, radius } from '../theme/colors';
+import { colors, shadows, radius, useTypography } from '../theme/colors';
 
 export default function LanguageSelectScreen({ navigation }) {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { currentLanguage, changeLanguage, languages } = useLanguage();
+  const typography = useTypography();
+  const styles = useMemo(() => createStyles(typography), [typography]);
 
   const handleLanguageSelect = async (languageCode) => {
     await changeLanguage(languageCode);
@@ -57,7 +59,7 @@ export default function LanguageSelectScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
@@ -76,8 +78,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   title: {
-    fontSize: 18,
-    fontWeight: '600',
+    ...typography.h2,
     color: colors.foreground,
   },
   content: {
@@ -99,12 +100,12 @@ const styles = StyleSheet.create({
     borderColor: colors.primary,
   },
   languageName: {
-    fontSize: 16,
+    ...typography.bodyMedium,
     fontWeight: '600',
     color: colors.foreground,
   },
   languageNameEn: {
-    fontSize: 14,
+    ...typography.caption,
     color: colors.mutedForeground,
     marginTop: 2,
   },

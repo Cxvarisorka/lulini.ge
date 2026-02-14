@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -16,12 +16,14 @@ import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../context/AuthContext';
-import { colors, shadows, radius } from '../theme/colors';
+import { colors, shadows, radius, useTypography } from '../theme/colors';
 
 export default function LoginScreen() {
   const { t } = useTranslation();
   const { login } = useAuth();
   const insets = useSafeAreaInsets();
+  const typography = useTypography();
+  const styles = useMemo(() => createStyles(typography), [typography]);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -144,7 +146,7 @@ export default function LoginScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
@@ -162,20 +164,20 @@ const styles = StyleSheet.create({
     width: 100,
     height: 100,
     borderRadius: 50,
-    backgroundColor: colors.secondary,
+    backgroundColor: `${colors.primary}15`,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 24,
     ...shadows.md,
   },
   title: {
-    fontSize: 28,
+    ...typography.display,
     fontWeight: '700',
     color: colors.foreground,
     marginBottom: 8,
   },
   subtitle: {
-    fontSize: 16,
+    ...typography.bodySmall,
     color: colors.mutedForeground,
     textAlign: 'center',
   },
@@ -187,7 +189,7 @@ const styles = StyleSheet.create({
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.muted,
     borderRadius: radius.lg,
     marginBottom: 16,
     paddingHorizontal: 16,
@@ -199,7 +201,7 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
-    fontSize: 16,
+    ...typography.body,
     color: colors.foreground,
   },
   passwordInput: {
@@ -224,8 +226,7 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   loginButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...typography.button,
     color: colors.primaryForeground,
     marginRight: 8,
   },
@@ -234,7 +235,7 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
   },
   footerText: {
-    fontSize: 12,
+    ...typography.captionSmall,
     color: colors.mutedForeground,
   },
 });

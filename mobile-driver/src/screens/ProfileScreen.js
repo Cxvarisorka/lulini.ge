@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   View,
   Text,
@@ -13,13 +13,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../context/AuthContext';
 import { useDriver } from '../context/DriverContext';
-import { colors, shadows, radius, spacing } from '../theme/colors';
+import { colors, shadows, radius, spacing, useTypography } from '../theme/colors';
 
 export default function ProfileScreen({ navigation }) {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { user, logout } = useAuth();
   const { stats } = useDriver();
+  const typography = useTypography();
+  const styles = useMemo(() => createStyles(typography), [typography]);
 
   const getInitials = () => {
     if (!user) return '?';
@@ -57,7 +59,7 @@ export default function ProfileScreen({ navigation }) {
       icon: 'star',
       value: stats.rating?.toFixed(1) || '0.0',
       label: t('profile.rating') || 'Rating',
-      color: '#FFD700',
+      color: colors.gold,
     },
   ];
 
@@ -110,7 +112,7 @@ export default function ProfileScreen({ navigation }) {
 
           {/* Rating */}
           <View style={styles.ratingContainer}>
-            <Ionicons name="star" size={18} color="#FFD700" />
+            <Ionicons name="star" size={18} color={colors.gold} />
             <Text style={styles.ratingText}>{stats.rating?.toFixed(1) || '0.0'}</Text>
             <Text style={styles.reviewCount} numberOfLines={1}>
               ({stats.totalReviews || 0} {stats.totalReviews === 1 ? t('profile.review') : t('profile.reviews')})
@@ -211,7 +213,7 @@ export default function ProfileScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.muted,
@@ -261,13 +263,13 @@ const styles = StyleSheet.create({
     borderColor: colors.background,
   },
   name: {
-    fontSize: 24,
+    ...typography.h1,
     fontWeight: '700',
     color: colors.foreground,
     marginBottom: spacing.xs,
   },
   email: {
-    fontSize: 14,
+    ...typography.bodySmall,
     color: colors.mutedForeground,
     marginBottom: spacing.md,
   },
@@ -280,13 +282,13 @@ const styles = StyleSheet.create({
     borderRadius: radius.full,
   },
   ratingText: {
-    fontSize: 16,
+    ...typography.body,
     fontWeight: '600',
     color: colors.foreground,
     marginLeft: spacing.xs,
   },
   reviewCount: {
-    fontSize: 13,
+    ...typography.caption,
     color: colors.mutedForeground,
     marginLeft: spacing.xs,
   },
@@ -294,11 +296,9 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
   },
   sectionTitle: {
-    fontSize: 12,
+    ...typography.label,
     fontWeight: '600',
     color: colors.mutedForeground,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
     marginBottom: spacing.sm,
     paddingHorizontal: spacing.xs,
   },
@@ -323,13 +323,13 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   statValue: {
-    fontSize: 17,
+    ...typography.bodyMedium,
     fontWeight: '700',
     color: colors.foreground,
     marginBottom: 2,
   },
   statLabel: {
-    fontSize: 11,
+    ...typography.captionSmall,
     color: colors.mutedForeground,
     textAlign: 'center',
   },
@@ -361,16 +361,16 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   infoLabel: {
-    fontSize: 11,
+    ...typography.captionSmall,
     color: colors.mutedForeground,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginBottom: 2,
   },
   infoValue: {
-    fontSize: 15,
-    color: colors.foreground,
+    ...typography.bodySmall,
     fontWeight: '500',
+    color: colors.foreground,
   },
   infoDivider: {
     height: 1,
@@ -409,9 +409,9 @@ const styles = StyleSheet.create({
     marginRight: spacing.md,
   },
   menuItemText: {
-    fontSize: 15,
-    color: colors.foreground,
+    ...typography.bodySmall,
     fontWeight: '500',
+    color: colors.foreground,
     flex: 1,
   },
   logoutButton: {
@@ -425,8 +425,8 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   logoutText: {
-    fontSize: 16,
-    color: colors.destructive,
+    ...typography.body,
     fontWeight: '600',
+    color: colors.destructive,
   },
 });

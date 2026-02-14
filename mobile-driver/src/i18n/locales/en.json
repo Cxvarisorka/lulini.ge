@@ -13,7 +13,8 @@
     "done": "Done",
     "close": "Close",
     "accept": "Accept",
-    "decline": "Decline"
+    "decline": "Decline",
+    "unknown": "Unknown"
   },
   "auth": {
     "login": "Login",
@@ -177,6 +178,7 @@
     "mapProvider": "Navigation Map",
     "mapProviderDescription": "Choose which map app to use for navigation to pickup and dropoff locations.",
     "mapNotInstalled": "Map app not installed. Opening in browser.",
+    "builtinMap": "Built-in Map",
     "notifications": "Notifications",
     "rideRequests": "Ride Requests",
     "messages": "Messages",
@@ -199,6 +201,31 @@
     "rideAccepted": "Ride accepted",
     "rideCancelled": "Ride cancelled",
     "rideCompleted": "Ride completed"
+  },
+  "nav": {
+    "calculatingRoute": "Calculating route...",
+    "recalculating": "Recalculating...",
+    "routeError": "Could not calculate route. Please try again.",
+    "arrived": "You have arrived!",
+    "exit": "Exit",
+    "depart": "Head on {{street}}",
+    "arrive": "You have arrived at your destination",
+    "straight": "Continue straight",
+    "straight_onto": "Continue onto {{street}}",
+    "left": "Turn left",
+    "left_onto": "Turn left onto {{street}}",
+    "right": "Turn right",
+    "right_onto": "Turn right onto {{street}}",
+    "slight_left": "Bear left",
+    "slight_left_onto": "Bear left onto {{street}}",
+    "slight_right": "Bear right",
+    "slight_right_onto": "Bear right onto {{street}}",
+    "sharp_left": "Sharp left",
+    "sharp_left_onto": "Sharp left onto {{street}}",
+    "sharp_right": "Sharp right",
+    "sharp_right_onto": "Sharp right onto {{street}}",
+    "uturn": "Make a U-turn",
+    "uturn_onto": "Make a U-turn onto {{street}}"
   },
   "errors": {
     "somethingWentWrong": "Something went wrong",

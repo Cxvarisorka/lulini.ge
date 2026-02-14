@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   View,
   Text,
@@ -14,7 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { useMap } from '../context/MapContext';
-import { colors, shadows, radius } from '../theme/colors';
+import { colors, shadows, radius, useTypography } from '../theme/colors';
 
 export default function SettingsScreen({ navigation }) {
   const { t } = useTranslation();
@@ -22,6 +22,8 @@ export default function SettingsScreen({ navigation }) {
   const { logout } = useAuth();
   const { getCurrentLanguageName } = useLanguage();
   const { getCurrentMapName } = useMap();
+  const typography = useTypography();
+  const styles = useMemo(() => createStyles(typography), [typography]);
 
   const handleLogout = () => {
     Alert.alert(
@@ -142,7 +144,7 @@ export default function SettingsScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
@@ -161,8 +163,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   title: {
-    fontSize: 18,
-    fontWeight: '600',
+    ...typography.h2,
     color: colors.foreground,
   },
   content: {
@@ -173,7 +174,7 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   sectionTitle: {
-    fontSize: 14,
+    ...typography.bodySmall,
     fontWeight: '600',
     color: colors.mutedForeground,
     marginBottom: 12,
@@ -202,7 +203,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   menuItemText: {
-    fontSize: 16,
+    ...typography.body,
     color: colors.foreground,
     marginLeft: 12,
   },
@@ -211,7 +212,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   menuItemValue: {
-    fontSize: 14,
+    ...typography.bodySmall,
     color: colors.mutedForeground,
     marginRight: 8,
   },
@@ -227,7 +228,7 @@ const styles = StyleSheet.create({
     ...shadows.sm,
   },
   logoutButtonText: {
-    fontSize: 16,
+    ...typography.body,
     fontWeight: '600',
     color: colors.destructive,
     marginLeft: 8,

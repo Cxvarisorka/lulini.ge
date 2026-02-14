@@ -19,13 +19,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useDriver } from '../context/DriverContext';
 import { useSocket } from '../context/SocketContext';
 import { rideAPI } from '../services/api';
-import { colors, shadows, radius, spacing } from '../theme/colors';
+import { colors, shadows, radius, spacing, useTypography } from '../theme/colors';
 
 export default function RidesScreen({ navigation }) {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { activeRides, addActiveRide, loadAllRides } = useDriver();
   const { newRideRequest, clearRideRequest } = useSocket();
+  const typography = useTypography();
+  const styles = useMemo(() => createStyles(typography), [typography]);
   const [refreshing, setRefreshing] = useState(false);
   const [accepting, setAccepting] = useState(false);
   const [selectedFilter, setSelectedFilter] = useState('active');
@@ -53,13 +55,7 @@ export default function RidesScreen({ navigation }) {
     setLoading(true);
 
     try {
-      const { rides, fromCache } = await loadAllRides(forceRefresh);
-
-      if (fromCache) {
-        console.log('Using cached rides data');
-      } else {
-        console.log('Fetched fresh rides data');
-      }
+      const { rides } = await loadAllRides(forceRefresh);
 
       if (selectedFilter === 'active') {
         // Active rides are already managed by loadAllRides
@@ -73,7 +69,6 @@ export default function RidesScreen({ navigation }) {
         setAllRides(filteredRides);
       }
     } catch (error) {
-      console.log('Error loading rides:', error);
       Alert.alert(t('common.error'), t('errors.tryAgain'));
     } finally {
       setLoading(false);
@@ -111,7 +106,6 @@ export default function RidesScreen({ navigation }) {
         );
       }
     } catch (error) {
-      console.log('Error accepting ride:', error);
       const errorMessage = error.response?.data?.message || t('errors.tryAgain');
       Alert.alert(t('errors.error'), errorMessage);
     } finally {
@@ -558,7 +552,7 @@ export default function RidesScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.muted,
@@ -578,7 +572,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   title: {
-    fontSize: 26,
+    ...typography.display,
     fontWeight: '700',
     color: colors.foreground,
   },
@@ -624,7 +618,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
   },
   filterText: {
-    fontSize: 13,
+    ...typography.caption,
     fontWeight: '600',
     color: colors.mutedForeground,
   },
@@ -665,11 +659,11 @@ const styles = StyleSheet.create({
     borderRadius: 3,
   },
   statusText: {
-    fontSize: 12,
+    ...typography.captionSmall,
     fontWeight: '600',
   },
   fareText: {
-    fontSize: 18,
+    ...typography.h2,
     fontWeight: '700',
     color: colors.foreground,
   },
@@ -695,7 +689,7 @@ const styles = StyleSheet.create({
   },
   locationText: {
     flex: 1,
-    fontSize: 14,
+    ...typography.bodySmall,
     color: colors.foreground,
   },
   rideFooter: {
@@ -712,7 +706,7 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   rideMetaText: {
-    fontSize: 12,
+    ...typography.captionSmall,
     color: colors.mutedForeground,
   },
   emptyContainer: {
@@ -732,14 +726,14 @@ const styles = StyleSheet.create({
     ...shadows.sm,
   },
   emptyTitle: {
-    fontSize: 18,
+    ...typography.h2,
     fontWeight: '600',
     color: colors.foreground,
     marginBottom: spacing.xs,
     textAlign: 'center',
   },
   emptySubtitle: {
-    fontSize: 14,
+    ...typography.bodySmall,
     color: colors.mutedForeground,
     textAlign: 'center',
   },
@@ -759,7 +753,7 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: spacing.md,
-    fontSize: 14,
+    ...typography.bodySmall,
     fontWeight: '500',
     color: colors.mutedForeground,
   },
@@ -789,7 +783,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   modalTitle: {
-    fontSize: 22,
+    ...typography.h1,
     fontWeight: '700',
     color: colors.foreground,
   },
@@ -808,16 +802,16 @@ const styles = StyleSheet.create({
     marginLeft: spacing.md,
   },
   locationLabel: {
-    fontSize: 11,
+    ...typography.captionSmall,
     color: colors.mutedForeground,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginBottom: 2,
   },
   locationAddress: {
-    fontSize: 15,
-    color: colors.foreground,
+    ...typography.bodySmall,
     fontWeight: '500',
+    color: colors.foreground,
   },
   modalLocationLine: {
     width: 2,
@@ -839,19 +833,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   detailLabel: {
-    fontSize: 11,
+    ...typography.captionSmall,
     color: colors.mutedForeground,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginBottom: spacing.xs,
   },
   detailValue: {
-    fontSize: 14,
+    ...typography.bodySmall,
     fontWeight: '600',
     color: colors.foreground,
   },
   fareValue: {
-    fontSize: 16,
+    ...typography.bodyMedium,
     fontWeight: '700',
     color: colors.success,
   },
@@ -870,8 +864,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   declineText: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...typography.button,
     color: colors.destructive,
   },
   acceptButton: {
@@ -888,8 +881,7 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   acceptText: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...typography.button,
     color: colors.primaryForeground,
   },
   // Filter Modal Styles
@@ -908,7 +900,7 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   filtersModalTitle: {
-    fontSize: 20,
+    ...typography.h1,
     fontWeight: '700',
     color: colors.foreground,
   },
@@ -927,7 +919,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xl,
   },
   filterSectionTitle: {
-    fontSize: 13,
+    ...typography.label,
     fontWeight: '600',
     color: colors.mutedForeground,
     textTransform: 'uppercase',
@@ -942,7 +934,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   priceInputLabel: {
-    fontSize: 12,
+    ...typography.captionSmall,
     color: colors.mutedForeground,
     marginBottom: spacing.xs,
   },
@@ -951,7 +943,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
-    fontSize: 16,
+    ...typography.body,
     color: colors.foreground,
   },
   priceSeparator: {
@@ -959,7 +951,7 @@ const styles = StyleSheet.create({
     paddingTop: spacing.lg,
   },
   priceSeparatorText: {
-    fontSize: 18,
+    ...typography.h2,
     color: colors.mutedForeground,
   },
   optionsGrid: {
@@ -977,7 +969,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
   },
   optionChipText: {
-    fontSize: 14,
+    ...typography.bodySmall,
     fontWeight: '500',
     color: colors.mutedForeground,
   },
@@ -1000,8 +992,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   clearFiltersText: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...typography.button,
     color: colors.foreground,
   },
   applyFiltersButton: {
@@ -1013,8 +1004,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   applyFiltersText: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...typography.button,
     color: colors.primaryForeground,
   },
 });

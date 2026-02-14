@@ -73,7 +73,8 @@ export default {
         {
           color: '#171717'
         }
-      ]
+      ],
+      '@react-native-community/datetimepicker'
     ],
     extra: {
       eas: {

@@ -1,7 +1,7 @@
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://192.168.100.3:3000/api';
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://api.gotours.ge/api';
 
 const api = axios.create({
   baseURL: API_URL,
@@ -21,7 +21,7 @@ api.interceptors.request.use(
         config.headers.Authorization = `Bearer ${token}`;
       }
     } catch (error) {
-      console.log('Error getting token:', error);
+      // Failed to get token from secure store
     }
     return config;
   },

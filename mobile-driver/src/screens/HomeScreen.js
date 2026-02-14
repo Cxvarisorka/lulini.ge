@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -20,7 +20,7 @@ import { useLocation } from '../context/LocationContext';
 import { useSocket } from '../context/SocketContext';
 import { useAuth } from '../context/AuthContext';
 import { rideAPI } from '../services/api';
-import { colors, shadows, radius, spacing } from '../theme/colors';
+import { colors, shadows, radius, spacing, useTypography } from '../theme/colors';
 
 const { height } = Dimensions.get('window');
 
@@ -28,11 +28,13 @@ export default function HomeScreen({ navigation }) {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const webViewRef = useRef(null);
+  const typography = useTypography();
+  const styles = useMemo(() => createStyles(typography), [typography]);
 
   const { user } = useAuth();
   const { isOnline, goOnline, goOffline, loading, stats, addActiveRide } = useDriver();
   const { location } = useLocation();
-  const { newRideRequest, clearRideRequest, isConnected, fetchPendingRides } = useSocket();
+  const { newRideRequest, clearRideRequest, isConnected, fetchPendingRides, socket } = useSocket();
 
   const [showRideRequest, setShowRideRequest] = useState(false);
   const [accepting, setAccepting] = useState(false);
@@ -87,7 +89,6 @@ export default function HomeScreen({ navigation }) {
         navigation.navigate('RideDetail', { rideId: response.data.data.ride._id });
       }
     } catch (error) {
-      console.log('Error accepting ride:', error);
       const serverMessage = error.response?.data?.message;
       clearRideRequest();
       Alert.alert(
@@ -106,8 +107,8 @@ export default function HomeScreen({ navigation }) {
   };
 
   const getMapHTML = () => {
-    const lat = location?.latitude || 41.7151;
-    const lng = location?.longitude || 44.8271;
+    const lat = location?.latitude || 42.2679;
+    const lng = location?.longitude || 42.6946;
 
     return `
       <!DOCTYPE html>
@@ -120,7 +121,7 @@ export default function HomeScreen({ navigation }) {
           body { margin: 0; padding: 0; }
           #map { width: 100%; height: 100vh; }
           .driver-marker {
-            background: #171717;
+            background: #5b21b6;
             border: 3px solid white;
             border-radius: 50%;
             width: 24px;
@@ -214,13 +215,20 @@ export default function HomeScreen({ navigation }) {
                 </Text>
               </View>
             </View>
-            <View style={styles.connectionBadge}>
+            <View style={[styles.connectionBadge, { backgroundColor: isConnected ? '#dcfce7' : '#fee2e2' }]}>
               <Ionicons
                 name={isConnected ? 'wifi' : 'wifi-outline'}
                 size={18}
-                color={isConnected ? colors.success : colors.mutedForeground}
+                color={isConnected ? colors.success : colors.destructive}
               />
             </View>
+          </View>
+          {/* Debug: Socket status - remove after debugging */}
+          <View style={styles.debugBanner}>
+            <View style={[styles.debugDot, { backgroundColor: isConnected ? colors.success : colors.destructive }]} />
+            <Text style={styles.debugText}>
+              Socket: {isConnected ? 'Connected' : 'Disconnected'} | ID: {socket?.id || 'none'}
+            </Text>
           </View>
         </View>
       </View>
@@ -342,7 +350,7 @@ export default function HomeScreen({ navigation }) {
                     <View style={styles.rideDetailText}>
                       <Text style={styles.rideDetailLabel} numberOfLines={1}>{t('rides.pickup')}</Text>
                       <Text style={styles.rideDetailValue} numberOfLines={2}>
-                        {newRideRequest.pickup?.address || 'Unknown'}
+                        {newRideRequest.pickup?.address || t('common.unknown')}
                       </Text>
                     </View>
                   </View>
@@ -354,7 +362,7 @@ export default function HomeScreen({ navigation }) {
                     <View style={styles.rideDetailText}>
                       <Text style={styles.rideDetailLabel} numberOfLines={1}>{t('rides.dropoff')}</Text>
                       <Text style={styles.rideDetailValue} numberOfLines={2}>
-                        {newRideRequest.dropoff?.address || 'Unknown'}
+                        {newRideRequest.dropoff?.address || t('common.unknown')}
                       </Text>
                     </View>
                   </View>
@@ -409,7 +417,7 @@ export default function HomeScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.muted,
@@ -448,7 +456,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   greeting: {
-    fontSize: 17,
+    ...typography.bodyMedium,
     fontWeight: '700',
     color: colors.foreground,
     marginBottom: spacing.xs,
@@ -464,9 +472,9 @@ const styles = StyleSheet.create({
     marginRight: spacing.sm,
   },
   statusText: {
-    fontSize: 13,
-    color: colors.mutedForeground,
+    ...typography.caption,
     fontWeight: '500',
+    color: colors.mutedForeground,
   },
   connectionBadge: {
     width: 36,
@@ -475,6 +483,27 @@ const styles = StyleSheet.create({
     backgroundColor: colors.muted,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  debugBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    marginTop: spacing.xs,
+    alignSelf: 'flex-start',
+  },
+  debugDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: spacing.xs,
+  },
+  debugText: {
+    fontSize: 11,
+    color: '#fff',
+    fontFamily: 'monospace',
   },
   bottomPanel: {
     flex: 1,
@@ -492,11 +521,9 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xl,
   },
   sectionTitle: {
-    fontSize: 12,
+    ...typography.label,
     fontWeight: '600',
     color: colors.mutedForeground,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
     marginBottom: spacing.sm,
     paddingHorizontal: spacing.xs,
   },
@@ -521,13 +548,13 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   statValue: {
-    fontSize: 17,
+    ...typography.bodyMedium,
     fontWeight: '700',
     color: colors.foreground,
     marginBottom: 2,
   },
   statLabel: {
-    fontSize: 11,
+    ...typography.captionSmall,
     color: colors.mutedForeground,
     textAlign: 'center',
   },
@@ -561,17 +588,17 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   toggleTitle: {
-    fontSize: 18,
+    ...typography.h2,
     fontWeight: '700',
     color: colors.primaryForeground,
     marginBottom: 2,
   },
   toggleSubtitle: {
-    fontSize: 13,
+    ...typography.caption,
     color: 'rgba(255,255,255,0.8)',
   },
   toggleText: {
-    fontSize: 14,
+    ...typography.bodySmall,
     color: colors.primaryForeground,
     marginTop: spacing.sm,
   },
@@ -599,12 +626,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   actionTitle: {
-    fontSize: 15,
+    ...typography.bodySmall,
     fontWeight: '600',
     color: colors.foreground,
   },
   actionSubtitle: {
-    fontSize: 13,
+    ...typography.caption,
     color: colors.mutedForeground,
     marginTop: 2,
   },
@@ -619,6 +646,9 @@ const styles = StyleSheet.create({
     borderTopRightRadius: radius['2xl'],
     padding: spacing.xl,
     paddingBottom: spacing['3xl'],
+    borderWidth: 2,
+    borderColor: colors.primary,
+    borderBottomWidth: 0,
   },
   modalHeader: {
     alignItems: 'center',
@@ -634,7 +664,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   modalTitle: {
-    fontSize: 22,
+    ...typography.h1,
     fontWeight: '700',
     color: colors.foreground,
   },
@@ -646,6 +676,8 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     padding: spacing.lg,
     marginBottom: spacing.md,
+    borderWidth: 2,
+    borderColor: colors.primary,
   },
   rideDetailRow: {
     flexDirection: 'row',
@@ -669,17 +701,16 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   rideDetailLabel: {
-    fontSize: 11,
+    ...typography.captionSmall,
     color: colors.mutedForeground,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginBottom: 2,
   },
   rideDetailValue: {
-    fontSize: 15,
+    ...typography.bodySmall,
     fontWeight: '500',
     color: colors.foreground,
-    lineHeight: 20,
   },
   rideInfoGrid: {
     flexDirection: 'row',
@@ -691,16 +722,18 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     padding: spacing.md,
     alignItems: 'center',
+    borderWidth: 2,
+    borderColor: colors.primary,
   },
   rideInfoLabel: {
-    fontSize: 11,
+    ...typography.captionSmall,
     color: colors.mutedForeground,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginBottom: spacing.xs,
   },
   rideInfoValue: {
-    fontSize: 17,
+    ...typography.bodyMedium,
     fontWeight: '600',
     color: colors.foreground,
   },
@@ -723,8 +756,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   declineButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...typography.button,
     color: colors.destructive,
   },
   acceptButton: {
@@ -741,8 +773,7 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   acceptButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...typography.button,
     color: colors.primaryForeground,
   },
 });

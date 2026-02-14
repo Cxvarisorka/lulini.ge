@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -12,11 +12,13 @@ import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { driverAPI } from '../services/api';
-import { colors, shadows, radius, spacing } from '../theme/colors';
+import { colors, shadows, radius, spacing, useTypography } from '../theme/colors';
 
 export default function EarningsScreen() {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
+  const typography = useTypography();
+  const styles = useMemo(() => createStyles(typography), [typography]);
 
   const [selectedPeriod, setSelectedPeriod] = useState('today');
   const [earnings, setEarnings] = useState({
@@ -38,7 +40,7 @@ export default function EarningsScreen() {
         setEarnings(response.data.data.earnings);
       }
     } catch (error) {
-      console.log('Error loading earnings:', error);
+      // Failed to load earnings
     } finally {
       setLoading(false);
     }
@@ -205,7 +207,7 @@ export default function EarningsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.muted,
@@ -219,7 +221,7 @@ const styles = StyleSheet.create({
     ...shadows.sm,
   },
   title: {
-    fontSize: 26,
+    ...typography.display,
     fontWeight: '700',
     color: colors.foreground,
   },
@@ -234,11 +236,9 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xl,
   },
   sectionTitle: {
-    fontSize: 12,
+    ...typography.label,
     fontWeight: '600',
     color: colors.mutedForeground,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
     marginBottom: spacing.sm,
     paddingHorizontal: spacing.xs,
   },
@@ -262,7 +262,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
   },
   periodButtonText: {
-    fontSize: 13,
+    ...typography.caption,
     fontWeight: '600',
     color: colors.mutedForeground,
   },
@@ -295,21 +295,20 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   totalLabel: {
-    fontSize: 13,
+    ...typography.label,
     color: colors.mutedForeground,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
     marginBottom: spacing.xs,
   },
   totalAmount: {
     fontSize: 36,
     fontWeight: '700',
+    lineHeight: 42,
     color: colors.foreground,
     marginBottom: spacing.xs,
     maxWidth: '100%',
   },
   periodLabel: {
-    fontSize: 14,
+    ...typography.bodySmall,
     color: colors.mutedForeground,
   },
   statsRow: {
@@ -333,13 +332,13 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   statValue: {
-    fontSize: 16,
+    ...typography.bodySmall,
     fontWeight: '700',
     color: colors.foreground,
     marginBottom: 2,
   },
   statLabel: {
-    fontSize: 11,
+    ...typography.captionSmall,
     color: colors.mutedForeground,
     textAlign: 'center',
   },
@@ -371,12 +370,12 @@ const styles = StyleSheet.create({
     marginRight: spacing.md,
   },
   quickStatLabel: {
-    fontSize: 14,
+    ...typography.bodySmall,
     color: colors.foreground,
     flex: 1,
   },
   quickStatValue: {
-    fontSize: 15,
+    ...typography.bodySmall,
     fontWeight: '600',
     color: colors.foreground,
     flexShrink: 0,
@@ -410,13 +409,13 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   emptyTitle: {
-    fontSize: 16,
+    ...typography.bodyMedium,
     fontWeight: '600',
     color: colors.foreground,
     marginBottom: spacing.xs,
   },
   emptySubtitle: {
-    fontSize: 14,
+    ...typography.bodySmall,
     color: colors.mutedForeground,
     textAlign: 'center',
   },
