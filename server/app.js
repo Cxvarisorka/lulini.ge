@@ -54,7 +54,10 @@ const io = new Server(server, {
             }
         },
         credentials: true
-    }
+    },
+    // Mobile-friendly ping settings (generous timeouts for Android mobile networks)
+    pingInterval: 25000,  // Ping every 25s (default - less aggressive, saves battery)
+    pingTimeout: 30000,   // Wait 30s for pong (Android on mobile networks can be slow)
 });
 
 // Helper to parse cookies from string
@@ -106,9 +109,9 @@ io.use(async (socket, next) => {
 
 // Socket.io connection handling
 io.on('connection', async (socket) => {
-    console.log(`User connected: ${socket.user.email} (${socket.user.role})`);
+    console.log(`User connected: ${socket.user.email} (${socket.user.role}) - socket: ${socket.id}`);
 
-    // Join user to their personal room
+    // Join user to their personal room (always - this is the fallback for event delivery)
     socket.join(`user:${socket.user.id}`);
 
     // Join admins to admin room for real-time updates
@@ -118,17 +121,58 @@ io.on('connection', async (socket) => {
     }
 
     // Join drivers to driver room for ride requests
-    // Check both role and driver profile
     const Driver = require('./models/driver.model');
-    const driverProfile = await Driver.findOne({ user: socket.user.id, isActive: true, isApproved: true });
+    try {
+        const driverProfile = await Driver.findOne({ user: socket.user.id, isActive: true, isApproved: true });
 
-    if (socket.user.role === 'driver' || driverProfile) {
-        socket.join(`driver:${socket.user.id}`);
-        console.log(`Driver ${socket.user.email} joined driver room driver:${socket.user.id}`);
+        if (socket.user.role === 'driver' || driverProfile) {
+            const driverRoom = `driver:${socket.user.id}`;
+            const userRoom = `user:${socket.user.id}`;
+            socket.join(driverRoom);
+            // Ensure ALL sockets for this user are in the driver room
+            // This handles Android edge cases where transport upgrade loses room membership
+            io.in(userRoom).socketsJoin(driverRoom);
+            console.log(`Driver ${socket.user.email} joined driver room ${driverRoom} (socket: ${socket.id})`);
+        }
+    } catch (err) {
+        // If DB lookup fails, still try to join by role so driver doesn't miss events
+        console.error(`Error looking up driver profile for ${socket.user.email}:`, err.message);
+        if (socket.user.role === 'driver') {
+            const driverRoom = `driver:${socket.user.id}`;
+            const userRoom = `user:${socket.user.id}`;
+            socket.join(driverRoom);
+            io.in(userRoom).socketsJoin(driverRoom);
+            console.log(`Driver ${socket.user.email} joined driver room by role fallback`);
+        }
     }
 
-    socket.on('disconnect', () => {
-        console.log(`User disconnected: ${socket.user.email}`);
+    // Allow drivers to rejoin their room (e.g., after reconnection)
+    socket.on('driver:rejoin', async () => {
+        try {
+            const profile = await Driver.findOne({ user: socket.user.id, isActive: true, isApproved: true });
+            if (socket.user.role === 'driver' || profile) {
+                const driverRoom = `driver:${socket.user.id}`;
+                const userRoom = `user:${socket.user.id}`;
+                socket.join(driverRoom);
+                // Ensure ALL sockets for this user are in the driver room
+                io.in(userRoom).socketsJoin(driverRoom);
+                console.log(`Driver ${socket.user.email} rejoined driver room ${driverRoom}`);
+                socket.emit('driver:rejoined', { success: true });
+            }
+        } catch (err) {
+            console.error(`Error during driver:rejoin for ${socket.user.email}:`, err.message);
+            if (socket.user.role === 'driver') {
+                const driverRoom = `driver:${socket.user.id}`;
+                const userRoom = `user:${socket.user.id}`;
+                socket.join(driverRoom);
+                io.in(userRoom).socketsJoin(driverRoom);
+                socket.emit('driver:rejoined', { success: true });
+            }
+        }
+    });
+
+    socket.on('disconnect', (reason) => {
+        console.log(`User disconnected: ${socket.user.email} (socket: ${socket.id}, reason: ${reason})`);
     });
 });
 

@@ -237,13 +237,22 @@ const updateDriverStatus = catchAsync(async (req, res, next) => {
     driver.status = status;
     await driver.save();
 
-    // Emit socket event
+    // Emit socket event and manage driver room membership
     const io = req.app.get('io');
     if (io) {
         io.emit('driver:statusChanged', {
             driverId: driver._id,
             status: status
         });
+
+        // When driver goes online, ensure their sockets are in the driver room
+        // This fixes the case where socket reconnected but room membership was lost
+        if (status === 'online') {
+            const userRoom = `user:${req.user.id}`;
+            const driverRoom = `driver:${req.user.id}`;
+            io.in(userRoom).socketsJoin(driverRoom);
+            console.log(`Ensured driver ${req.user.email} sockets joined ${driverRoom}`);
+        }
     }
 
     res.json({

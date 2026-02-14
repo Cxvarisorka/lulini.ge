@@ -77,7 +77,7 @@ const rideSchema = new mongoose.Schema({
     },
     paymentMethod: {
         type: String,
-        enum: ['cash', 'card'],
+        enum: ['cash', 'card', 'apple_pay', 'google_pay', 'saved_card'],
         default: 'cash'
     },
     paymentStatus: {

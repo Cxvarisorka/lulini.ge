@@ -67,9 +67,23 @@ const createRide = catchAsync(async (req, res, next) => {
     const io = req.app.get('io');
     if (io) {
         onlineDrivers.forEach(driver => {
-            const roomName = `driver:${driver.user._id}`;
-            console.log(`Emitting ride request to room: ${roomName}`);
-            io.to(roomName).emit('ride:request', populatedRide);
+            const driverRoom = `driver:${driver.user._id}`;
+            const userRoom = `user:${driver.user._id}`;
+
+            // Check how many sockets are in each room
+            const driverRoomSockets = io.sockets.adapter.rooms.get(driverRoom);
+            const userRoomSockets = io.sockets.adapter.rooms.get(userRoom);
+            const driverCount = driverRoomSockets ? driverRoomSockets.size : 0;
+            const userCount = userRoomSockets ? userRoomSockets.size : 0;
+
+            console.log(`Emitting ride:request to driver ${driver.user._id} - driver room: ${driverCount} sockets, user room: ${userCount} sockets`);
+
+            if (driverCount === 0 && userCount === 0) {
+                console.log(`WARNING: No sockets found for driver ${driver.user.firstName} ${driver.user.lastName} (${driver.user._id}) - event will be lost!`);
+            }
+
+            // Emit to BOTH rooms for redundancy (Socket.io deduplicates if socket is in both)
+            io.to(driverRoom).to(userRoom).emit('ride:request', populatedRide);
         });
 
         // Notify admin of new ride request
