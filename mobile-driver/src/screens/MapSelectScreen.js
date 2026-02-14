@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   View,
   Text,
@@ -11,12 +11,14 @@ import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useMap } from '../context/MapContext';
-import { colors, shadows, radius } from '../theme/colors';
+import { colors, shadows, radius, useTypography } from '../theme/colors';
 
 export default function MapSelectScreen({ navigation }) {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { currentMap, changeMap, maps } = useMap();
+  const typography = useTypography();
+  const styles = useMemo(() => createStyles(typography), [typography]);
 
   const handleMapSelect = async (mapCode) => {
     await changeMap(mapCode);
@@ -49,7 +51,7 @@ export default function MapSelectScreen({ navigation }) {
               <View style={styles.mapIconContainer}>
                 <Ionicons name={map.icon} size={24} color={colors.foreground} />
               </View>
-              <Text style={styles.mapName}>{map.name}</Text>
+              <Text style={styles.mapName}>{map.nameKey ? t(map.nameKey) : map.name}</Text>
             </View>
             {currentMap === map.code && (
               <Ionicons name="checkmark-circle" size={24} color={colors.primary} />
@@ -61,7 +63,7 @@ export default function MapSelectScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
@@ -80,8 +82,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   title: {
-    fontSize: 18,
-    fontWeight: '600',
+    ...typography.h2,
     color: colors.foreground,
   },
   content: {
@@ -89,10 +90,9 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   description: {
-    fontSize: 14,
+    ...typography.bodySmall,
     color: colors.mutedForeground,
     marginBottom: 20,
-    lineHeight: 20,
   },
   mapItem: {
     flexDirection: 'row',
@@ -122,7 +122,7 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   mapName: {
-    fontSize: 16,
+    ...typography.bodyMedium,
     fontWeight: '600',
     color: colors.foreground,
   },

@@ -19,6 +19,7 @@ import SettingsScreen from '../screens/SettingsScreen';
 import RideDetailScreen from '../screens/RideDetailScreen';
 import LanguageSelectScreen from '../screens/LanguageSelectScreen';
 import MapSelectScreen from '../screens/MapSelectScreen';
+import NavigationScreen from '../screens/NavigationScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -109,6 +110,7 @@ export default function AppNavigator() {
             <Stack.Screen name="Settings" component={SettingsScreen} />
             <Stack.Screen name="LanguageSelect" component={LanguageSelectScreen} />
             <Stack.Screen name="MapSelect" component={MapSelectScreen} />
+            <Stack.Screen name="Navigation" component={NavigationScreen} />
           </>
         )}
       </Stack.Navigator>

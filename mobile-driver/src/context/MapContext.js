@@ -1,4 +1,4 @@
-import React, { createContext, useState, useContext, useEffect } from 'react';
+import React, { createContext, useState, useContext, useEffect, useMemo, useCallback } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import { Platform, Linking, Alert } from 'react-native';
 
@@ -36,12 +36,7 @@ const MAP_PROVIDERS = [
     code: 'yandex',
     name: 'Yandex Maps',
     icon: 'location',
-    getNavigationUrl: (lat, lng) => {
-      if (Platform.OS === 'ios') {
-        return `yandexmaps://maps.yandex.ru/?rtext=~${lat},${lng}&rtt=auto`;
-      }
-      return `yandexmaps://maps.yandex.ru/?rtext=~${lat},${lng}&rtt=auto`;
-    },
+    getNavigationUrl: (lat, lng) => `yandexmaps://maps.yandex.ru/?rtext=~${lat},${lng}&rtt=auto`,
     getFallbackUrl: (lat, lng) => `https://yandex.com/maps/?rtext=~${lat},${lng}&rtt=auto`,
   },
   {
@@ -58,6 +53,14 @@ const MAP_PROVIDERS = [
     icon: 'globe',
     getNavigationUrl: (lat, lng) => `https://www.openstreetmap.org/directions?to=${lat},${lng}`,
     getFallbackUrl: (lat, lng) => `https://www.openstreetmap.org/directions?to=${lat},${lng}`,
+  },
+  {
+    code: 'builtin',
+    name: 'Built-in Map',
+    nameKey: 'settings.builtinMap',
+    icon: 'compass',
+    getNavigationUrl: () => null,
+    getFallbackUrl: () => null,
   },
 ];
 
@@ -76,31 +79,27 @@ export const MapProvider = ({ children }) => {
         setCurrentMap(savedMap);
       }
     } catch (error) {
-      console.log('Error loading map preference:', error);
+      // Failed to load map preference
     } finally {
       setLoading(false);
     }
   };
 
-  const changeMap = async (mapCode) => {
+  const changeMap = useCallback(async (mapCode) => {
     try {
       await SecureStore.setItemAsync('mapProvider', mapCode);
       setCurrentMap(mapCode);
     } catch (error) {
-      console.log('Error saving map preference:', error);
+      // Failed to save map preference
     }
-  };
+  }, []);
 
-  const getCurrentMapName = () => {
+  const getCurrentMapName = useCallback(() => {
     const map = MAP_PROVIDERS.find((m) => m.code === currentMap);
     return map ? map.name : 'Google Maps';
-  };
+  }, [currentMap]);
 
-  const getAvailableMaps = () => {
-    return MAP_PROVIDERS.filter((map) => map.available !== false);
-  };
-
-  const navigateTo = async (lat, lng, address, t) => {
+  const navigateTo = useCallback(async (lat, lng, address, t) => {
     const map = MAP_PROVIDERS.find((m) => m.code === currentMap);
     if (!map) return;
 
@@ -116,7 +115,6 @@ export const MapProvider = ({ children }) => {
         await Linking.openURL(fallbackUrl);
       }
     } catch (error) {
-      console.log('Error opening navigation:', error);
       // Show alert with option to open in browser
       Alert.alert(
         t ? t('common.error') : 'Error',
@@ -130,16 +128,17 @@ export const MapProvider = ({ children }) => {
         ]
       );
     }
-  };
+  }, [currentMap]);
 
-  const value = {
+  const value = useMemo(() => ({
     currentMap,
     changeMap,
-    maps: getAvailableMaps(),
+    maps: MAP_PROVIDERS.filter((map) => map.available !== false),
     getCurrentMapName,
     navigateTo,
+    isBuiltinMap: currentMap === 'builtin',
     loading,
-  };
+  }), [currentMap, loading, changeMap, getCurrentMapName, navigateTo]);
 
   return <MapContext.Provider value={value}>{children}</MapContext.Provider>;
 };

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -16,14 +16,19 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { rideAPI } from '../services/api';
 import { useDriver } from '../context/DriverContext';
 import { useMap } from '../context/MapContext';
-import { colors, shadows, radius } from '../theme/colors';
+import { useLocation } from '../context/LocationContext';
+import { colors, shadows, radius, useTypography } from '../theme/colors';
 
 export default function RideDetailScreen({ navigation, route }) {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { rideId } = route.params;
   const { updateActiveRide, removeActiveRide, invalidateCache } = useDriver();
-  const { navigateTo } = useMap();
+  const { navigateTo, isBuiltinMap } = useMap();
+  const { location } = useLocation();
+
+  const typography = useTypography();
+  const styles = useMemo(() => createStyles(typography), [typography]);
 
   const [ride, setRide] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -82,7 +87,6 @@ export default function RideDetailScreen({ navigation, route }) {
         setRide(response.data.data.ride);
       }
     } catch (error) {
-      console.log('Error loading ride details:', error);
       Alert.alert(t('common.error'), t('errors.somethingWentWrong'));
     } finally {
       setLoading(false);
@@ -99,7 +103,6 @@ export default function RideDetailScreen({ navigation, route }) {
         Alert.alert(t('common.success'), t('rides.customerNotified'));
       }
     } catch (error) {
-      console.log('Error notifying arrival:', error);
       const errorMessage = error.response?.data?.message || t('errors.somethingWentWrong');
       Alert.alert(t('common.error'), errorMessage);
     } finally {
@@ -117,7 +120,6 @@ export default function RideDetailScreen({ navigation, route }) {
         Alert.alert(t('common.success'), t('rides.rideStarted'));
       }
     } catch (error) {
-      console.log('Error starting ride:', error);
       const errorMessage = error.response?.data?.message || t('errors.somethingWentWrong');
       Alert.alert(t('common.error'), errorMessage);
     } finally {
@@ -150,7 +152,6 @@ export default function RideDetailScreen({ navigation, route }) {
                 );
               }
             } catch (error) {
-              console.log('Error completing ride:', error);
               const errorMessage = error.response?.data?.message || t('errors.somethingWentWrong');
               Alert.alert(t('common.error'), errorMessage);
             } finally {
@@ -163,7 +164,14 @@ export default function RideDetailScreen({ navigation, route }) {
   };
 
   const handleNavigate = (address, lat, lng) => {
-    navigateTo(lat, lng, address, t);
+    if (isBuiltinMap) {
+      navigation.navigate('Navigation', {
+        destination: { latitude: lat, longitude: lng, address },
+        origin: location ? { latitude: location.latitude, longitude: location.longitude } : null,
+      });
+    } else {
+      navigateTo(lat, lng, address, t);
+    }
   };
 
   if (loading) {
@@ -227,7 +235,7 @@ export default function RideDetailScreen({ navigation, route }) {
               <Text style={styles.cardTitle}>{t('rides.pickup')}</Text>
               <View style={styles.locationRow}>
                 <Ionicons name="radio-button-on" size={20} color={colors.success} />
-                <Text style={styles.addressText}>{ride.pickup?.address || 'Unknown'}</Text>
+                <Text style={styles.addressText}>{ride.pickup?.address || t('common.unknown')}</Text>
               </View>
               {!isReadOnly && (
                 <TouchableOpacity
@@ -244,7 +252,7 @@ export default function RideDetailScreen({ navigation, route }) {
               <Text style={styles.cardTitle}>{t('rides.dropoff')}</Text>
               <View style={styles.locationRow}>
                 <Ionicons name="location" size={20} color={colors.destructive} />
-                <Text style={styles.addressText}>{ride.dropoff?.address || 'Unknown'}</Text>
+                <Text style={styles.addressText}>{ride.dropoff?.address || t('common.unknown')}</Text>
               </View>
               {!isReadOnly && (
                 <TouchableOpacity
@@ -261,7 +269,7 @@ export default function RideDetailScreen({ navigation, route }) {
               <Text style={styles.cardTitle}>{t('rides.passenger')}</Text>
               <View style={styles.passengerInfo}>
                 <View style={styles.passengerDetails}>
-                  <Text style={styles.passengerName}>{ride.passengerName || 'Unknown'}</Text>
+                  <Text style={styles.passengerName}>{ride.passengerName || t('common.unknown')}</Text>
                   <Text style={styles.passengerPhone}>{ride.passengerPhone || 'No phone'}</Text>
                 </View>
                 {ride.passengerPhone && (
@@ -417,7 +425,7 @@ export default function RideDetailScreen({ navigation, route }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
@@ -441,8 +449,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   title: {
-    fontSize: 18,
-    fontWeight: '600',
+    ...typography.h2,
     color: colors.foreground,
   },
   content: {
@@ -457,7 +464,7 @@ const styles = StyleSheet.create({
     ...shadows.md,
   },
   cardTitle: {
-    fontSize: 14,
+    ...typography.caption,
     fontWeight: '600',
     color: colors.mutedForeground,
     marginBottom: 12,
@@ -467,8 +474,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   addressText: {
+    ...typography.body,
     flex: 1,
-    fontSize: 16,
     color: colors.foreground,
     marginLeft: 12,
   },
@@ -481,7 +488,7 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
   },
   navButtonText: {
-    fontSize: 14,
+    ...typography.bodySmall,
     fontWeight: '600',
     color: colors.primary,
     marginLeft: 8,
@@ -495,13 +502,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   passengerName: {
-    fontSize: 16,
+    ...typography.body,
     fontWeight: '600',
     color: colors.foreground,
     marginBottom: 4,
   },
   passengerPhone: {
-    fontSize: 14,
+    ...typography.bodySmall,
     color: colors.mutedForeground,
   },
   contactButton: {
@@ -533,8 +540,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.success,
   },
   actionButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...typography.button,
     color: colors.background,
     marginLeft: 8,
   },
@@ -545,16 +551,16 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   detailLabel: {
-    fontSize: 14,
+    ...typography.bodySmall,
     color: colors.mutedForeground,
   },
   detailValue: {
-    fontSize: 14,
+    ...typography.bodySmall,
     fontWeight: '600',
     color: colors.foreground,
   },
   fareText: {
-    fontSize: 16,
+    ...typography.body,
     color: colors.primary,
   },
   statusCard: {
@@ -574,18 +580,18 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   statusTextLarge: {
-    fontSize: 18,
+    ...typography.h2,
     fontWeight: '700',
     textTransform: 'capitalize',
   },
   completedFare: {
-    fontSize: 20,
+    ...typography.h1,
     fontWeight: '700',
     color: colors.success,
     marginTop: 12,
   },
   cancelReason: {
-    fontSize: 14,
+    ...typography.bodySmall,
     color: colors.mutedForeground,
     marginTop: 8,
     textAlign: 'center',
@@ -607,7 +613,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   waitingTitle: {
-    fontSize: 16,
+    ...typography.body,
     fontWeight: '600',
     color: colors.foreground,
     marginLeft: 8,
@@ -625,7 +631,7 @@ const styles = StyleSheet.create({
     color: colors.destructive,
   },
   waitingTimeLabel: {
-    fontSize: 14,
+    ...typography.bodySmall,
     color: colors.mutedForeground,
     marginTop: 4,
   },
@@ -650,20 +656,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   waitingFeeLabel: {
-    fontSize: 14,
+    ...typography.bodySmall,
     color: colors.mutedForeground,
   },
   waitingFeeValue: {
-    fontSize: 16,
+    ...typography.body,
     fontWeight: '600',
     color: colors.warning,
   },
   waitingWarning: {
-    fontSize: 14,
+    ...typography.bodySmall,
+    fontWeight: '500',
     color: colors.destructive,
     textAlign: 'center',
     marginTop: 12,
-    fontWeight: '500',
   },
   waitingFeeCard: {
     backgroundColor: colors.warning + '10',
@@ -675,13 +681,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   waitingFeeInfoLabel: {
+    ...typography.bodySmall,
     flex: 1,
-    fontSize: 14,
     color: colors.foreground,
     marginLeft: 8,
   },
   waitingFeeInfoValue: {
-    fontSize: 16,
+    ...typography.body,
     fontWeight: '700',
     color: colors.warning,
   },
