@@ -2,43 +2,43 @@
 // Based on HSL values from client/src/index.css
 
 export const colors = {
-  // Primary colors - dark/neutral theme
-  primary: '#171717', // hsl(0 0% 9%)
-  primaryForeground: '#fafafa', // hsl(0 0% 98%)
+  // Primary colors - dark purple theme
+  primary: '#5b21b6', // dark purple (violet-800)
+  primaryForeground: '#ffffff', // white text on purple
 
   // Secondary colors
-  secondary: '#f5f5f5', // hsl(0 0% 96.1%)
-  secondaryForeground: '#171717', // hsl(0 0% 9%)
+  secondary: '#1a1a1a', // dark gray
+  secondaryForeground: '#ffffff', // white
 
-  // Accent colors
-  accent: '#f5f5f5', // hsl(0 0% 96.1%)
-  accentForeground: '#171717', // hsl(0 0% 9%)
+  // Accent colors - medium purple
+  accent: '#7c3aed', // medium purple (violet-600)
+  accentForeground: '#ffffff', // white
 
   // Background and foreground
-  background: '#ffffff', // hsl(0 0% 100%)
-  foreground: '#0a0a0a', // hsl(0 0% 3.9%)
+  background: '#ffffff', // white
+  foreground: '#0a0a0a', // black
 
   // Card colors
-  card: '#ffffff', // hsl(0 0% 100%)
-  cardForeground: '#0a0a0a', // hsl(0 0% 3.9%)
+  card: '#ffffff', // white
+  cardForeground: '#0a0a0a', // black
 
   // Muted colors
-  muted: '#f5f5f5', // hsl(0 0% 96.1%)
-  mutedForeground: '#737373', // hsl(0 0% 45.1%)
+  muted: '#f5f5f5', // light gray
+  mutedForeground: '#737373', // medium gray
 
   // Border and input
-  border: '#e5e5e5', // hsl(0 0% 89.8%)
-  input: '#e5e5e5', // hsl(0 0% 89.8%)
-  ring: '#0a0a0a', // hsl(0 0% 3.9%)
+  border: '#e5e5e5', // light gray border
+  input: '#e5e5e5', // light gray input
+  ring: '#5b21b6', // dark purple ring
 
   // Destructive (for errors/warnings)
-  destructive: '#ef4444', // hsl(0 84.2% 60.2%)
-  destructiveForeground: '#fafafa', // hsl(0 0% 98%)
+  destructive: '#ef4444', // red
+  destructiveForeground: '#fafafa', // white
 
   // Additional colors for UI
   success: '#16a34a', // green
   warning: '#d97706', // amber
-  info: '#2563eb', // blue (kept for specific accents)
+  info: '#6d28d9', // dark purple for info
 
   // Text colors
   text: {
@@ -58,28 +58,28 @@ export const colors = {
   },
 };
 
-// Shadow styles
+// Shadow styles - lighter for minimalist design
 export const shadows = {
   sm: {
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
+    shadowOpacity: 0.03,
+    shadowRadius: 1.5,
     elevation: 1,
   },
   md: {
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 1,
   },
   lg: {
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 4,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
   },
 };
 
@@ -104,4 +104,8 @@ export const spacing = {
   '3xl': 32,
 };
 
-export default { colors, shadows, radius, spacing };
+// Import typography
+import typography, { useTypography, staticTypography, georgianTypography } from './typography';
+
+export default { colors, shadows, radius, spacing, typography };
+export { typography, useTypography, staticTypography, georgianTypography };
