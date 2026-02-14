@@ -17,14 +17,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import { taxiAPI } from '../services/api';
-import { getDirections, getDirectionsOSRM, isGoogleMapsConfigured, reverseGeocode } from '../services/googleMaps';
-import { colors, shadows, radius } from '../theme/colors';
+import { getDirections, getDirectionsOSRM, reverseGeocode } from '../services/googleMaps';
+import { colors, shadows, radius, useTypography } from '../theme/colors';
 import CancelRideModal from '../components/CancelRideModal';
 import RideReviewModal from '../components/RideReviewModal';
 import LocationSearchSheet from '../components/taxi/LocationSearchSheet';
 import RideOptionsSheet from '../components/taxi/RideOptionsSheet';
 import RideStatusSheet from '../components/taxi/RideStatusSheet';
 import DraggableBottomSheet from '../components/taxi/DraggableBottomSheet';
+import PaymentMethodModal from '../components/taxi/PaymentMethodModal';
 import { VEHICLE_TYPES } from '../components/taxi/VehicleTypeSelector';
 
 const { width, height } = Dimensions.get('window');
@@ -49,6 +50,8 @@ const BOOKING_STEPS = {
 };
 
 export default function TaxiScreen({ navigation }) {
+  const typography = useTypography();
+  const styles = React.useMemo(() => createStyles(typography), [typography]);
   const { t } = useTranslation();
   const { user } = useAuth();
   const { socket } = useSocket();
@@ -78,6 +81,7 @@ export default function TaxiScreen({ navigation }) {
   const [showReviewModal, setShowReviewModal] = useState(false);
   const [completedRide, setCompletedRide] = useState(null);
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
+  const [showPaymentMethodModal, setShowPaymentMethodModal] = useState(false);
   const timeoutTimerRef = useRef(null);
   const [progress, setProgress] = useState(0);
 
@@ -91,6 +95,9 @@ export default function TaxiScreen({ navigation }) {
   // Refs for values used inside socket handlers to avoid re-registering listeners
   const locationRef = useRef(null);
   const currentRideRef = useRef(null);
+
+  // Track shown alerts to prevent duplicates (key: "rideId:eventType")
+  const shownAlertsRef = useRef(new Set());
 
   // Saved destination data for restoring after searching state
   const savedDestinationRef = useRef(null);
@@ -232,7 +239,7 @@ export default function TaxiScreen({ navigation }) {
           }, 500);
         }
       } catch (error) {
-        console.log('Error checking active ride:', error);
+        // Error checking active ride
       }
     };
 
@@ -283,12 +290,19 @@ export default function TaxiScreen({ navigation }) {
   useEffect(() => { locationRef.current = location; }, [location]);
   useEffect(() => { currentRideRef.current = currentRide; }, [currentRide]);
 
+  // Show alert only once per ride+event combination
+  const showAlertOnce = useCallback((rideId, eventType, title, message, buttons) => {
+    const key = `${rideId}:${eventType}`;
+    if (shownAlertsRef.current.has(key)) return;
+    shownAlertsRef.current.add(key);
+    Alert.alert(title, message, buttons);
+  }, []);
+
   // Socket event listeners - only re-register when socket instance changes
   useEffect(() => {
     if (!socket) return;
 
     socket.on('ride:accepted', (ride) => {
-      console.log('Ride accepted:', ride);
       clearRideTimeout();
       setCurrentRide(ride);
       setBookingStep(BOOKING_STEPS.DRIVER_FOUND);
@@ -315,7 +329,8 @@ export default function TaxiScreen({ navigation }) {
         }
       }
 
-      Alert.alert(
+      showAlertOnce(
+        ride._id, 'accepted',
         t('taxi.driverFound'),
         `${ride.driver?.user?.firstName} ${t('taxi.isOnTheWay')}`,
         [{ text: t('common.ok') }]
@@ -350,10 +365,10 @@ export default function TaxiScreen({ navigation }) {
     });
 
     socket.on('ride:arrived', (ride) => {
-      console.log('Driver arrived:', ride);
       setCurrentRide(ride);
       setBookingStep(BOOKING_STEPS.DRIVER_ARRIVED);
-      Alert.alert(
+      showAlertOnce(
+        ride._id, 'arrived',
         t('taxi.driverArrived'),
         t('taxi.driverArrivedMessage'),
         [{ text: t('common.ok') }]
@@ -361,7 +376,6 @@ export default function TaxiScreen({ navigation }) {
     });
 
     socket.on('ride:started', (ride) => {
-      console.log('Ride started:', ride);
       setCurrentRide(ride);
       setBookingStep(BOOKING_STEPS.IN_PROGRESS);
 
@@ -377,7 +391,8 @@ export default function TaxiScreen({ navigation }) {
         `);
       }
 
-      Alert.alert(
+      showAlertOnce(
+        ride._id, 'started',
         t('taxi.rideStarted'),
         t('taxi.enjoyYourRide'),
         [{ text: t('common.ok') }]
@@ -385,7 +400,6 @@ export default function TaxiScreen({ navigation }) {
     });
 
     socket.on('ride:completed', (data) => {
-      console.log('Ride completed:', data);
       const ride = data.ride || data;
       setCompletedRide(ride);
       setShowReviewModal(true);
@@ -393,12 +407,12 @@ export default function TaxiScreen({ navigation }) {
     });
 
     socket.on('ride:cancelled', (ride) => {
-      console.log('Ride cancelled:', ride);
       resetBookingState();
       // Only alert if someone else cancelled (driver/admin).
       // When the user cancels, handleConfirmCancel / handleRideTimeout already shows an alert.
       if (ride.cancelledBy !== 'user') {
-        Alert.alert(
+        showAlertOnce(
+          ride._id, 'cancelled',
           t('taxi.rideCancelled'),
           ride.cancelledBy === 'driver'
             ? t('taxi.driverCancelledRide')
@@ -409,10 +423,10 @@ export default function TaxiScreen({ navigation }) {
     });
 
     socket.on('ride:expired', (data) => {
-      console.log('Ride expired:', data);
       clearRideTimeout();
       resetBookingState();
-      Alert.alert(
+      showAlertOnce(
+        data.rideId, 'expired',
         t('taxi.rideExpired'),
         t('taxi.rideExpiredMessage'),
         [{ text: t('common.ok') }]
@@ -420,9 +434,9 @@ export default function TaxiScreen({ navigation }) {
     });
 
     socket.on('ride:waitingTimeout', (data) => {
-      console.log('Ride waiting timeout:', data);
       resetBookingState();
-      Alert.alert(
+      showAlertOnce(
+        data.rideId, 'waitingTimeout',
         t('taxi.waitingTimeout'),
         t('taxi.waitingTimeoutMessage'),
         [{ text: t('common.ok') }]
@@ -476,6 +490,7 @@ export default function TaxiScreen({ navigation }) {
     setRoutePolyline(null);
     savedDestinationRef.current = null;
     savedDestinationCoordsRef.current = null;
+    shownAlertsRef.current.clear();
     clearRideTimeout();
 
     // Clear nearby drivers and destination from map
@@ -537,7 +552,6 @@ export default function TaxiScreen({ navigation }) {
         setLocationAddress(addressString || t('taxi.currentLocation'));
       }
     } catch (error) {
-      console.log('Error getting location:', error);
       setLocation(DEFAULT_LOCATION);
       setLocationAddress('Kutaisi, Georgia');
     } finally {
@@ -557,6 +571,12 @@ export default function TaxiScreen({ navigation }) {
     return R * c;
   };
 
+  const calculatePrice = useCallback((distance, vehicleId) => {
+    const vehicleType = VEHICLE_TYPES.find(v => v.id === vehicleId);
+    const basePrice = 5 + (distance * 1.5);
+    return (basePrice * vehicleType.priceMultiplier).toFixed(2);
+  }, []);
+
   // Fetch directions and update map with route polyline
   const fetchDirectionsAndUpdate = useCallback(async (destCoords) => {
     if (!location || !destCoords) return;
@@ -572,9 +592,7 @@ export default function TaxiScreen({ navigation }) {
 
       if (directions && directions.polyline && directions.polyline.length > 0) {
         // Use real distance and duration from directions
-        const vehicleType = VEHICLE_TYPES.find(v => v.id === selectedVehicle);
-        const basePrice = 5 + (directions.distance * 1.5);
-        setEstimatedPrice((basePrice * vehicleType.priceMultiplier).toFixed(2));
+        setEstimatedPrice(calculatePrice(directions.distance, selectedVehicle));
         setEstimatedDuration(directions.duration);
         setRoutePolyline(directions.polyline);
 
@@ -595,9 +613,7 @@ export default function TaxiScreen({ navigation }) {
           destCoords.latitude,
           destCoords.longitude
         );
-        const vehicleType = VEHICLE_TYPES.find(v => v.id === selectedVehicle);
-        const basePrice = 5 + (distance * 1.5);
-        setEstimatedPrice((basePrice * vehicleType.priceMultiplier).toFixed(2));
+        setEstimatedPrice(calculatePrice(distance, selectedVehicle));
         setEstimatedDuration(Math.round(distance * 2.5));
         setRoutePolyline(null);
 
@@ -611,7 +627,6 @@ export default function TaxiScreen({ navigation }) {
         }
       }
     } catch (error) {
-      console.log('Error fetching directions:', error);
       // Fallback calculation
       const distance = calculateDistance(
         location.latitude,
@@ -619,14 +634,12 @@ export default function TaxiScreen({ navigation }) {
         destCoords.latitude,
         destCoords.longitude
       );
-      const vehicleType = VEHICLE_TYPES.find(v => v.id === selectedVehicle);
-      const basePrice = 5 + (distance * 1.5);
-      setEstimatedPrice((basePrice * vehicleType.priceMultiplier).toFixed(2));
+      setEstimatedPrice(calculatePrice(distance, selectedVehicle));
       setEstimatedDuration(Math.round(distance * 2.5));
     } finally {
       setIsLoadingDirections(false);
     }
-  }, [location, selectedVehicle]);
+  }, [location, selectedVehicle, calculatePrice]);
 
   // Handle destination selection with coordinates (from Places Autocomplete)
   const handleDestinationSelectWithCoords = useCallback(async (address, coords) => {
@@ -687,11 +700,9 @@ export default function TaxiScreen({ navigation }) {
         destinationCoords.latitude,
         destinationCoords.longitude
       );
-      const vehicleType = VEHICLE_TYPES.find(v => v.id === vehicleId);
-      const basePrice = 5 + (distance * 1.5);
-      setEstimatedPrice((basePrice * vehicleType.priceMultiplier).toFixed(2));
+      setEstimatedPrice(calculatePrice(distance, vehicleId));
     }
-  }, [location, destinationCoords]);
+  }, [location, destinationCoords, calculatePrice]);
 
   const clearRideTimeout = () => {
     if (timeoutTimerRef.current) {
@@ -714,7 +725,6 @@ export default function TaxiScreen({ navigation }) {
         [{ text: t('common.ok') }]
       );
     } catch (error) {
-      console.log('Error auto-cancelling ride:', error);
       resetBookingState();
     }
   };
@@ -751,6 +761,17 @@ export default function TaxiScreen({ navigation }) {
       return;
     }
 
+    // If card payment is selected, show payment method modal first
+    if (paymentMethod === 'card') {
+      setShowPaymentMethodModal(true);
+      return;
+    }
+
+    // Otherwise proceed with cash payment
+    submitRideRequest(paymentMethod);
+  };
+
+  const submitRideRequest = async (selectedPaymentMethod) => {
     setIsRequesting(true);
 
     try {
@@ -761,9 +782,8 @@ export default function TaxiScreen({ navigation }) {
         destinationCoords.longitude
       );
 
-      const vehicleType = VEHICLE_TYPES.find(v => v.id === selectedVehicle);
+      const totalPrice = parseFloat(calculatePrice(distance, selectedVehicle));
       const basePrice = 5 + (distance * 1.5);
-      const totalPrice = basePrice * vehicleType.priceMultiplier;
       const duration = Math.round(distance * 2.5);
 
       const rideData = {
@@ -788,7 +808,7 @@ export default function TaxiScreen({ navigation }) {
         },
         passengerName: `${user.firstName} ${user.lastName}`,
         passengerPhone: user.phone || '',
-        paymentMethod: paymentMethod,
+        paymentMethod: selectedPaymentMethod,
         notes: ''
       };
 
@@ -827,7 +847,7 @@ export default function TaxiScreen({ navigation }) {
               `);
             }
           } catch (err) {
-            console.log('Error fetching nearby drivers:', err);
+            // Failed to fetch nearby drivers
           }
         }
 
@@ -836,7 +856,6 @@ export default function TaxiScreen({ navigation }) {
         }, RIDE_REQUEST_TIMEOUT);
       }
     } catch (error) {
-      console.log('Error requesting ride:', error);
       const errorMessage = error.response?.data?.message || t('errors.tryAgain');
       Alert.alert(t('errors.somethingWentWrong'), errorMessage);
     } finally {
@@ -866,7 +885,6 @@ export default function TaxiScreen({ navigation }) {
         [{ text: t('common.ok') }]
       );
     } catch (error) {
-      console.log('Error cancelling ride:', error);
       const errorMessage = error.response?.data?.message || t('errors.tryAgain');
       Alert.alert(t('errors.error'), errorMessage);
     } finally {
@@ -883,20 +901,14 @@ export default function TaxiScreen({ navigation }) {
     setIsSubmittingReview(true);
     try {
       await taxiAPI.reviewDriver(completedRide._id, rating, reviewText);
+      setShowReviewModal(false);
+      setCompletedRide(null);
       Alert.alert(
         t('taxi.thankYou'),
         t('taxi.reviewSubmitted'),
-        [{
-          text: t('common.ok'),
-          onPress: () => {
-            setShowReviewModal(false);
-            setCompletedRide(null);
-            navigation.replace('TaxiHistory');
-          }
-        }]
+        [{ text: t('common.ok') }]
       );
     } catch (error) {
-      console.log('Error submitting review:', error);
       const errorMessage = error.response?.data?.message || t('errors.tryAgain');
       Alert.alert(t('errors.error'), errorMessage);
     } finally {
@@ -907,7 +919,6 @@ export default function TaxiScreen({ navigation }) {
   const handleCloseReviewModal = () => {
     setShowReviewModal(false);
     setCompletedRide(null);
-    navigation.replace('TaxiHistory');
   };
 
   const handleBackToSearch = useCallback(() => {
@@ -999,7 +1010,6 @@ export default function TaxiScreen({ navigation }) {
         setIsLoadingDirections(false);
       }
     } catch (error) {
-      console.log('Error handling map click:', error);
       setIsSelectingOnMap(false);
       setIsLoadingDirections(false);
       // Expand bottom sheet back on error
@@ -1077,7 +1087,7 @@ export default function TaxiScreen({ navigation }) {
   };
 
   // Map HTML
-  const getMapHTML = () => {
+  const mapHTML = useMemo(() => {
     const lat = location?.latitude || DEFAULT_LOCATION.latitude;
     const lng = location?.longitude || DEFAULT_LOCATION.longitude;
 
@@ -1089,8 +1099,8 @@ export default function TaxiScreen({ navigation }) {
         <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
         <style>
-          body { margin: 0; padding: 0; }
-          #map { width: 100%; height: 100vh; }
+          html, body { margin: 0; padding: 0; background: #f5f5f5; }
+          #map { width: 100%; height: 100vh; background: #f5f5f5; }
 
           @keyframes pulse-green {
             0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.6); }
@@ -1408,7 +1418,7 @@ export default function TaxiScreen({ navigation }) {
       </body>
       </html>
     `;
-  };
+  }, [location?.latitude, location?.longitude]);
 
   return (
     <View style={styles.container}>
@@ -1429,17 +1439,28 @@ export default function TaxiScreen({ navigation }) {
         isLoading={isSubmittingReview}
       />
 
+      {/* Payment Method Modal */}
+      <PaymentMethodModal
+        visible={showPaymentMethodModal}
+        onClose={() => setShowPaymentMethodModal(false)}
+        onSelect={(method) => {
+          setShowPaymentMethodModal(false);
+          submitRideRequest(method);
+        }}
+      />
+
       {/* Full Screen Map */}
       <View style={styles.mapContainer}>
         <WebView
           ref={webViewRef}
-          source={{ html: getMapHTML() }}
+          source={{ html: mapHTML }}
           style={styles.map}
           scrollEnabled={false}
           javaScriptEnabled={true}
           domStorageEnabled={true}
-          onError={(e) => console.log('WebView error:', e)}
+          onError={() => {}}
           onMessage={handleWebViewMessage}
+          backgroundColor={colors.muted}
         />
 
         {/* Loading Overlay */}
@@ -1454,9 +1475,9 @@ export default function TaxiScreen({ navigation }) {
         <View style={[styles.mapControls, { top: insets.top + 10 }]}>
           <TouchableOpacity
             style={styles.controlButton}
-            onPress={() => navigation.goBack()}
+            onPress={() => navigation.navigate('MainTabs')}
           >
-            <Ionicons name="arrow-back" size={24} color={colors.foreground} />
+            <Ionicons name="menu" size={24} color={colors.foreground} />
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -1532,7 +1553,7 @@ export default function TaxiScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
@@ -1540,9 +1561,11 @@ const styles = StyleSheet.create({
   mapContainer: {
     flex: 1,
     position: 'relative',
+    backgroundColor: colors.muted,
   },
   map: {
     flex: 1,
+    backgroundColor: colors.muted,
   },
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -1552,7 +1575,7 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: 12,
-    fontSize: 16,
+    ...typography.h2,
     color: colors.foreground,
   },
   mapControls: {
@@ -1570,7 +1593,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center',
-    ...shadows.md,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 4,
   },
   myLocationButton: {
     position: 'absolute',
@@ -1581,7 +1608,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center',
-    ...shadows.md,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 4,
     zIndex: 10,
   },
   phoneAlertBanner: {
@@ -1604,12 +1635,12 @@ const styles = StyleSheet.create({
   },
   phoneAlertTitle: {
     color: '#fff',
-    fontSize: 14,
+    ...typography.body,
     fontWeight: '600',
   },
   phoneAlertMessage: {
     color: 'rgba(255,255,255,0.9)',
-    fontSize: 12,
+    ...typography.caption,
     marginTop: 2,
   },
   mapSelectionOverlay: {
@@ -1630,7 +1661,7 @@ const styles = StyleSheet.create({
   mapSelectionText: {
     flex: 1,
     color: colors.background,
-    fontSize: 14,
+    ...typography.body,
     fontWeight: '600',
     marginLeft: 10,
   },

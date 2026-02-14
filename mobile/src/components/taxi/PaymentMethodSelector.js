@@ -21,10 +21,15 @@ export default function PaymentMethodSelector({ selected, onSelect }) {
           size={20}
           color={selected === 'cash' ? colors.primary : colors.mutedForeground}
         />
-        <Text style={[
-          styles.paymentText,
-          selected === 'cash' && styles.paymentTextSelected,
-        ]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+        <Text
+          style={[
+            styles.paymentText,
+            selected === 'cash' && styles.paymentTextSelected,
+          ]}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.8}
+        >
           {t('taxi.cash')}
         </Text>
       </TouchableOpacity>
@@ -41,10 +46,15 @@ export default function PaymentMethodSelector({ selected, onSelect }) {
           size={20}
           color={selected === 'card' ? colors.primary : colors.mutedForeground}
         />
-        <Text style={[
-          styles.paymentText,
-          selected === 'card' && styles.paymentTextSelected,
-        ]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+        <Text
+          style={[
+            styles.paymentText,
+            selected === 'card' && styles.paymentTextSelected,
+          ]}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.8}
+        >
           {t('taxi.card')}
         </Text>
       </TouchableOpacity>
@@ -64,13 +74,14 @@ const styles = StyleSheet.create({
     padding: 12,
     marginHorizontal: 4,
     borderRadius: radius.lg,
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.background,
     borderWidth: 2,
-    borderColor: 'transparent',
+    borderColor: colors.primary,
   },
   paymentOptionSelected: {
     borderColor: colors.primary,
     backgroundColor: colors.background,
+    borderWidth: 3,
   },
   paymentText: {
     marginLeft: 8,
