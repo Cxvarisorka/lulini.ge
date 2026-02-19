@@ -223,13 +223,14 @@ export default function HomeScreen({ navigation }) {
               />
             </View>
           </View>
-          {/* Debug: Socket status - remove after debugging */}
-          <View style={styles.debugBanner}>
-            <View style={[styles.debugDot, { backgroundColor: isConnected ? colors.success : colors.destructive }]} />
-            <Text style={styles.debugText}>
-              Socket: {isConnected ? 'Connected' : 'Disconnected'} | ID: {socket?.id || 'none'}
-            </Text>
-          </View>
+          {__DEV__ && (
+            <View style={styles.debugBanner}>
+              <View style={[styles.debugDot, { backgroundColor: isConnected ? colors.success : colors.destructive }]} />
+              <Text style={styles.debugText}>
+                Socket: {isConnected ? 'Connected' : 'Disconnected'}
+              </Text>
+            </View>
+          )}
         </View>
       </View>
 

@@ -82,13 +82,32 @@ const login = catchAsync(async (req, res, next) => {
         return next(new AppError('Invalid credentials', 401));
     }
 
+    // Account lockout check (30 min lockout after 5 failed attempts)
+    if (user.lockUntil && user.lockUntil > new Date()) {
+        const minutesLeft = Math.ceil((user.lockUntil - new Date()) / 60000);
+        return next(new AppError(`Account locked due to too many failed attempts. Try again in ${minutesLeft} minutes`, 423));
+    }
+
     if (user.provider !== 'local') {
         return next(new AppError(`Please login with ${user.provider}`, 400));
     }
 
     const isMatch = await user.comparePassword(password);
     if (!isMatch) {
+        // Increment failed attempts, lock after 5
+        user.failedLoginAttempts = (user.failedLoginAttempts || 0) + 1;
+        if (user.failedLoginAttempts >= 5) {
+            user.lockUntil = new Date(Date.now() + 30 * 60 * 1000);
+        }
+        await user.save({ validateBeforeSave: false });
         return next(new AppError('Invalid credentials', 401));
+    }
+
+    // Reset lockout counters on successful login
+    if (user.failedLoginAttempts > 0 || user.lockUntil) {
+        user.failedLoginAttempts = 0;
+        user.lockUntil = null;
+        await user.save({ validateBeforeSave: false });
     }
 
     sendTokenResponse(user, 200, res, 'Login successful');
@@ -204,20 +223,25 @@ const googleTokenAuth = catchAsync(async (req, res, next) => {
     const payload = ticket.getPayload();
     const { sub: googleId, email, given_name, family_name, picture } = payload;
 
-    // Find or create user
-    let user = await User.findOne({
-        $or: [
-            { providerId: googleId, provider: 'google' },
-            { email: email }
-        ]
-    });
+    // Find user by Google provider ID first (exact match)
+    let user = await User.findOne({ providerId: googleId, provider: 'google' });
+
+    if (!user && email) {
+        // Check if email exists under a different provider
+        const existingByEmail = await User.findOne({ email });
+        if (existingByEmail) {
+            // Do NOT silently merge — require the user to log in with their original provider
+            return next(new AppError(
+                `An account with this email already exists. Please log in with ${existingByEmail.provider}`,
+                409
+            ));
+        }
+    }
 
     if (user) {
-        // If user exists with email but different provider, update provider info
-        if (user.provider !== 'google') {
-            user.provider = 'google';
-            user.providerId = googleId;
-            user.avatar = picture || user.avatar;
+        // Update avatar if changed
+        if (picture && picture !== user.avatar) {
+            user.avatar = picture;
             await user.save();
         }
     } else {
@@ -268,8 +292,7 @@ const sendPhoneOtp = catchAsync(async (req, res, next) => {
 
     res.status(200).json({
         success: true,
-        message: 'OTP sent successfully',
-        isRegistered: !!existingUser
+        message: 'OTP sent successfully'
     });
 });
 
@@ -306,7 +329,6 @@ const verifyPhoneOtp = catchAsync(async (req, res, next) => {
     }
 
     // Try Twilio Verify first (returns null if not configured)
-    console.log('verifyPhoneOtp: checking code for phone:', phone, 'code length:', code.length);
     let isValid = await checkVerification(phone, code);
 
     // Handle Twilio error responses
@@ -410,23 +432,24 @@ const appleTokenAuth = catchAsync(async (req, res, next) => {
     const { sub: appleId, email: tokenEmail } = appleUser;
     const email = providedEmail || tokenEmail;
 
-    // Find or create user
-    let user = await User.findOne({
-        $or: [
-            { providerId: appleId, provider: 'apple' },
-            ...(email ? [{ email }] : [])
-        ]
-    });
+    // Find user by Apple provider ID first (exact match)
+    let user = await User.findOne({ providerId: appleId, provider: 'apple' });
+
+    if (!user && email) {
+        // Check if email exists under a different provider
+        const existingByEmail = await User.findOne({ email });
+        if (existingByEmail) {
+            return next(new AppError(
+                `An account with this email already exists. Please log in with ${existingByEmail.provider}`,
+                409
+            ));
+        }
+    }
 
     let isNewUser = false;
 
     if (user) {
-        // If user exists with email but different provider, update provider info
-        if (user.provider !== 'apple') {
-            user.provider = 'apple';
-            user.providerId = appleId;
-            await user.save();
-        }
+        // Existing Apple user — no merge needed
     } else {
         // Create new user
         user = await User.create({

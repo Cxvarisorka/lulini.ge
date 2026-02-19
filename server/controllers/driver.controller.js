@@ -4,13 +4,23 @@ const Ride = require('../models/ride.model');
 const AppError = require('../utils/AppError');
 const catchAsync = require('../utils/catchAsync');
 
+// Haversine distance in km (for speed/distance validation)
+function haversineDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) ** 2 +
+        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+        Math.sin(dLon / 2) ** 2;
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+}
+
 // @desc    Create new driver
 // @route   POST /api/drivers
 // @access  Private/Admin
 const createDriver = catchAsync(async (req, res, next) => {
     const { email, password, firstName, lastName, phone, licenseNumber, vehicle } = req.body;
-
-    console.log('Creating driver with data:', { email, firstName, lastName, phone, licenseNumber, vehicle });
 
     // Validate required fields
     if (!email || !password || !firstName || !lastName || !phone || !licenseNumber || !vehicle) {
@@ -275,6 +285,22 @@ const updateDriverLocation = catchAsync(async (req, res, next) => {
     const driver = await Driver.findOne({ user: req.user.id });
     if (!driver) {
         return next(new AppError('Driver profile not found', 404));
+    }
+
+    // Speed/distance validation against previous location
+    if (driver.location && driver.location.coordinates &&
+        driver.location.coordinates[0] !== 0 && driver.location.coordinates[1] !== 0) {
+        const [prevLng, prevLat] = driver.location.coordinates;
+        const distKm = haversineDistance(prevLat, prevLng, latitude, longitude);
+        const timeDeltaSec = (Date.now() - new Date(driver.updatedAt).getTime()) / 1000;
+
+        // Only validate with reasonable time delta (> 2s) and non-trivial movement
+        if (timeDeltaSec > 2 && distKm > 0.01) {
+            const speedKmh = (distKm / timeDeltaSec) * 3600;
+            if (speedKmh > 200) {
+                return next(new AppError('Location update rejected: implausible speed detected', 400));
+            }
+        }
     }
 
     driver.location = {
@@ -643,6 +669,100 @@ const getNearbyDrivers = catchAsync(async (req, res, next) => {
     });
 });
 
+// @desc    Batch update driver location (from background GPS)
+// @route   POST /api/drivers/location/batch
+// @access  Private/Driver
+const batchUpdateDriverLocation = catchAsync(async (req, res, next) => {
+    const { locations } = req.body;
+
+    if (!Array.isArray(locations) || locations.length === 0) {
+        return next(new AppError('locations array is required', 400));
+    }
+
+    if (locations.length > 50) {
+        return next(new AppError('Maximum 50 locations per batch', 400));
+    }
+
+    const driver = await Driver.findOne({ user: req.user.id });
+    if (!driver) {
+        return next(new AppError('Driver profile not found', 404));
+    }
+
+    // Sort by timestamp ascending so we process in chronological order
+    const sorted = [...locations].sort((a, b) => a.timestamp - b.timestamp);
+
+    // Validate and find the latest valid point
+    let lastValid = null;
+    if (driver.location && driver.location.coordinates &&
+        driver.location.coordinates[0] !== 0 && driver.location.coordinates[1] !== 0) {
+        lastValid = {
+            lat: driver.location.coordinates[1],
+            lng: driver.location.coordinates[0],
+            time: new Date(driver.updatedAt).getTime(),
+        };
+    }
+
+    let accepted = null; // will hold the latest accepted point
+
+    for (const loc of sorted) {
+        const { latitude, longitude, timestamp } = loc;
+
+        // Basic coordinate validation
+        if (latitude == null || longitude == null ||
+            latitude < -90 || latitude > 90 ||
+            longitude < -180 || longitude > 180) {
+            continue;
+        }
+
+        // Speed validation against last known position
+        if (lastValid) {
+            const timeDeltaSec = (timestamp - lastValid.time) / 1000;
+            if (timeDeltaSec > 2) {
+                const distKm = haversineDistance(lastValid.lat, lastValid.lng, latitude, longitude);
+                const speedKmh = (distKm / timeDeltaSec) * 3600;
+                if (speedKmh > 200) {
+                    continue; // skip implausible
+                }
+            }
+        }
+
+        lastValid = { lat: latitude, lng: longitude, time: timestamp };
+        accepted = loc;
+    }
+
+    if (!accepted) {
+        return res.json({ success: true, message: 'No valid locations in batch' });
+    }
+
+    // Update driver with the latest valid position
+    driver.location = {
+        type: 'Point',
+        coordinates: [accepted.longitude, accepted.latitude],
+    };
+    await driver.save();
+
+    // Broadcast to passenger if driver has an active ride
+    const activeRide = await Ride.findOne({
+        driver: driver._id,
+        status: { $in: ['accepted', 'driver_arrived'] },
+    });
+
+    if (activeRide) {
+        const io = req.app.get('io');
+        if (io) {
+            io.to(`user:${activeRide.user}`).emit('driver:locationUpdate', {
+                rideId: activeRide._id,
+                location: {
+                    latitude: accepted.latitude,
+                    longitude: accepted.longitude,
+                },
+            });
+        }
+    }
+
+    res.json({ success: true, message: 'Batch location updated', accepted: 1 });
+});
+
 module.exports = {
     createDriver,
     getAllDrivers,
@@ -652,6 +772,7 @@ module.exports = {
     getDriverProfile,
     updateDriverStatus,
     updateDriverLocation,
+    batchUpdateDriverLocation,
     getDriverStats,
     getDriverEarnings,
     getDriverReviews,

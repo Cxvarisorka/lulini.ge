@@ -54,10 +54,9 @@ const checkVerification = async (phone, code) => {
             .services(verifyServiceSid)
             .verificationChecks.create({ to: phone, code });
 
-        console.log('Twilio verify check result:', check.status, 'for phone:', phone);
         return check.status === 'approved';
     } catch (error) {
-        console.error('Twilio verify check error:', error.code, error.message, 'for phone:', phone);
+        console.error('Twilio verify check error:', error.code, error.message);
         // 20404 = verification not found (expired or already consumed)
         if (error.code === 20404) {
             return { error: 'expired' };

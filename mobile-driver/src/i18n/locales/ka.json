@@ -36,7 +36,7 @@
     "profile": "პროფილი"
   },
   "home": {
-    "title": "GoTours მძღოლი",
+    "title": "Lulini მძღოლი",
     "goOnline": "ონლაინ",
     "goOffline": "ოფლაინ",
     "youAreOnline": "თქვენ ონლაინ ხართ",
@@ -200,7 +200,17 @@
     "newRideRequest": "ახალი მოგზაურობის მოთხოვნა!",
     "rideAccepted": "მოგზაურობა მიღებულია",
     "rideCancelled": "მოგზაურობა გაუქმებულია",
-    "rideCompleted": "მოგზაურობა დასრულებულია"
+    "rideCompleted": "მოგზაურობა დასრულებულია",
+    "push": {
+      "rideRequestTitle": "ახალი მოთხოვნა!",
+      "rideRequestBody": "აყვანა: {{address}}",
+      "rideCancelledTitle": "მგზავრობა გაუქმდა",
+      "rideCancelledBody": "მგზავრობა გაუქმდა",
+      "rideCompletedTitle": "მგზავრობა დასრულდა",
+      "rideCompletedBody": "თქვენ მიიღეთ {{fare}} ლარი",
+      "waitingTimeoutTitle": "მგზავრობა გაუქმდა",
+      "waitingTimeoutBody": "მგზავრი 3 წუთის განმავლობაში არ გამოცხადდა"
+    }
   },
   "nav": {
     "calculatingRoute": "მარშრუტის გამოთვლა...",

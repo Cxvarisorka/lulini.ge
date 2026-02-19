@@ -9,12 +9,15 @@ const {
     getDriverProfile,
     updateDriverStatus,
     updateDriverLocation,
+    batchUpdateDriverLocation,
     getDriverStats,
     getDriverEarnings,
     getDriverReviews,
     getAllDriverStatistics,
     getNearbyDrivers
 } = require('../controllers/driver.controller');
+
+const { validateUpdateDriverLocation } = require('../middlewares/validators');
 
 const router = express.Router();
 
@@ -27,7 +30,8 @@ router.get('/nearby', getNearbyDrivers);
 // Driver routes (for logged in drivers)
 router.get('/profile', isDriver, getDriverProfile);
 router.patch('/status', isDriver, updateDriverStatus);
-router.patch('/location', isDriver, updateDriverLocation);
+router.patch('/location', isDriver, validateUpdateDriverLocation, updateDriverLocation);
+router.post('/location/batch', isDriver, batchUpdateDriverLocation);
 router.get('/stats', isDriver, getDriverStats);
 router.get('/earnings', isDriver, getDriverEarnings);
 

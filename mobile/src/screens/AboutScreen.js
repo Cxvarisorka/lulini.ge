@@ -84,7 +84,7 @@ const typography = useTypography();
           <View style={styles.logoContainer}>
             <Ionicons name="car-sport" size={48} color={colors.primary} />
           </View>
-          <Text style={styles.appName}>GoTours Georgia</Text>
+          <Text style={styles.appName}>Lulini</Text>
           <Text style={styles.appTagline}>{t('about.tagline')}</Text>
           <View style={styles.versionContainer}>
             <Text style={styles.versionText}>
@@ -179,7 +179,7 @@ const typography = useTypography();
         {/* Footer */}
         <View style={styles.footer}>
           <Text style={styles.footerText}>
-            © 2026 GoTours Georgia. {t('about.allRightsReserved')}
+            © 2026 Lulini. {t('about.allRightsReserved')}
           </Text>
           <Text style={styles.footerSubtext}>
             {t('about.madeWithLove')} 🇬🇪

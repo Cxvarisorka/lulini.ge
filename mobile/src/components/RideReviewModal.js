@@ -235,7 +235,7 @@ const createStyles = (typography) => StyleSheet.create({
   driverInfo: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.muted,
     padding: 16,
     borderRadius: radius.lg,
     marginBottom: 24,
@@ -299,7 +299,7 @@ const createStyles = (typography) => StyleSheet.create({
     marginBottom: 8,
   },
   reviewInput: {
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.muted,
     borderRadius: radius.lg,
     padding: 12,
     ...typography.bodyMedium,
@@ -307,7 +307,7 @@ const createStyles = (typography) => StyleSheet.create({
     minHeight: 100,
   },
   rideSummary: {
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.muted,
     borderRadius: radius.lg,
     padding: 16,
     marginBottom: 24,

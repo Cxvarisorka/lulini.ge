@@ -15,9 +15,11 @@ const {
     reviewDriver
 } = require('../controllers/ride.controller');
 const { protect, authorize, isDriver } = require('../middlewares/auth.middleware');
+const { rideCreateLimiter } = require('../middlewares/rateLimiter');
+const { validateCreateRide } = require('../middlewares/validators');
 
 // User routes
-router.post('/', protect, createRide);
+router.post('/', protect, rideCreateLimiter, validateCreateRide, createRide);
 router.get('/my', protect, getMyRides);
 
 // Driver routes

@@ -177,6 +177,8 @@ rideSchema.index({ status: 1 });
 rideSchema.index({ createdAt: -1 });
 rideSchema.index({ status: 1, expiresAt: 1 }); // For querying non-expired pending rides
 rideSchema.index({ status: 1, waitingExpiresAt: 1 }); // For querying waiting timeout rides
+rideSchema.index({ status: 1, vehicleType: 1, expiresAt: 1 }); // getAvailableRides filtered by vehicle type
+rideSchema.index({ driver: 1, status: 1, endTime: -1 }); // Driver ride history sorted by completion
 
 const Ride = mongoose.model('Ride', rideSchema);
 

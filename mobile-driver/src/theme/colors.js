@@ -1,6 +1,8 @@
 // Color theme matching the website's design system
 // Based on HSL values from client/src/index.css
 
+import typography, { useTypography, staticTypography, georgianTypography, responsiveTypography } from './typography';
+
 export const colors = {
   // Primary colors - dark purple theme
   primary: '#5b21b6', // dark purple (violet-800)
@@ -112,9 +114,6 @@ export const spacing = {
   '2xl': 24,
   '3xl': 32,
 };
-
-// Import typography
-import typography, { useTypography, staticTypography, georgianTypography, responsiveTypography } from './typography';
 
 export default { colors, shadows, radius, spacing, typography };
 export { typography, useTypography, staticTypography, georgianTypography, responsiveTypography };

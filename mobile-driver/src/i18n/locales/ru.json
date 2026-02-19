@@ -36,7 +36,7 @@
     "profile": "Профиль"
   },
   "home": {
-    "title": "GoTours Водитель",
+    "title": "Lulini Водитель",
     "goOnline": "Выйти на линию",
     "goOffline": "Уйти с линии",
     "youAreOnline": "Вы на линии",
@@ -200,7 +200,17 @@
     "newRideRequest": "Новый заказ!",
     "rideAccepted": "Поездка принята",
     "rideCancelled": "Поездка отменена",
-    "rideCompleted": "Поездка завершена"
+    "rideCompleted": "Поездка завершена",
+    "push": {
+      "rideRequestTitle": "Новый заказ!",
+      "rideRequestBody": "Посадка: {{address}}",
+      "rideCancelledTitle": "Поездка отменена",
+      "rideCancelledBody": "Поездка была отменена",
+      "rideCompletedTitle": "Поездка завершена",
+      "rideCompletedBody": "Вы заработали {{fare}} лари",
+      "waitingTimeoutTitle": "Поездка отменена",
+      "waitingTimeoutBody": "Пассажир не появился в течение 3 минут"
+    }
   },
   "nav": {
     "calculatingRoute": "Расчёт маршрута...",

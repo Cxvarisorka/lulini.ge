@@ -1,14 +1,32 @@
-import React, { createContext, useState, useContext, useEffect, useRef } from 'react';
+import React, {
+  createContext,
+  useState,
+  useContext,
+  useEffect,
+  useRef,
+  useCallback,
+} from 'react';
 import * as Location from 'expo-location';
-import { Alert } from 'react-native';
+import { Alert, AppState, Platform } from 'react-native';
 import { driverAPI } from '../services/api';
+import {
+  startBackgroundLocationUpdates,
+  stopBackgroundLocationUpdates,
+  clearRetryQueue,
+} from '../services/backgroundLocation';
 
 /**
- * LocationContext - Manages location tracking for the driver app
+ * LocationContext — Production-grade driver location tracking
  *
- * Note: Currently uses FOREGROUND location only (works with Expo Go)
- * Background location tracking has been removed to avoid requiring a development build.
- * For production with background tracking, you'll need to build a custom development build.
+ * Features:
+ *   - Background GPS via expo-task-manager (works minimized + screen locked)
+ *   - Foreground watcher syncs UI state (map marker, heading)
+ *   - Batched server updates from background task
+ *   - GPS spoofing detection (mock provider, accuracy, speed)
+ *   - Speed validation before sending
+ *   - Offline retry queue persisted to SecureStore
+ *   - Battery-adaptive: tight during rides, loose when idle
+ *   - Full cleanup on logout
  */
 
 const LocationContext = createContext();
@@ -27,273 +45,412 @@ const DEFAULT_LOCATION = {
   longitude: 44.8271,
 };
 
+// Throttle for foreground → server updates (background task handles its own batching)
+const MIN_MOVEMENT_METERS = 10;
+const MIN_SERVER_UPDATE_INTERVAL = 5000;
+
+// Speed limit for foreground validation
+const MAX_SPEED_KMH = 200;
+
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 export const LocationProvider = ({ children }) => {
   const [location, setLocation] = useState(null);
   const [address, setAddress] = useState('');
   const [isTracking, setIsTracking] = useState(false);
   const [error, setError] = useState(null);
+  const [permissionStatus, setPermissionStatus] = useState(null); // 'foreground' | 'background' | null
+
   const locationSubscription = useRef(null);
   const isShowingAlert = useRef(false);
+  const activeRideRef = useRef(null);
+
+  // Throttle server updates from foreground watcher
+  const lastServerUpdate = useRef({ lat: 0, lng: 0, time: 0 });
+
+  // ─── Permission flow ────────────────────────────────────────────────────
 
   useEffect(() => {
-    requestLocationPermission();
-
+    requestPermissions();
     return () => {
       stopTracking();
     };
   }, []);
 
-  const requestLocationPermission = async () => {
-    try {
-      // First check if location services are enabled
-      const locationEnabled = await Location.hasServicesEnabledAsync();
-
-      if (!locationEnabled) {
-        if (!isShowingAlert.current) {
-          isShowingAlert.current = true;
-          Alert.alert(
-            'Location Services Disabled',
-            'Please enable location services in your device settings to use this app.',
-            [{
-              text: 'OK',
-              onPress: () => { isShowingAlert.current = false; }
-            }]
-          );
+  // Re-check permissions when app returns to foreground
+  useEffect(() => {
+    const subscription = AppState.addEventListener(
+      'change',
+      async (nextAppState) => {
+        if (nextAppState === 'active') {
+          const fg = await Location.getForegroundPermissionsAsync();
+          if (fg.status !== 'granted') {
+            stopTracking();
+            setError('Location permission revoked');
+            showAlert(
+              'Location Permission Required',
+              'Location permission was revoked. Please re-enable it in settings to continue driving.',
+            );
+          }
         }
+      },
+    );
+    return () => subscription.remove();
+  }, []);
+
+  const showAlert = useCallback((title, message) => {
+    if (isShowingAlert.current) return;
+    isShowingAlert.current = true;
+    Alert.alert(title, message, [
+      {
+        text: 'OK',
+        onPress: () => {
+          isShowingAlert.current = false;
+        },
+      },
+    ]);
+  }, []);
+
+  const requestPermissions = async () => {
+    try {
+      // Check location services
+      const servicesEnabled = await Location.hasServicesEnabledAsync();
+      if (!servicesEnabled) {
+        showAlert(
+          'Location Services Disabled',
+          'Please enable location services in your device settings to use this app.',
+        );
         setError('Location services disabled');
         setLocation(DEFAULT_LOCATION);
         return false;
       }
 
-      // Request permission
-      const { status } = await Location.requestForegroundPermissionsAsync();
-
-      if (status !== 'granted') {
-        if (!isShowingAlert.current) {
-          isShowingAlert.current = true;
-          Alert.alert(
-            'Location Permission Required',
-            'Please enable location permissions in your device settings to use this app.',
-            [{
-              text: 'OK',
-              onPress: () => { isShowingAlert.current = false; }
-            }]
-          );
-        }
+      // Step 1: Foreground permission
+      const { status: fgStatus } =
+        await Location.requestForegroundPermissionsAsync();
+      if (fgStatus !== 'granted') {
+        showAlert(
+          'Location Permission Required',
+          'Please enable location permissions in your device settings to use this app.',
+        );
         setError('Location permission not granted');
         setLocation(DEFAULT_LOCATION);
         return false;
       }
+      setPermissionStatus('foreground');
 
-      // Get initial location with timeout
+      // Step 2: Background permission (required for production tracking)
+      const { status: bgStatus } =
+        await Location.requestBackgroundPermissionsAsync();
+      if (bgStatus === 'granted') {
+        setPermissionStatus('background');
+      } else {
+        // Background not granted — app will work but only in foreground
+        console.warn(
+          '[Location] Background permission not granted — foreground only',
+        );
+        showAlert(
+          'Background Location',
+          Platform.OS === 'ios'
+            ? 'For best experience, please set location access to "Always" in Settings > Lulini Driver > Location.'
+            : 'For best experience, please allow "All the time" location access in app settings.',
+        );
+      }
+
+      // Get initial location
       const currentLocation = await Promise.race([
         Location.getCurrentPositionAsync({
           accuracy: Location.Accuracy.Balanced,
-          timeInterval: 5000,
-          distanceInterval: 0,
         }),
         new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Location request timed out')), 15000)
-        )
-      ]);
-
-      const newLocation = {
-        latitude: currentLocation.coords.latitude,
-        longitude: currentLocation.coords.longitude,
-      };
-
-      setLocation(newLocation);
-      setError(null);
-
-      // Get address
-      try {
-        const [addressData] = await Location.reverseGeocodeAsync(newLocation);
-        if (addressData) {
-          const addressString = [
-            addressData.street,
-            addressData.name,
-            addressData.city,
-          ].filter(Boolean).join(', ');
-          setAddress(addressString || 'Current Location');
-        }
-      } catch (err) {
-        // Failed to reverse geocode
-      }
-
-      return true;
-    } catch (err) {
-      let errorMessage = 'Failed to get your location. ';
-      if (err.message.includes('timeout')) {
-        errorMessage += 'Make sure you have a clear view of the sky and try again.';
-      } else if (err.message.includes('denied')) {
-        errorMessage += 'Please enable location permissions in your device settings.';
-      } else {
-        errorMessage += err.message;
-      }
-
-      if (!isShowingAlert.current) {
-        isShowingAlert.current = true;
-        Alert.alert(
-          'Location Error',
-          errorMessage,
-          [{
-            text: 'OK',
-            onPress: () => { isShowingAlert.current = false; }
-          }]
-        );
-      }
-      setError('Location error');
-      setLocation(DEFAULT_LOCATION);
-      return false;
-    }
-  };
-
-  const startTracking = async () => {
-    try {
-      // Check if we already have permission
-      const { status } = await Location.getForegroundPermissionsAsync();
-
-      if (status !== 'granted') {
-        const hasPermission = await requestLocationPermission();
-        if (!hasPermission) {
-          return false;
-        }
-      } else {
-        // Get initial location if we don't have one
-        if (!location) {
-          try {
-            const currentLocation = await Promise.race([
-              Location.getCurrentPositionAsync({
-                accuracy: Location.Accuracy.Balanced,
-              }),
-              new Promise((_, reject) =>
-                setTimeout(() => reject(new Error('Location timeout')), 10000)
-              )
-            ]);
-            const coords = {
-              latitude: currentLocation.coords.latitude,
-              longitude: currentLocation.coords.longitude,
-            };
-            setLocation(coords);
-          } catch (err) {
-            // Use default location as fallback
-            setLocation(DEFAULT_LOCATION);
-          }
-        }
-      }
-
-      // Note: Background location tracking removed for now
-      // Only using foreground location which works with Expo Go
-
-      // Start watching location (foreground only)
-      locationSubscription.current = await Location.watchPositionAsync(
-        {
-          accuracy: Location.Accuracy.High,
-          timeInterval: 10000, // Update every 10 seconds
-          distanceInterval: 10, // Or every 10 meters
-        },
-        (newLocation) => {
-          const coords = {
-            latitude: newLocation.coords.latitude,
-            longitude: newLocation.coords.longitude,
-          };
-          setLocation(coords);
-
-          // Send location to backend
-          updateLocationOnServer(coords);
-        }
-      );
-
-      setIsTracking(true);
-      return true;
-    } catch (err) {
-      setError('Failed to start tracking');
-
-      // Don't show alert for permission errors (already handled)
-      if (!err.message.includes('permission') && !err.message.includes('denied') && !isShowingAlert.current) {
-        isShowingAlert.current = true;
-        Alert.alert(
-          'Location Tracking Error',
-          `Could not start tracking: ${err.message}`,
-          [{
-            text: 'OK',
-            onPress: () => { isShowingAlert.current = false; }
-          }]
-        );
-      }
-      return false;
-    }
-  };
-
-  const stopTracking = () => {
-    if (locationSubscription.current) {
-      locationSubscription.current.remove();
-      locationSubscription.current = null;
-    }
-    setIsTracking(false);
-  };
-
-  const updateLocationOnServer = async (coords) => {
-    try {
-      await driverAPI.updateLocation(coords);
-    } catch (err) {
-      // Failed to update location on server
-    }
-  };
-
-  const getCurrentLocation = async () => {
-    try {
-      const currentLocation = await Promise.race([
-        Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-          timeInterval: 5000,
-          distanceInterval: 0,
-        }),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Location request timed out')), 15000)
-        )
+          setTimeout(() => reject(new Error('Location timeout')), 15000),
+        ),
       ]);
 
       const coords = {
         latitude: currentLocation.coords.latitude,
         longitude: currentLocation.coords.longitude,
       };
+      setLocation(coords);
+      setError(null);
 
+      // Reverse geocode (non-blocking)
+      reverseGeocode(coords);
+
+      return true;
+    } catch (err) {
+      let msg = 'Failed to get your location. ';
+      if (err.message.includes('timeout')) {
+        msg += 'Make sure you have a clear view of the sky and try again.';
+      } else if (err.message.includes('denied')) {
+        msg += 'Please enable location permissions in your device settings.';
+      } else {
+        msg += err.message;
+      }
+      showAlert('Location Error', msg);
+      setError('Location error');
+      setLocation(DEFAULT_LOCATION);
+      return false;
+    }
+  };
+
+  const reverseGeocode = async (coords) => {
+    try {
+      const [data] = await Location.reverseGeocodeAsync(coords);
+      if (data) {
+        const str = [data.street, data.name, data.city]
+          .filter(Boolean)
+          .join(', ');
+        setAddress(str || 'Current Location');
+      }
+    } catch (_) {}
+  };
+
+  // ─── Start tracking (foreground watcher + background task) ──────────────
+
+  const startTracking = async () => {
+    try {
+      // Ensure foreground permission
+      const { status } = await Location.getForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        const ok = await requestPermissions();
+        if (!ok) return false;
+      }
+
+      // Get initial location if missing
+      if (!location) {
+        try {
+          const pos = await Promise.race([
+            Location.getCurrentPositionAsync({
+              accuracy: Location.Accuracy.Balanced,
+            }),
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('timeout')), 10000),
+            ),
+          ]);
+          setLocation({
+            latitude: pos.coords.latitude,
+            longitude: pos.coords.longitude,
+          });
+        } catch (_) {
+          setLocation(DEFAULT_LOCATION);
+        }
+      }
+
+      const hasActiveRide = !!activeRideRef.current;
+
+      // Start background location updates (handles own batching + server sends)
+      const bgPermission = await Location.getBackgroundPermissionsAsync();
+      if (bgPermission.status === 'granted') {
+        await startBackgroundLocationUpdates(hasActiveRide);
+      } else if (Platform.OS === 'ios') {
+        // iOS requires "Always" location for background tracking — block going online without it
+        showAlert(
+          'Background Location Required',
+          'To go online as a driver, you must allow "Always" location access. Go to Settings > Lulini Driver > Location and select "Always".',
+        );
+        return false;
+      }
+
+      // Start foreground watcher for UI updates (map marker position, heading)
+      locationSubscription.current = await Location.watchPositionAsync(
+        {
+          accuracy: Location.Accuracy.High,
+          timeInterval: hasActiveRide ? 3000 : 10000,
+          distanceInterval: hasActiveRide ? 5 : 10,
+        },
+        (newLocation) => {
+          const coords = {
+            latitude: newLocation.coords.latitude,
+            longitude: newLocation.coords.longitude,
+            heading: newLocation.coords.heading ?? null,
+            speed: newLocation.coords.speed ?? null,
+            accuracy: newLocation.coords.accuracy ?? null,
+          };
+
+          // Client-side spoofing check
+          if (
+            Platform.OS === 'android' &&
+            newLocation.mocked
+          ) {
+            console.warn('[Location] Mock location detected in foreground');
+            return;
+          }
+
+          // Speed validation
+          const last = lastServerUpdate.current;
+          if (last.lat !== 0) {
+            const timeDelta = (Date.now() - last.time) / 1000;
+            if (timeDelta > 1) {
+              const dist = haversineKm(
+                last.lat,
+                last.lng,
+                coords.latitude,
+                coords.longitude,
+              );
+              const speed = (dist / timeDelta) * 3600;
+              if (speed > MAX_SPEED_KMH) {
+                console.warn(
+                  `[Location] Foreground speed ${speed.toFixed(0)} km/h — skipping`,
+                );
+                return;
+              }
+            }
+          }
+
+          setLocation(coords);
+
+          // Send to server if background isn't handling it
+          if (bgPermission.status !== 'granted') {
+            updateLocationOnServer(coords);
+          }
+        },
+      );
+
+      setIsTracking(true);
+      return true;
+    } catch (err) {
+      setError('Failed to start tracking');
+      if (
+        !err.message?.includes('permission') &&
+        !err.message?.includes('denied')
+      ) {
+        showAlert(
+          'Location Tracking Error',
+          `Could not start tracking: ${err.message}`,
+        );
+      }
+      return false;
+    }
+  };
+
+  // ─── Stop tracking ─────────────────────────────────────────────────────
+
+  const stopTracking = useCallback(async () => {
+    // Stop foreground watcher
+    if (locationSubscription.current) {
+      locationSubscription.current.remove();
+      locationSubscription.current = null;
+    }
+
+    // Stop background task
+    await stopBackgroundLocationUpdates();
+
+    setIsTracking(false);
+  }, []);
+
+  // ─── Foreground server update (fallback when no background permission) ──
+
+  const updateLocationOnServer = async (coords) => {
+    const now = Date.now();
+    const last = lastServerUpdate.current;
+
+    if (now - last.time < MIN_SERVER_UPDATE_INTERVAL) return;
+
+    if (last.lat !== 0) {
+      const moved =
+        haversineKm(last.lat, last.lng, coords.latitude, coords.longitude) *
+        1000;
+      if (moved < MIN_MOVEMENT_METERS) return;
+    }
+
+    lastServerUpdate.current = {
+      lat: coords.latitude,
+      lng: coords.longitude,
+      time: now,
+    };
+
+    try {
+      await driverAPI.updateLocation(coords);
+    } catch (err) {
+      console.warn('[Location] Server update failed:', err.message);
+    }
+  };
+
+  // ─── Ride state changes (adjusts GPS frequency) ────────────────────────
+
+  const setActiveRide = async (ride) => {
+    const hadRide = !!activeRideRef.current;
+    const hasRide = !!ride;
+    activeRideRef.current = ride;
+
+    // Restart tracking with different accuracy if ride state changed
+    if (hadRide !== hasRide && isTracking) {
+      await stopTracking();
+      await startTracking();
+    }
+  };
+
+  // ─── On-demand location fetch ──────────────────────────────────────────
+
+  const getCurrentLocation = async () => {
+    try {
+      const pos = await Promise.race([
+        Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        }),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Location timeout')), 15000),
+        ),
+      ]);
+
+      const coords = {
+        latitude: pos.coords.latitude,
+        longitude: pos.coords.longitude,
+      };
       setLocation(coords);
       return coords;
     } catch (err) {
-      let errorMessage = 'Failed to get your location. ';
+      let msg = 'Failed to get your location. ';
       if (err.message.includes('timeout')) {
-        errorMessage += 'Make sure you have a clear view of the sky and try again.';
+        msg += 'Make sure you have a clear view of the sky and try again.';
       } else {
-        errorMessage += err.message;
+        msg += err.message;
       }
-
-      if (!isShowingAlert.current) {
-        isShowingAlert.current = true;
-        Alert.alert(
-          'Location Error',
-          errorMessage,
-          [{
-            text: 'OK',
-            onPress: () => { isShowingAlert.current = false; }
-          }]
-        );
-      }
+      showAlert('Location Error', msg);
       return null;
     }
   };
+
+  // ─── Full cleanup for logout ───────────────────────────────────────────
+
+  const cleanupForLogout = useCallback(async () => {
+    await stopTracking();
+    await clearRetryQueue();
+    setLocation(null);
+    setAddress('');
+    setError(null);
+    setPermissionStatus(null);
+    lastServerUpdate.current = { lat: 0, lng: 0, time: 0 };
+  }, [stopTracking]);
+
+  // ─── Context value ─────────────────────────────────────────────────────
 
   const value = {
     location,
     address,
     isTracking,
     error,
-    requestLocationPermission,
+    permissionStatus,
+    requestPermissions,
     startTracking,
     stopTracking,
     getCurrentLocation,
+    setActiveRide,
+    cleanupForLogout,
   };
 
-  return <LocationContext.Provider value={value}>{children}</LocationContext.Provider>;
+  return (
+    <LocationContext.Provider value={value}>{children}</LocationContext.Provider>
+  );
 };

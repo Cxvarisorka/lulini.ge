@@ -36,7 +36,7 @@
     "profile": "Profile"
   },
   "home": {
-    "title": "GoTours Driver",
+    "title": "Lulini Driver",
     "goOnline": "Go Online",
     "goOffline": "Go Offline",
     "youAreOnline": "You're Online",
@@ -200,7 +200,17 @@
     "newRideRequest": "New ride request!",
     "rideAccepted": "Ride accepted",
     "rideCancelled": "Ride cancelled",
-    "rideCompleted": "Ride completed"
+    "rideCompleted": "Ride completed",
+    "push": {
+      "rideRequestTitle": "New Ride Request!",
+      "rideRequestBody": "Pickup: {{address}}",
+      "rideCancelledTitle": "Ride Cancelled",
+      "rideCancelledBody": "The ride has been cancelled",
+      "rideCompletedTitle": "Ride Completed",
+      "rideCompletedBody": "You earned {{fare}} GEL",
+      "waitingTimeoutTitle": "Ride Cancelled",
+      "waitingTimeoutBody": "Passenger did not show up within 3 minutes"
+    }
   },
   "nav": {
     "calculatingRoute": "Calculating route...",

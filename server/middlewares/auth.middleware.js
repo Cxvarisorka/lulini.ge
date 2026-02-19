@@ -40,14 +40,6 @@ const authorize = (...roles) => {
 
 // Middleware to check if user is a driver (has driver profile)
 const isDriver = catchAsync(async (req, res, next) => {
-    // Debug: check what exists for this user
-    const anyDriver = await Driver.findOne({ user: req.user.id });
-    if (!anyDriver) {
-        console.log(`isDriver: No Driver document at all for user ${req.user.email} (${req.user.id})`);
-    } else {
-        console.log(`isDriver: Found Driver for ${req.user.email} - isActive: ${anyDriver.isActive}, isApproved: ${anyDriver.isApproved}`);
-    }
-
     const driver = await Driver.findOne({ user: req.user.id, isActive: true, isApproved: true });
 
     if (!driver) {

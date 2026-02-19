@@ -20,6 +20,8 @@ const {
     updateEmail
 } = require('../controllers/auth.controller');
 const { protect } = require('../middlewares/auth.middleware');
+const { authLimiter, otpSendLimiter, otpVerifyLimiter } = require('../middlewares/rateLimiter');
+const { validateRegister, validateLogin, validateSendPhoneOtp } = require('../middlewares/validators');
 
 // Health check / test route
 router.get('/test', (req, res) => {
@@ -27,8 +29,8 @@ router.get('/test', (req, res) => {
 });
 
 // Traditional auth routes
-router.post('/register', register);
-router.post('/login', login);
+router.post('/register', authLimiter, validateRegister, register);
+router.post('/login', authLimiter, validateLogin, login);
 router.post('/logout', logout);
 router.get('/me', protect, getMe);
 
@@ -49,18 +51,18 @@ router.get('/google/callback',
 );
 
 // Google OAuth for mobile - verify ID token from native Google Sign-In SDK
-router.post('/google/token', googleTokenAuth);
+router.post('/google/token', authLimiter, googleTokenAuth);
 
 // Phone OTP authentication routes
-router.post('/phone/send-otp', sendPhoneOtp);
-router.post('/phone/verify-otp', verifyPhoneOtp);
+router.post('/phone/send-otp', otpSendLimiter, validateSendPhoneOtp, sendPhoneOtp);
+router.post('/phone/verify-otp', otpVerifyLimiter, verifyPhoneOtp);
 
 // Phone update routes (authenticated)
-router.post('/phone/update-send-otp', protect, sendPhoneUpdateOtp);
-router.post('/phone/update-verify-otp', protect, verifyPhoneUpdateOtp);
+router.post('/phone/update-send-otp', protect, otpSendLimiter, validateSendPhoneOtp, sendPhoneUpdateOtp);
+router.post('/phone/update-verify-otp', protect, otpVerifyLimiter, verifyPhoneUpdateOtp);
 
 // Apple Sign-In route
-router.post('/apple/token', appleTokenAuth);
+router.post('/apple/token', authLimiter, appleTokenAuth);
 
 // Complete onboarding
 router.post('/complete-onboarding', protect, completeOnboarding);

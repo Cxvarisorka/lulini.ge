@@ -139,7 +139,7 @@ export default function LoginScreen() {
 
         {/* Footer */}
         <View style={styles.footer}>
-          <Text style={styles.footerText}>GoTours Driver v1.0.0</Text>
+          <Text style={styles.footerText}>Lulini Driver v1.0.0</Text>
         </View>
       </View>
     </KeyboardAvoidingView>

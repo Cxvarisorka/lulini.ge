@@ -73,6 +73,24 @@ const userSchema = new mongoose.Schema({
     hasCompletedOnboarding: {
         type: Boolean,
         default: false
+    },
+    failedLoginAttempts: {
+        type: Number,
+        default: 0
+    },
+    lockUntil: {
+        type: Date,
+        default: null
+    },
+    deviceTokens: [{
+        token: { type: String, required: true },
+        platform: { type: String, enum: ['ios', 'android'], required: true },
+        _id: false
+    }],
+    preferredLanguage: {
+        type: String,
+        enum: ['en', 'es', 'ru', 'ka'],
+        default: 'ka'
     }
 }, {
     timestamps: true
@@ -91,6 +109,9 @@ userSchema.methods.comparePassword = async function(candidatePassword) {
     if (!this.password) return false;
     return await bcrypt.compare(candidatePassword, this.password);
 };
+
+// Compound index for OAuth login lookups (Google/Apple/Phone provider + providerId)
+userSchema.index({ provider: 1, providerId: 1 });
 
 const User = mongoose.model('User', userSchema);
 

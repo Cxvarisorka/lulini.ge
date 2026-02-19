@@ -1,6 +1,8 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import { authAPI } from '../services/api';
+import { registerForPushNotifications, unregisterPushToken } from '../services/pushNotifications';
+import i18n from '../i18n';
 
 const AuthContext = createContext();
 
@@ -20,6 +22,13 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     checkAuthStatus();
   }, []);
+
+  // Register push token when user authenticates
+  useEffect(() => {
+    if (user && isAuthenticated) {
+      registerForPushNotifications(i18n.language).catch(() => {});
+    }
+  }, [user, isAuthenticated]);
 
   const checkAuthStatus = async () => {
     try {
@@ -77,6 +86,11 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = async () => {
+    try {
+      await unregisterPushToken();
+    } catch (error) {
+      // Push unregister error
+    }
     try {
       await authAPI.logout();
     } catch (error) {

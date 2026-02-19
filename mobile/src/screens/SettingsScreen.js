@@ -217,7 +217,7 @@ const typography = useTypography();
 
         {/* App Info */}
         <View style={styles.appInfo}>
-          <Text style={styles.appName}>GoTours Georgia</Text>
+          <Text style={styles.appName}>Lulini</Text>
           <Text style={styles.appVersion}>Version 1.0.0</Text>
         </View>
       </ScrollView>

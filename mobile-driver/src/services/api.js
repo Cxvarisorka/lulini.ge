@@ -5,7 +5,7 @@ const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://api.gotours.ge/api';
 
 const api = axios.create({
   baseURL: API_URL,
-  timeout: 30000, // Increased timeout for slower networks
+  timeout: 10000,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -55,6 +55,7 @@ export const driverAPI = {
   getProfile: () => api.get('/drivers/profile'),
   updateStatus: (status) => api.patch('/drivers/status', { status }),
   updateLocation: (location) => api.patch('/drivers/location', location),
+  batchUpdateLocation: (locations) => api.post('/drivers/location/batch', { locations }),
   getStats: () => api.get('/drivers/stats'),
   getEarnings: (period) => api.get(`/drivers/earnings?period=${period}`),
 };

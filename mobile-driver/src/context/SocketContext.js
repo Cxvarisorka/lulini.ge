@@ -17,7 +17,11 @@ export const useSocket = () => {
 };
 
 const SOCKET_URL = process.env.EXPO_PUBLIC_SOCKET_URL || 'https://api.gotours.ge';
-const POLL_INTERVAL_MS = 15000; // Poll every 15 seconds as safety net
+// Poll less aggressively when socket is healthy, more when degraded
+const POLL_INTERVAL_HEALTHY_MS = 60000; // 60s when WebSocket is connected
+const POLL_INTERVAL_DEGRADED_MS = 10000; // 10s when socket is disconnected
+// Debounce fetchPendingRides to prevent burst calls (reconnect + appState + online status)
+const FETCH_DEBOUNCE_MS = 3000;
 
 export const SocketProvider = ({ children }) => {
   const { isAuthenticated, user } = useAuth();
@@ -31,6 +35,8 @@ export const SocketProvider = ({ children }) => {
   const isDriverOnlineRef = useRef(false);
   // Track notified ride IDs to prevent duplicate notifications
   const notifiedRideIdsRef = useRef(new Set());
+  // Debounce timer for fetchPendingRides to prevent burst calls
+  const fetchDebounceRef = useRef(null);
 
   // Set up notification channel for Android
   useEffect(() => {
@@ -74,7 +80,7 @@ export const SocketProvider = ({ children }) => {
           // Socket thinks it's connected - rejoin room and fetch any missed rides
           socketRef.current.emit('driver:rejoin');
           if (isDriverOnline) {
-            fetchPendingRides();
+            debouncedFetchPendingRides();
           }
         }
       }
@@ -83,6 +89,15 @@ export const SocketProvider = ({ children }) => {
     return () => subscription.remove();
   }, [isDriverOnline]);
 
+  // Debounced version of fetchPendingRides — prevents burst calls on reconnect
+  // Must be declared before useEffects that reference it in dependency arrays
+  const debouncedFetchPendingRides = useCallback(() => {
+    if (fetchDebounceRef.current) clearTimeout(fetchDebounceRef.current);
+    fetchDebounceRef.current = setTimeout(() => {
+      fetchPendingRides();
+    }, FETCH_DEBOUNCE_MS);
+  }, []);
+
   // When driver online status is confirmed (e.g., from loadDriverStats sync),
   // ensure socket room membership and fetch any pending rides.
   // This fixes Android where the initial socket room join can be unreliable.
@@ -90,20 +105,26 @@ export const SocketProvider = ({ children }) => {
     isDriverOnlineRef.current = isDriverOnline;
     if (isDriverOnline && socketRef.current?.connected) {
       socketRef.current.emit('driver:rejoin');
-      fetchPendingRides();
+      debouncedFetchPendingRides();
     }
-  }, [isDriverOnline]);
+  }, [isDriverOnline, debouncedFetchPendingRides]);
 
-  // Polling safety net: periodically check for rides while driver is online
+  // Adaptive polling: fast when socket is down, slow when healthy
   useEffect(() => {
     if (isDriverOnline) {
-      // Start polling
+      const interval = isConnected ? POLL_INTERVAL_HEALTHY_MS : POLL_INTERVAL_DEGRADED_MS;
+
+      // Clear existing interval when socket health changes
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+      }
+
       pollIntervalRef.current = setInterval(() => {
         fetchPendingRides();
-      }, POLL_INTERVAL_MS);
+      }, interval);
 
       // Also fetch immediately when going online
-      fetchPendingRides();
+      debouncedFetchPendingRides();
     } else {
       // Stop polling when offline
       if (pollIntervalRef.current) {
@@ -118,7 +139,7 @@ export const SocketProvider = ({ children }) => {
         pollIntervalRef.current = null;
       }
     };
-  }, [isDriverOnline]);
+  }, [isDriverOnline, isConnected]);
 
   const connectSocket = async () => {
     try {
@@ -128,9 +149,9 @@ export const SocketProvider = ({ children }) => {
         return;
       }
 
-      console.log(`[Socket] Token length: ${token.length}, starts with: ${token.substring(0, 10)}...`);
-      console.log(`[Socket] Connecting to ${SOCKET_URL} (platform: ${Platform.OS})`);
-      console.log(`[Socket] Transports: websocket, polling`);
+      if (__DEV__) {
+        console.log(`[Socket] Connecting to ${SOCKET_URL}`);
+      }
 
       const socketInstance = io(SOCKET_URL, {
         auth: {
@@ -143,29 +164,55 @@ export const SocketProvider = ({ children }) => {
         reconnectionDelayMax: 10000,
       });
 
+      // Track rejoin timer so we can clean up on disconnect
+      let rejoinTimer = null;
+
       socketInstance.on('connect', () => {
-        console.log(`[Socket] Connected! ID: ${socketInstance.id}, transport: ${socketInstance.io.engine.transport.name}`);
+        if (__DEV__) console.log(`[Socket] Connected! ID: ${socketInstance.id}`);
         setIsConnected(true);
 
-        // Always rejoin driver room on connect/reconnect to ensure room membership
+        // Clear any stale rejoin timer from a previous connection
+        if (rejoinTimer) {
+          clearTimeout(rejoinTimer);
+          rejoinTimer = null;
+        }
+
+        // Rejoin driver room — server sends 'driver:rejoined' ACK
         socketInstance.emit('driver:rejoin');
+        rejoinTimer = setTimeout(() => {
+          if (__DEV__) console.warn('[Socket] driver:rejoin ACK timeout (no reconnect — will retry on next event)');
+          // Don't force reconnect — the server race condition is fixed.
+          // If we still don't get an ACK, socket.io's built-in reconnection
+          // and the next AppState/poll cycle will retry.
+        }, 5000);
+
+        // Remove any stale listeners before adding a new one
+        socketInstance.off('driver:rejoined');
+        socketInstance.once('driver:rejoined', () => {
+          if (__DEV__) console.log('[Socket] driver:rejoin ACK received');
+          if (rejoinTimer) {
+            clearTimeout(rejoinTimer);
+            rejoinTimer = null;
+          }
+        });
 
         // Fetch pending rides on any connect (not just reconnect)
         // On first connect, only fetch if driver is already known to be online
         if (wasConnectedRef.current || isDriverOnlineRef.current) {
-          fetchPendingRides();
+          debouncedFetchPendingRides();
         }
         wasConnectedRef.current = true;
       });
 
-      // Log transport upgrades (polling -> websocket)
-      socketInstance.io.engine.on('upgrade', (transport) => {
-        console.log(`[Socket] Transport upgraded to: ${transport.name}`);
-      });
-
       socketInstance.on('disconnect', (reason) => {
-        console.log(`[Socket] Disconnected! Reason: ${reason}`);
+        if (__DEV__) console.log(`[Socket] Disconnected: ${reason}`);
         setIsConnected(false);
+
+        // Clean up pending rejoin timer
+        if (rejoinTimer) {
+          clearTimeout(rejoinTimer);
+          rejoinTimer = null;
+        }
 
         // If server disconnected us, force reconnect
         if (reason === 'io server disconnect') {
@@ -241,7 +288,7 @@ export const SocketProvider = ({ children }) => {
       socketRef.current = socketInstance;
       setSocket(socketInstance);
     } catch (error) {
-      // Socket connection failed
+      console.error('[Socket] Connection setup failed:', error.message);
     }
   };
 
@@ -269,7 +316,7 @@ export const SocketProvider = ({ children }) => {
         });
       }
     } catch (error) {
-      // Failed to fetch pending rides
+      console.warn('[Socket] Failed to fetch pending rides:', error.message);
     }
   };
 
@@ -294,7 +341,7 @@ export const SocketProvider = ({ children }) => {
         trigger: null, // Show immediately
       });
     } catch (error) {
-      // Failed to show notification
+      console.warn('[Socket] Failed to show notification:', error.message);
     }
   };
 

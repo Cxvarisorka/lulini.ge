@@ -1,24 +1,35 @@
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
+import { getIsInternetReachable } from '../context/NetworkContext';
 
 // API URL Configuration
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://api.gotours.ge/api';
 
 const api = axios.create({
   baseURL: API_URL,
+  timeout: 10000,
   headers: {
     'Content-Type': 'application/json',
   },
   withCredentials: true,
 });
 
-// Request interceptor to add auth token
+// Request interceptor: auth token + offline short-circuit
 api.interceptors.request.use(
   async (config) => {
     const token = await SecureStore.getItemAsync('token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+
+    // Block mutating requests when offline (GET may use cache / stale-while-revalidate)
+    if (!getIsInternetReachable() && config.method !== 'get') {
+      const err = new Error('No internet connection');
+      err.code = 'ERR_OFFLINE';
+      err.config = config;
+      return Promise.reject(err);
+    }
+
     return config;
   },
   (error) => {
@@ -26,7 +37,7 @@ api.interceptors.request.use(
   }
 );
 
-// Response interceptor for error handling and token extraction
+// Response interceptor: token extraction + retry on transient failures
 api.interceptors.response.use(
   async (response) => {
     const setCookie = response.headers['set-cookie'];
@@ -42,9 +53,30 @@ api.interceptors.response.use(
     return response;
   },
   async (error) => {
-    if (error.response?.status === 401) {
-      await SecureStore.deleteItemAsync('token');
+    // Offline errors are not retryable — surface immediately
+    if (error.code === 'ERR_OFFLINE') return Promise.reject(error);
+
+    const config = error.config;
+
+    // 4xx = client error, never retry (except maybe 408/429, but we keep it simple)
+    if (error.response?.status >= 400 && error.response?.status < 500) {
+      if (error.response.status === 401) {
+        await SecureStore.deleteItemAsync('token');
+      }
+      return Promise.reject(error);
     }
+
+    // Retry on 5xx or network error (ECONNABORTED, ERR_NETWORK, timeout)
+    // Max 2 retries with linear backoff (1s, 2s)
+    if (config && (error.response?.status >= 500 || !error.response)) {
+      config._retryCount = (config._retryCount || 0) + 1;
+      if (config._retryCount <= 2 && getIsInternetReachable()) {
+        const delay = config._retryCount * 1000;
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        return api(config);
+      }
+    }
+
     return Promise.reject(error);
   }
 );
@@ -99,8 +131,8 @@ export const authAPI = {
 
 // Taxi API
 export const taxiAPI = {
-  requestRide: (data) =>
-    api.post('/rides', data),
+  requestRide: (data, config) =>
+    api.post('/rides', data, config),
 
   getMyRides: () =>
     api.get('/rides/my'),

@@ -429,7 +429,9 @@ export default function NavigationScreen({ navigation, route: navRoute }) {
             if (data.type === 'mapDragged') {
               setIsFollowing(false);
             }
-          } catch {}
+          } catch (e) {
+            console.warn('[Navigation] Failed to parse WebView message:', e.message);
+          }
         }}
       />
 

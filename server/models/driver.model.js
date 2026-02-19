@@ -109,6 +109,7 @@ const driverSchema = new mongoose.Schema({
 driverSchema.index({ location: '2dsphere' });
 driverSchema.index({ user: 1 });
 driverSchema.index({ status: 1, isActive: 1, isApproved: 1 });
+driverSchema.index({ status: 1, isActive: 1, isApproved: 1, 'vehicle.type': 1 }); // Vehicle-filtered driver search
 
 // Note: Cascade deletion is now handled in the controller for better error handling
 // These middlewares are kept as a backup but deletion is primarily handled in the controller

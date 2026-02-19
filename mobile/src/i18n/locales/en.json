@@ -198,7 +198,13 @@
     "addPhoneNumber": "Add Phone Number",
     "suggestions": "Suggestions",
     "googleApiNotConfigured": "Google Places API not configured. Using manual search.",
-    "tapToSelectLocation": "Tap on the map to select location"
+    "tapToSelectLocation": "Tap on the map to select location",
+    "activeRideExists": "You already have an active ride. Please wait for it to finish or cancel it first."
+  },
+  "connection": {
+    "noInternet": "No Internet Connection",
+    "reconnecting": "Reconnecting...",
+    "connected": "Connected"
   },
   "rentals": {
     "title": "Car Rentals",
@@ -229,7 +235,7 @@
     }
   },
   "auth": {
-    "welcome": "Welcome to GoTours",
+    "welcome": "Welcome to Lulini",
     "welcomeSubtitle": "Your trusted ride in Georgia",
     "welcomeBack": "Welcome Back",
     "signInToContinue": "Sign in to continue",
@@ -248,7 +254,7 @@
     "noAccount": "Don't have an account?",
     "signUp": "Sign Up",
     "createAccount": "Create Account",
-    "joinUs": "Join GoTours Georgia",
+    "joinUs": "Join Lulini Georgia",
     "firstName": "First Name",
     "firstNamePlaceholder": "John",
     "lastName": "Last Name",
@@ -347,6 +353,7 @@
     "error": "Error",
     "somethingWentWrong": "Something went wrong",
     "networkError": "Network error. Please check your connection.",
+    "noInternetConnection": "You are offline. Please check your internet connection and try again.",
     "locationError": "Could not get your location",
     "tryAgain": "Please try again"
   },
@@ -485,14 +492,26 @@
     "soundDesc": "Play sound for notifications",
     "vibration": "Vibration",
     "vibrationDesc": "Vibrate for notifications",
-    "infoMessage": "You can also manage notifications in your device settings."
+    "infoMessage": "You can also manage notifications in your device settings.",
+    "push": {
+      "rideAccepted": "Driver {{driverName}} accepted your ride",
+      "driverArrivedTitle": "Driver Arrived!",
+      "driverArrivedBody": "Your driver has arrived at the pickup location",
+      "rideStarted": "Your ride has started",
+      "rideCompletedTitle": "Ride Completed",
+      "rideCompletedBody": "Total fare: {{fare}} GEL",
+      "rideCancelledTitle": "Ride Cancelled",
+      "rideCancelledBody": "Your ride has been cancelled",
+      "rideExpired": "Your ride request has expired. Please try again.",
+      "waitingTimeout": "The ride was cancelled because you didn't arrive at the pickup point within 3 minutes"
+    }
   },
   "about": {
     "tagline": "Your ride, your way",
     "version": "Version",
     "build": "Build",
     "aboutUs": "About Us",
-    "description": "GoTours Georgia is your trusted transportation partner in Georgia. We provide safe, reliable, and affordable taxi services across the country. Whether you need a quick ride across town or a comfortable journey to explore Georgia's beautiful landscapes, we've got you covered.",
+    "description": "Lulini Georgia is your trusted transportation partner in Georgia. We provide safe, reliable, and affordable taxi services across the country. Whether you need a quick ride across town or a comfortable journey to explore Georgia's beautiful landscapes, we've got you covered.",
     "followUs": "Follow Us",
     "website": "Website",
     "legal": "Legal",
@@ -500,7 +519,7 @@
     "privacyPolicy": "Privacy Policy",
     "licenses": "Open Source Licenses",
     "rateApp": "Rate the App",
-    "rateAppDesc": "Love GoTours? Leave us a review!",
+    "rateAppDesc": "Love Lulini? Leave us a review!",
     "allRightsReserved": "All rights reserved.",
     "madeWithLove": "Made with love in Georgia"
   }

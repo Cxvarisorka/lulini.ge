@@ -6,6 +6,8 @@ import * as AppleAuthentication from 'expo-apple-authentication';
 import { Platform } from 'react-native';
 import { authAPI } from '../services/api';
 import { GOOGLE_CONFIG } from '../config/google.config';
+import { registerForPushNotifications, unregisterPushToken } from '../services/pushNotifications';
+import i18n from '../i18n';
 
 // Complete any pending auth session
 WebBrowser.maybeCompleteAuthSession();
@@ -68,6 +70,13 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     checkAuthStatus();
   }, []);
+
+  // Register push token when user authenticates
+  useEffect(() => {
+    if (user) {
+      registerForPushNotifications(i18n.language).catch(() => {});
+    }
+  }, [user]);
 
   const checkAuthStatus = async () => {
     try {
@@ -298,6 +307,11 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = async () => {
+    try {
+      await unregisterPushToken();
+    } catch (err) {
+      // Push unregister error
+    }
     try {
       await authAPI.logout();
     } catch (err) {

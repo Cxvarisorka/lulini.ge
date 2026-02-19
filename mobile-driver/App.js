@@ -1,9 +1,12 @@
-import React, { useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, LogBox } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { I18nextProvider } from 'react-i18next';
 import * as Notifications from 'expo-notifications';
+
+// Register background location task (must happen at module load, outside React tree)
+import './src/services/backgroundLocation';
 
 import i18n from './src/i18n';
 import { AuthProvider } from './src/context/AuthContext';
@@ -13,6 +16,9 @@ import { DriverProvider } from './src/context/DriverContext';
 import { LanguageProvider } from './src/context/LanguageContext';
 import { MapProvider } from './src/context/MapContext';
 import AppNavigator from './src/navigation/AppNavigator';
+import SplashScreen from './src/screens/SplashScreen';
+import ErrorBoundary from './src/components/ErrorBoundary';
+import ConnectionStatusBar from './src/components/ConnectionStatusBar';
 
 // Ignore certain warnings
 LogBox.ignoreLogs(['Animated: `useNativeDriver`']);
@@ -27,8 +33,9 @@ Notifications.setNotificationHandler({
 });
 
 export default function App() {
+  const [showSplash, setShowSplash] = useState(true);
+
   useEffect(() => {
-    // Check and request notification permissions only if not already granted
     const requestPermissions = async () => {
       try {
         const { status: existingStatus } = await Notifications.getPermissionsAsync();
@@ -36,33 +43,40 @@ export default function App() {
           await Notifications.requestPermissionsAsync();
         }
       } catch (error) {
-        // Permission request failed silently
+        console.warn('[App] Notification permission request failed:', error.message);
       }
     };
 
     requestPermissions();
   }, []);
 
+  if (showSplash) {
+    return <SplashScreen onFinish={() => setShowSplash(false)} />;
+  }
+
   return (
-    <View style={{ flex: 1 }}>
-      <I18nextProvider i18n={i18n}>
-        <SafeAreaProvider>
-          <LanguageProvider>
-            <MapProvider>
-            <AuthProvider>
-              <LocationProvider>
-                <SocketProvider>
-                  <DriverProvider>
-                    <StatusBar style="dark" />
-                    <AppNavigator />
-                  </DriverProvider>
-                </SocketProvider>
-              </LocationProvider>
-            </AuthProvider>
-            </MapProvider>
-          </LanguageProvider>
-        </SafeAreaProvider>
-      </I18nextProvider>
-    </View>
+    <ErrorBoundary>
+      <View style={{ flex: 1 }}>
+        <I18nextProvider i18n={i18n}>
+          <SafeAreaProvider>
+            <LanguageProvider>
+              <MapProvider>
+              <AuthProvider>
+                <LocationProvider>
+                  <SocketProvider>
+                    <DriverProvider>
+                      <ConnectionStatusBar />
+                      <StatusBar style="dark" />
+                      <AppNavigator />
+                    </DriverProvider>
+                  </SocketProvider>
+                </LocationProvider>
+              </AuthProvider>
+              </MapProvider>
+            </LanguageProvider>
+          </SafeAreaProvider>
+        </I18nextProvider>
+      </View>
+    </ErrorBoundary>
   );
 }

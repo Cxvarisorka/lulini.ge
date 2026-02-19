@@ -70,7 +70,7 @@ export default function LoginScreen({ navigation }) {
           <View style={styles.logoContainer}>
             <Ionicons name="car-sport" size={48} color={colors.primary} />
           </View>
-          <Text style={styles.brandName}>GoTours Georgia</Text>
+          <Text style={styles.brandName}>Lulini</Text>
         </View>
 
         <View style={styles.header}>

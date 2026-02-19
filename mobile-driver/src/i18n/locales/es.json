@@ -36,7 +36,7 @@
     "profile": "Perfil"
   },
   "home": {
-    "title": "GoTours Conductor",
+    "title": "Lulini Conductor",
     "goOnline": "Conectarse",
     "goOffline": "Desconectarse",
     "youAreOnline": "Estás conectado",
@@ -200,7 +200,17 @@
     "newRideRequest": "¡Nueva solicitud de viaje!",
     "rideAccepted": "Viaje aceptado",
     "rideCancelled": "Viaje cancelado",
-    "rideCompleted": "Viaje completado"
+    "rideCompleted": "Viaje completado",
+    "push": {
+      "rideRequestTitle": "¡Nueva solicitud!",
+      "rideRequestBody": "Recogida: {{address}}",
+      "rideCancelledTitle": "Viaje cancelado",
+      "rideCancelledBody": "El viaje ha sido cancelado",
+      "rideCompletedTitle": "Viaje completado",
+      "rideCompletedBody": "Ganaste {{fare}} GEL",
+      "waitingTimeoutTitle": "Viaje cancelado",
+      "waitingTimeoutBody": "El pasajero no se presentó en 3 minutos"
+    }
   },
   "nav": {
     "calculatingRoute": "Calculando ruta...",

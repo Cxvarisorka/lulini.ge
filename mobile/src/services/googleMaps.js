@@ -1,22 +1,51 @@
 import Constants from 'expo-constants';
+import * as SecureStore from 'expo-secure-store';
 
 const GOOGLE_MAPS_API_KEY = Constants.expoConfig?.extra?.googleMapsApiKey || '';
 const MAPBOX_ACCESS_TOKEN = Constants.expoConfig?.extra?.mapboxAccessToken || '';
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://api.gotours.ge/api';
 
 /**
  * Maps Services for React Native (Expo Go compatible)
  * Optimized for Georgia/Kutaisi address search
- * Uses OSM Nominatim for address autocomplete (free, no API key)
+ *
+ * Search: OSM Nominatim (primary) → Google Geocoding (backup)
+ * Directions: Server proxy (primary) → OSRM (fallback) → Haversine (last resort)
+ * Reverse geocode: Nominatim → Mapbox → Google
  */
 
 // Nominatim rate limiting - max 1 request per second per usage policy
 let lastNominatimRequest = 0;
 const NOMINATIM_MIN_INTERVAL = 1000; // 1 second
 
-// Cache for directions and search results
+// LRU-style cache with max size and TTL eviction
+const MAX_CACHE_ENTRIES = 100;
+const DIRECTIONS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const SEARCH_CACHE_TTL = 60000; // 1 minute
+
 const directionsCache = new Map();
 const searchCache = new Map();
-const SEARCH_CACHE_TTL = 60000; // 1 minute cache
+
+// Evict oldest entries when cache exceeds max size
+function cacheSet(cache, key, value) {
+  if (cache.size >= MAX_CACHE_ENTRIES) {
+    // Delete the oldest entry (first key in insertion order)
+    const firstKey = cache.keys().next().value;
+    cache.delete(firstKey);
+  }
+  cache.set(key, value);
+}
+
+/**
+ * Get auth token for server API calls
+ */
+async function getAuthToken() {
+  try {
+    return await SecureStore.getItemAsync('token');
+  } catch {
+    return null;
+  }
+}
 
 // Kutaisi region configuration - optimized for Georgia
 const KUTAISI_CONFIG = {
@@ -195,61 +224,65 @@ export async function reverseGeocodeNominatim(latitude, longitude) {
 }
 
 /**
- * Get directions between two points using Google Directions API
+ * Get directions between two points via server proxy (API key stays server-side)
+ * Falls back to OSRM if server proxy fails
  * @param {Object} origin - { latitude, longitude }
  * @param {Object} destination - { latitude, longitude }
  * @returns {Promise<Object>} - { distance, duration, distanceText, durationText, polyline, steps }
  */
 export async function getDirections(origin, destination) {
-  if (!GOOGLE_MAPS_API_KEY) {
-    return null;
-  }
+  // Round to 4 decimals for better cache hits (~11m precision)
+  const oLat = origin.latitude.toFixed(4);
+  const oLng = origin.longitude.toFixed(4);
+  const dLat = destination.latitude.toFixed(4);
+  const dLng = destination.longitude.toFixed(4);
+  const cacheKey = `${oLat},${oLng}-${dLat},${dLng}`;
 
-  const cacheKey = `${origin.latitude},${origin.longitude}-${destination.latitude},${destination.longitude}`;
-
-  // Check cache first
-  if (directionsCache.has(cacheKey)) {
-    return directionsCache.get(cacheKey);
+  // Check cache first (with TTL)
+  const cached = directionsCache.get(cacheKey);
+  if (cached && (Date.now() - cached._ts < DIRECTIONS_CACHE_TTL)) {
+    return cached;
   }
 
   try {
-    const originStr = `${origin.latitude},${origin.longitude}`;
-    const destStr = `${destination.latitude},${destination.longitude}`;
-
-    const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${originStr}&destination=${destStr}&mode=driving&key=${GOOGLE_MAPS_API_KEY}`;
-
-    const response = await fetch(url);
-    const data = await response.json();
-
-    if (data.status !== 'OK') {
-      return null;
+    const token = await getAuthToken();
+    if (!token) {
+      // No auth token — skip server proxy, go straight to OSRM
+      return getDirectionsOSRM(origin, destination);
     }
 
-    const route = data.routes[0];
-    const leg = route.legs[0];
+    const url = `${API_URL}/maps/directions?` +
+      `originLat=${origin.latitude}&originLng=${origin.longitude}` +
+      `&destLat=${destination.latitude}&destLng=${destination.longitude}`;
+
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    const data = await response.json();
+
+    if (!data.success) {
+      // Server proxy failed — fallback to OSRM
+      return getDirectionsOSRM(origin, destination);
+    }
 
     const result = {
-      distance: leg.distance.value / 1000, // Convert to km
-      duration: Math.round(leg.duration.value / 60), // Convert to minutes
-      distanceText: leg.distance.text,
-      durationText: leg.duration.text,
-      polyline: decodePolyline(route.overview_polyline.points),
-      startAddress: leg.start_address,
-      endAddress: leg.end_address,
-      steps: leg.steps.map(step => ({
-        distance: step.distance.text,
-        duration: step.duration.text,
-        instruction: step.html_instructions.replace(/<[^>]*>/g, ''),
-        polyline: decodePolyline(step.polyline.points),
-      })),
+      distance: data.data.distance,
+      duration: data.data.duration,
+      distanceText: data.data.distanceText,
+      durationText: data.data.durationText,
+      polyline: data.data.polyline,
+      startAddress: data.data.startAddress || '',
+      endAddress: data.data.endAddress || '',
+      steps: data.data.steps || [],
+      _ts: Date.now(),
     };
 
-    // Cache the result
-    directionsCache.set(cacheKey, result);
-
+    cacheSet(directionsCache, cacheKey, result);
     return result;
   } catch (error) {
-    return null;
+    // Network error — fallback to OSRM
+    return getDirectionsOSRM(origin, destination);
   }
 }
 
@@ -261,10 +294,16 @@ export async function getDirections(origin, destination) {
  * @returns {Promise<Object|null>}
  */
 export async function getDirectionsOSRM(origin, destination) {
-  const cacheKey = `osrm:${origin.latitude},${origin.longitude}-${destination.latitude},${destination.longitude}`;
+  // Round OSRM coordinates too for better cache hits
+  const oLat = origin.latitude.toFixed(4);
+  const oLng = origin.longitude.toFixed(4);
+  const dLat = destination.latitude.toFixed(4);
+  const dLng = destination.longitude.toFixed(4);
+  const cacheKey = `osrm:${oLat},${oLng}-${dLat},${dLng}`;
 
-  if (directionsCache.has(cacheKey)) {
-    return directionsCache.get(cacheKey);
+  const cachedOsrm = directionsCache.get(cacheKey);
+  if (cachedOsrm && (Date.now() - cachedOsrm._ts < DIRECTIONS_CACHE_TTL)) {
+    return cachedOsrm;
   }
 
   try {
@@ -289,9 +328,10 @@ export async function getDirectionsOSRM(origin, destination) {
       startAddress: '',
       endAddress: '',
       steps: [],
+      _ts: Date.now(),
     };
 
-    directionsCache.set(cacheKey, result);
+    cacheSet(directionsCache, cacheKey, result);
     return result;
   } catch (error) {
     return null;
@@ -300,7 +340,7 @@ export async function getDirectionsOSRM(origin, destination) {
 
 /**
  * Search for places using OSM Nominatim as primary provider
- * Free, no API key needed, good coverage for Georgia/Kutaisi
+ * Falls back to Google Geocoding when Nominatim returns no results
  * @param {string} query - Search text
  * @param {Object} location - Optional bias location { latitude, longitude }
  * @returns {Promise<Array>} - Array of place predictions
@@ -317,11 +357,16 @@ export async function searchPlaces(query, location = null) {
     return cached.results;
   }
 
-  // Use Nominatim as primary search provider
-  const results = await searchPlacesNominatim(query, location);
+  // Primary: Nominatim (free, no API key needed)
+  let results = await searchPlacesNominatim(query, location);
 
-  // Cache the results
-  searchCache.set(cacheKey, { results, timestamp: Date.now() });
+  // Backup: Google Geocoding if Nominatim returns nothing
+  if (results.length === 0 && GOOGLE_MAPS_API_KEY) {
+    results = await searchPlacesGoogle(query, location);
+  }
+
+  // Cache the results (bounded)
+  cacheSet(searchCache, cacheKey, { results, timestamp: Date.now() });
 
   return results;
 }
