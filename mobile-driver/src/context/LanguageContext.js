@@ -15,8 +15,6 @@ export const useLanguage = () => {
 const LANGUAGES = [
   { code: 'ka', name: 'Georgian', nativeName: 'ქართული' },
   { code: 'en', name: 'English', nativeName: 'English' },
-  { code: 'ru', name: 'Russian', nativeName: 'Русский' },
-  { code: 'es', name: 'Spanish', nativeName: 'Español' },
 ];
 
 export const LanguageProvider = ({ children }) => {

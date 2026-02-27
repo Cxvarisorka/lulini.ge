@@ -62,7 +62,7 @@ export const driverAPI = {
 
 // Ride endpoints
 export const rideAPI = {
-  getMyRides: (status) => api.get(`/rides/driver/my${status ? `?status=${status}` : ''}`),
+  getMyRides: (params = {}) => api.get('/rides/driver/my', { params }),
   getAvailableRides: () => api.get('/rides/driver/available'),
   acceptRide: (rideId) => api.patch(`/rides/${rideId}/accept`),
   notifyArrival: (rideId) => api.patch(`/rides/${rideId}/arrive`),

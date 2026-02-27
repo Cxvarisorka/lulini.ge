@@ -24,7 +24,7 @@ import { colors, shadows, radius, spacing, useTypography } from '../theme/colors
 export default function RidesScreen({ navigation }) {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
-  const { activeRides, addActiveRide, loadAllRides } = useDriver();
+  const { activeRides, addActiveRide, loadAllRides, loadMoreRides, hasMoreRides } = useDriver();
   const { newRideRequest, clearRideRequest } = useSocket();
   const typography = useTypography();
   const styles = useMemo(() => createStyles(typography), [typography]);
@@ -33,6 +33,7 @@ export default function RidesScreen({ navigation }) {
   const [selectedFilter, setSelectedFilter] = useState('active');
   const [allRides, setAllRides] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   // Advanced filters
   const [showFiltersModal, setShowFiltersModal] = useState(false);
@@ -76,6 +77,7 @@ export default function RidesScreen({ navigation }) {
   }, [selectedFilter, loadAllRides, t]);
 
   useEffect(() => {
+    setAllRides([]);
     loadRides();
   }, [loadRides]);
 
@@ -84,6 +86,29 @@ export default function RidesScreen({ navigation }) {
     await loadRides(true);
     setRefreshing(false);
   };
+
+  const handleLoadMore = useCallback(async () => {
+    if (loadingMore || selectedFilter === 'active' || !hasMoreRides) return;
+    setLoadingMore(true);
+    try {
+      const { rides: newRides } = await loadMoreRides();
+      if (newRides.length > 0) {
+        setAllRides(prev => {
+          const existingIds = new Set(prev.map(r => r._id));
+          const unique = newRides.filter(r => !existingIds.has(r._id));
+          // Apply same status filter
+          let filtered = unique;
+          if (selectedFilter === 'completed') {
+            filtered = unique.filter(ride => ride.status === 'completed');
+          } else if (selectedFilter === 'cancelled') {
+            filtered = unique.filter(ride => ride.status === 'cancelled');
+          }
+          return [...prev, ...filtered];
+        });
+      }
+    } catch {}
+    setLoadingMore(false);
+  }, [loadingMore, selectedFilter, hasMoreRides, loadMoreRides]);
 
   const handleAcceptRide = async () => {
     if (!newRideRequest) return;
@@ -140,6 +165,18 @@ export default function RidesScreen({ navigation }) {
             {item.pickup?.address}
           </Text>
         </View>
+
+        {item.stops?.length > 0 && item.stops.map((stop, index) => (
+          <React.Fragment key={`stop-${index}`}>
+            <View style={styles.locationLine} />
+            <View style={styles.locationRow}>
+              <View style={[styles.locationDot, { backgroundColor: '#f97316' }]} />
+              <Text style={styles.locationText} numberOfLines={1}>
+                {stop.address}
+              </Text>
+            </View>
+          </React.Fragment>
+        ))}
 
         <View style={styles.locationLine} />
 
@@ -309,6 +346,13 @@ export default function RidesScreen({ navigation }) {
             renderItem={renderRideItem}
             keyExtractor={(item) => item._id}
             contentContainerStyle={styles.list}
+            ListFooterComponent={loadingMore ? (
+              <View style={styles.footerLoader}>
+                <ActivityIndicator size="small" color={colors.primary} />
+              </View>
+            ) : null}
+            onEndReached={handleLoadMore}
+            onEndReachedThreshold={0.3}
             refreshControl={
               <RefreshControl
                 refreshing={refreshing}
@@ -357,6 +401,19 @@ export default function RidesScreen({ navigation }) {
                       <Text style={styles.locationAddress} numberOfLines={2}>{newRideRequest.pickup?.address}</Text>
                     </View>
                   </View>
+
+                  {newRideRequest.stops?.length > 0 && newRideRequest.stops.map((stop, index) => (
+                    <React.Fragment key={`stop-${index}`}>
+                      <View style={styles.modalLocationLine} />
+                      <View style={styles.modalLocationRow}>
+                        <View style={[styles.locationDot, { backgroundColor: '#f97316' }]} />
+                        <View style={styles.locationTextContainer}>
+                          <Text style={styles.locationLabel} numberOfLines={1}>{t('rides.stop')} {index + 1}</Text>
+                          <Text style={styles.locationAddress} numberOfLines={2}>{stop.address}</Text>
+                        </View>
+                      </View>
+                    </React.Fragment>
+                  ))}
 
                   <View style={styles.modalLocationLine} />
 
@@ -708,6 +765,10 @@ const createStyles = (typography) => StyleSheet.create({
   rideMetaText: {
     ...typography.captionSmall,
     color: colors.mutedForeground,
+  },
+  footerLoader: {
+    paddingVertical: spacing.lg,
+    alignItems: 'center',
   },
   emptyContainer: {
     flex: 1,

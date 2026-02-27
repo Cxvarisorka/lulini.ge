@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,22 +8,49 @@ import {
   ActivityIndicator,
   Alert,
   Linking,
+  Platform,
 } from 'react-native';
+// Defensive import: react-native-maps can crash on iOS if the Google Maps SDK
+// was initialised with an empty API key. Falling back to a WebView map avoids
+// a hard crash for users on builds where the key was missing.
+let MapView, Marker, Polyline, PROVIDER_GOOGLE;
+try {
+  const Maps = require('react-native-maps');
+  MapView = Maps.default;
+  Marker = Maps.Marker;
+  Polyline = Maps.Polyline;
+  PROVIDER_GOOGLE = Maps.PROVIDER_GOOGLE;
+} catch (e) {
+  console.warn('[RideDetail] react-native-maps failed to load:', e.message);
+  MapView = null;
+}
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { rideAPI } from '../services/api';
+import { getDirections } from '../services/googleMaps';
 import { useDriver } from '../context/DriverContext';
+import { useSocket } from '../context/SocketContext';
 import { useMap } from '../context/MapContext';
 import { useLocation } from '../context/LocationContext';
 import { colors, shadows, radius, useTypography } from '../theme/colors';
+
+const STATUS_COLORS = {
+  pending: colors.status.pending,
+  accepted: colors.status.accepted,
+  driver_arrived: colors.status.driver_arrived,
+  in_progress: colors.status.in_progress,
+  completed: colors.status.completed,
+  cancelled: colors.status.cancelled,
+};
 
 export default function RideDetailScreen({ navigation, route }) {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { rideId } = route.params;
   const { updateActiveRide, removeActiveRide, invalidateCache } = useDriver();
+  const { socket } = useSocket();
   const { navigateTo, isBuiltinMap } = useMap();
   const { location } = useLocation();
 
@@ -35,58 +62,106 @@ export default function RideDetailScreen({ navigation, route }) {
   const [actionLoading, setActionLoading] = useState(false);
   const [waitingTimeLeft, setWaitingTimeLeft] = useState(null);
   const [waitingFee, setWaitingFee] = useState(0);
+  const [polylineCoords, setPolylineCoords] = useState([]);
+  const cancelledHandledRef = useRef(false);
+  const mapRef = useRef(null);
+  const hasFitted = useRef(false);
 
   useEffect(() => {
     loadRideDetails();
   }, [rideId]);
 
-  // Waiting time countdown effect
+  // Fetch route polyline when ride data is available
+  useEffect(() => {
+    if (!ride?.pickup?.lat || !ride?.dropoff?.lat) return;
+    let mounted = true;
+    (async () => {
+      try {
+        const result = await getDirections(
+          { latitude: ride.pickup.lat, longitude: ride.pickup.lng },
+          { latitude: ride.dropoff.lat, longitude: ride.dropoff.lng },
+        );
+        if (result?.polyline && mounted) {
+          const coords = result.polyline.map(p => ({
+            latitude: Array.isArray(p) ? p[0] : p.latitude,
+            longitude: Array.isArray(p) ? p[1] : p.longitude,
+          }));
+          setPolylineCoords(coords);
+        }
+      } catch {}
+    })();
+    return () => { mounted = false; };
+  }, [ride?.pickup?.lat, ride?.dropoff?.lat]);
+
+  // Fit map to markers
+  const fitMapToMarkers = useCallback(() => {
+    if (hasFitted.current || !mapRef.current || !ride) return;
+    const coords = [];
+    if (ride.pickup?.lat) coords.push({ latitude: ride.pickup.lat, longitude: ride.pickup.lng });
+    if (ride.dropoff?.lat) coords.push({ latitude: ride.dropoff.lat, longitude: ride.dropoff.lng });
+    ride.stops?.forEach(s => {
+      if (s.lat) coords.push({ latitude: s.lat, longitude: s.lng });
+    });
+    if (coords.length >= 2) {
+      hasFitted.current = true;
+      mapRef.current.fitToCoordinates(coords, {
+        edgePadding: { top: 60, right: 60, bottom: 60, left: 60 },
+        animated: false,
+      });
+    }
+  }, [ride]);
+
+  // Listen for passenger cancelling this ride
+  useEffect(() => {
+    if (!socket || !rideId) return;
+    const handleCancelled = (cancelledRide) => {
+      const cancelledId = cancelledRide?._id || cancelledRide?.rideId;
+      if (cancelledId && cancelledId !== rideId) return;
+      if (cancelledHandledRef.current) return;
+      cancelledHandledRef.current = true;
+      Alert.alert(
+        t('rides.rideCancelled'),
+        t('rides.passengerCancelledRide'),
+        [{ text: t('common.ok'), onPress: () => navigation.goBack() }]
+      );
+    };
+    socket.on('ride:cancelled', handleCancelled);
+    return () => socket.off('ride:cancelled', handleCancelled);
+  }, [socket, rideId, navigation, t]);
+
+  // Waiting time countdown
   useEffect(() => {
     if (!ride || ride.status !== 'driver_arrived' || !ride.waitingExpiresAt) {
       setWaitingTimeLeft(null);
       return;
     }
-
-    const FREE_WAITING_SECONDS = 60; // 1 minute free
+    const FREE_WAITING_SECONDS = 60;
     const WAITING_FEE_PER_MINUTE = 0.50;
-
     const updateWaitingTime = () => {
       const now = new Date();
       const expiresAt = new Date(ride.waitingExpiresAt);
       const arrivalTime = new Date(ride.arrivalTime);
       const timeLeftMs = expiresAt.getTime() - now.getTime();
       const waitedSeconds = (now.getTime() - arrivalTime.getTime()) / 1000;
-
-      if (timeLeftMs <= 0) {
-        setWaitingTimeLeft(0);
-        return;
-      }
-
+      if (timeLeftMs <= 0) { setWaitingTimeLeft(0); return; }
       setWaitingTimeLeft(Math.ceil(timeLeftMs / 1000));
-
-      // Calculate waiting fee (after 1 minute free)
       if (waitedSeconds > FREE_WAITING_SECONDS) {
-        const paidSeconds = Math.min(waitedSeconds - FREE_WAITING_SECONDS, 120); // Max 2 minutes paid
-        const fee = Math.round((paidSeconds / 60) * WAITING_FEE_PER_MINUTE * 100) / 100;
-        setWaitingFee(fee);
+        const paidSeconds = Math.min(waitedSeconds - FREE_WAITING_SECONDS, 120);
+        setWaitingFee(Math.round((paidSeconds / 60) * WAITING_FEE_PER_MINUTE * 100) / 100);
       } else {
         setWaitingFee(0);
       }
     };
-
     updateWaitingTime();
     const interval = setInterval(updateWaitingTime, 1000);
-
     return () => clearInterval(interval);
   }, [ride?.status, ride?.waitingExpiresAt, ride?.arrivalTime]);
 
   const loadRideDetails = async () => {
     try {
       const response = await rideAPI.getRideById(rideId);
-      if (response.data.success) {
-        setRide(response.data.data.ride);
-      }
-    } catch (error) {
+      if (response.data.success) setRide(response.data.data.ride);
+    } catch {
       Alert.alert(t('common.error'), t('errors.somethingWentWrong'));
     } finally {
       setLoading(false);
@@ -103,8 +178,7 @@ export default function RideDetailScreen({ navigation, route }) {
         Alert.alert(t('common.success'), t('rides.customerNotified'));
       }
     } catch (error) {
-      const errorMessage = error.response?.data?.message || t('errors.somethingWentWrong');
-      Alert.alert(t('common.error'), errorMessage);
+      Alert.alert(t('common.error'), error.response?.data?.message || t('errors.somethingWentWrong'));
     } finally {
       setActionLoading(false);
     }
@@ -120,8 +194,7 @@ export default function RideDetailScreen({ navigation, route }) {
         Alert.alert(t('common.success'), t('rides.rideStarted'));
       }
     } catch (error) {
-      const errorMessage = error.response?.data?.message || t('errors.somethingWentWrong');
-      Alert.alert(t('common.error'), errorMessage);
+      Alert.alert(t('common.error'), error.response?.data?.message || t('errors.somethingWentWrong'));
     } finally {
       setActionLoading(false);
     }
@@ -129,7 +202,6 @@ export default function RideDetailScreen({ navigation, route }) {
 
   const handleCompleteRide = async () => {
     if (!ride) return;
-
     Alert.alert(
       t('rides.completeRide'),
       `${t('rides.confirmComplete')}\n${t('rides.fare')}: $${ride.quote?.totalPrice}`,
@@ -144,16 +216,12 @@ export default function RideDetailScreen({ navigation, route }) {
               const response = await rideAPI.completeRide(rideId, fare);
               if (response.data.success) {
                 removeActiveRide(rideId);
-                invalidateCache(); // Invalidate cache so RidesScreen fetches fresh data
+                invalidateCache();
                 navigation.goBack();
-                Alert.alert(
-                  t('common.success'),
-                  `${t('rides.rideCompletedSuccess')}\n${t('rides.earned')}: $${fare.toFixed(2)}`
-                );
+                Alert.alert(t('common.success'), `${t('rides.rideCompletedSuccess')}\n${t('rides.earned')}: $${fare.toFixed(2)}`);
               }
             } catch (error) {
-              const errorMessage = error.response?.data?.message || t('errors.somethingWentWrong');
-              Alert.alert(t('common.error'), errorMessage);
+              Alert.alert(t('common.error'), error.response?.data?.message || t('errors.somethingWentWrong'));
             } finally {
               setActionLoading(false);
             }
@@ -174,6 +242,24 @@ export default function RideDetailScreen({ navigation, route }) {
     }
   };
 
+  const getStatusColor = (status) => STATUS_COLORS[status] || colors.mutedForeground;
+
+  const formatDate = (dateString) => {
+    if (!dateString) return '—';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+      month: 'short', day: 'numeric', year: 'numeric',
+      hour: '2-digit', minute: '2-digit',
+    });
+  };
+
+  const formatDuration = (startTime, endTime) => {
+    if (!startTime || !endTime) return null;
+    const diff = Math.round((new Date(endTime) - new Date(startTime)) / 60000);
+    if (diff < 1) return `< 1 ${t('rides.min')}`;
+    return `${diff} ${t('rides.min')}`;
+  };
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -182,245 +268,436 @@ export default function RideDetailScreen({ navigation, route }) {
     );
   }
 
-  const getRideStatusTitle = () => {
-    if (!ride) return t('rides.rideDetails');
+  if (!ride) return null;
 
-    if (ride.status === 'completed') return t('rides.completedRide');
-    if (ride.status === 'cancelled') return t('rides.cancelledRide');
-    return t('rides.active');
+  const isReadOnly = ride.status === 'completed' || ride.status === 'cancelled';
+  const actualDuration = formatDuration(ride.startTime, ride.endTime);
+
+  const initialRegion = ride.pickup?.lat ? {
+    latitude: (ride.pickup.lat + (ride.dropoff?.lat || ride.pickup.lat)) / 2,
+    longitude: (ride.pickup.lng + (ride.dropoff?.lng || ride.pickup.lng)) / 2,
+    latitudeDelta: 0.05,
+    longitudeDelta: 0.05,
+  } : {
+    latitude: 42.2679, longitude: 42.6946,
+    latitudeDelta: 0.05, longitudeDelta: 0.05,
   };
 
-  const isReadOnly = ride && (ride.status === 'completed' || ride.status === 'cancelled');
-
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color={colors.foreground} />
-        </TouchableOpacity>
-        <Text style={styles.title}>{getRideStatusTitle()}</Text>
-        <View style={{ width: 40 }} />
-      </View>
+    <View style={styles.container}>
+      {/* Back button overlay on map */}
+      <TouchableOpacity
+        style={[styles.backButtonOverlay, { top: insets.top + 8 }]}
+        onPress={() => navigation.goBack()}
+      >
+        <Ionicons name="arrow-back" size={22} color={colors.foreground} />
+      </TouchableOpacity>
 
-      <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}>
-        {ride && (
-          <>
-            {/* Status Badge for completed/cancelled rides */}
-            {isReadOnly && (
-              <View style={styles.statusCard}>
-                <View style={[styles.statusBadgeLarge, { backgroundColor: colors.status[ride.status] + '20' }]}>
-                  <Ionicons
-                    name={ride.status === 'completed' ? 'checkmark-circle' : 'close-circle'}
-                    size={24}
-                    color={colors.status[ride.status]}
-                  />
-                  <Text style={[styles.statusTextLarge, { color: colors.status[ride.status] }]}>
-                    {t(`rides.${ride.status}`)}
-                  </Text>
-                </View>
-                {ride.status === 'completed' && ride.fare && (
-                  <Text style={styles.completedFare}>
-                    {t('rides.earned')}: ${ride.fare.toFixed(2)}
-                  </Text>
-                )}
-                {ride.status === 'cancelled' && ride.cancellationReason && (
-                  <Text style={styles.cancelReason}>
-                    {t('rides.reason')}: {ride.cancellationReason.replace(/_/g, ' ')}
-                  </Text>
-                )}
-              </View>
-            )}
-
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>{t('rides.pickup')}</Text>
-              <View style={styles.locationRow}>
-                <Ionicons name="radio-button-on" size={20} color={colors.success} />
-                <Text style={styles.addressText}>{ride.pickup?.address || t('common.unknown')}</Text>
-              </View>
-              {!isReadOnly && (
-                <TouchableOpacity
-                  style={styles.navButton}
-                  onPress={() => handleNavigate(ride.pickup?.address, ride.pickup?.lat, ride.pickup?.lng)}
+      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+        {/* Map */}
+        <View style={styles.mapContainer}>
+          {MapView ? (
+            <MapView
+              ref={mapRef}
+              style={styles.map}
+              initialRegion={initialRegion}
+              onMapReady={fitMapToMarkers}
+              onLayout={fitMapToMarkers}
+              provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
+              scrollEnabled={true}
+              zoomEnabled={true}
+              pitchEnabled={false}
+              rotateEnabled={false}
+            >
+              {ride.pickup?.lat && Marker && (
+                <Marker
+                  coordinate={{ latitude: ride.pickup.lat, longitude: ride.pickup.lng }}
+                  anchor={{ x: 0.5, y: 0.5 }}
+                  tracksViewChanges={false}
+                  zIndex={10}
                 >
-                  <Ionicons name="navigate" size={18} color={colors.primary} />
-                  <Text style={styles.navButtonText}>{t('rides.navigation')}</Text>
-                </TouchableOpacity>
+                  <View style={styles.pickupMarker}>
+                    <View style={styles.pickupDot} />
+                  </View>
+                </Marker>
               )}
-            </View>
-
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>{t('rides.dropoff')}</Text>
-              <View style={styles.locationRow}>
-                <Ionicons name="location" size={20} color={colors.destructive} />
-                <Text style={styles.addressText}>{ride.dropoff?.address || t('common.unknown')}</Text>
-              </View>
-              {!isReadOnly && (
-                <TouchableOpacity
-                  style={styles.navButton}
-                  onPress={() => handleNavigate(ride.dropoff?.address, ride.dropoff?.lat, ride.dropoff?.lng)}
-                >
-                  <Ionicons name="navigate" size={18} color={colors.primary} />
-                  <Text style={styles.navButtonText}>{t('rides.navigation')}</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>{t('rides.passenger')}</Text>
-              <View style={styles.passengerInfo}>
-                <View style={styles.passengerDetails}>
-                  <Text style={styles.passengerName}>{ride.passengerName || t('common.unknown')}</Text>
-                  <Text style={styles.passengerPhone}>{ride.passengerPhone || 'No phone'}</Text>
-                </View>
-                {ride.passengerPhone && (
-                  <TouchableOpacity
-                    style={styles.contactButton}
-                    onPress={() => Linking.openURL(`tel:${ride.passengerPhone}`)}
+              {ride.stops?.map((stop, i) => (
+                stop.lat && Marker ? (
+                  <Marker
+                    key={`stop-${i}`}
+                    coordinate={{ latitude: stop.lat, longitude: stop.lng }}
+                    anchor={{ x: 0.5, y: 0.5 }}
+                    tracksViewChanges={false}
+                    zIndex={9}
                   >
-                    <Ionicons name="call" size={20} color={colors.primary} />
+                    <View style={styles.stopMarker}>
+                      <Text style={styles.stopMarkerText}>{i + 1}</Text>
+                    </View>
+                  </Marker>
+                ) : null
+              ))}
+              {ride.dropoff?.lat && Marker && (
+                <Marker
+                  coordinate={{ latitude: ride.dropoff.lat, longitude: ride.dropoff.lng }}
+                  anchor={{ x: 0.5, y: 0.5 }}
+                  tracksViewChanges={false}
+                  zIndex={10}
+                >
+                  <View style={styles.dropoffMarker}>
+                    <Ionicons name="flag" size={14} color="#fff" />
+                  </View>
+                </Marker>
+              )}
+              {polylineCoords.length > 1 && Polyline && (
+                <Polyline
+                  coordinates={polylineCoords}
+                  strokeColor={colors.primary}
+                  strokeWidth={4}
+                />
+              )}
+            </MapView>
+          ) : (
+            <View style={[styles.map, { backgroundColor: colors.muted, justifyContent: 'center', alignItems: 'center' }]}>
+              <Ionicons name="map-outline" size={48} color={colors.mutedForeground} />
+            </View>
+          )}
+        </View>
+
+        {/* Status Badge Row */}
+        <View style={styles.statusRow}>
+          <View style={[styles.statusBadge, { backgroundColor: getStatusColor(ride.status) + '15' }]}>
+            <View style={[styles.statusDot, { backgroundColor: getStatusColor(ride.status) }]} />
+            <Text style={[styles.statusText, { color: getStatusColor(ride.status) }]}>
+              {t(`rides.${ride.status}`)}
+            </Text>
+          </View>
+          <Text style={styles.rideDate}>{formatDate(ride.createdAt)}</Text>
+        </View>
+
+        {/* Route Details */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>{t('rides.routeDetails')}</Text>
+          <View style={styles.routeTimeline}>
+            {/* Pickup */}
+            <View style={styles.timelineItem}>
+              <View style={styles.timelineDotGreen} />
+              <View style={styles.timelineContent}>
+                <Text style={styles.timelineLabel}>{t('rides.pickup')}</Text>
+                <Text style={styles.timelineAddress}>{ride.pickup?.address || '—'}</Text>
+                {!isReadOnly && ride.pickup?.lat && (
+                  <TouchableOpacity
+                    style={styles.timelineNavButton}
+                    onPress={() => handleNavigate(ride.pickup?.address, ride.pickup?.lat, ride.pickup?.lng)}
+                  >
+                    <Ionicons name="navigate" size={14} color={colors.primary} />
+                    <Text style={styles.timelineNavText}>{t('rides.navigation')}</Text>
                   </TouchableOpacity>
                 )}
               </View>
             </View>
+            <View style={styles.timelineConnector} />
 
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>{t('rides.rideDetails')}</Text>
-              <View style={styles.detailsRow}>
-                <Text style={styles.detailLabel}>{t('rides.distance')}:</Text>
-                <Text style={styles.detailValue}>{ride.quote?.distanceText || 'N/A'}</Text>
-              </View>
-              <View style={styles.detailsRow}>
-                <Text style={styles.detailLabel}>{t('rides.duration')}:</Text>
-                <Text style={styles.detailValue}>{ride.quote?.durationText || 'N/A'}</Text>
-              </View>
-              <View style={styles.detailsRow}>
-                <Text style={styles.detailLabel}>{t('rides.fare')}:</Text>
-                <Text style={[styles.detailValue, styles.fareText]}>${ride.quote?.totalPrice || '0'}</Text>
-              </View>
-              <View style={styles.detailsRow}>
-                <Text style={styles.detailLabel}>{t('rides.paymentMethod')}:</Text>
-                <Text style={styles.detailValue}>{ride.paymentMethod || 'cash'}</Text>
-              </View>
-              {ride.rating && (
-                <View style={styles.detailsRow}>
-                  <Text style={styles.detailLabel}>{t('rides.rating')}:</Text>
-                  <View style={styles.ratingContainer}>
-                    <Ionicons name="star" size={16} color={colors.warning} />
-                    <Text style={styles.detailValue}> {ride.rating.toFixed(1)}</Text>
+            {/* Stops */}
+            {ride.stops?.map((stop, i) => (
+              <React.Fragment key={`stop-${i}`}>
+                <View style={styles.timelineItem}>
+                  <View style={styles.timelineDotOrange}>
+                    <Text style={styles.timelineDotOrangeText}>{i + 1}</Text>
+                  </View>
+                  <View style={styles.timelineContent}>
+                    <Text style={styles.timelineLabel}>{t('rides.stop')} {i + 1}</Text>
+                    <Text style={styles.timelineAddress}>{stop.address || '—'}</Text>
+                    {!isReadOnly && stop.lat && (
+                      <TouchableOpacity
+                        style={styles.timelineNavButton}
+                        onPress={() => handleNavigate(stop.address, stop.lat, stop.lng)}
+                      >
+                        <Ionicons name="navigate" size={14} color={colors.primary} />
+                        <Text style={styles.timelineNavText}>{t('rides.navigation')}</Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
                 </View>
-              )}
-            </View>
+                <View style={styles.timelineConnector} />
+              </React.Fragment>
+            ))}
 
-            {/* Waiting Time Card - shown when driver has arrived */}
-            {ride.status === 'driver_arrived' && waitingTimeLeft !== null && (
-              <View style={[styles.card, styles.waitingCard]}>
-                <View style={styles.waitingHeader}>
-                  <Ionicons
-                    name="time-outline"
-                    size={24}
-                    color={waitingTimeLeft <= 60 ? colors.destructive : colors.warning}
-                  />
-                  <Text style={styles.waitingTitle}>{t('rides.waitingForPassenger')}</Text>
-                </View>
-                <View style={styles.waitingTimeRow}>
-                  <Text style={[
-                    styles.waitingTimeValue,
-                    waitingTimeLeft <= 60 && styles.waitingTimeUrgent
-                  ]}>
-                    {Math.floor(waitingTimeLeft / 60)}:{(waitingTimeLeft % 60).toString().padStart(2, '0')}
-                  </Text>
-                  <Text style={styles.waitingTimeLabel}>{t('rides.timeRemaining')}</Text>
-                </View>
-                <View style={styles.waitingProgressBar}>
-                  <View style={[
-                    styles.waitingProgressFill,
-                    { width: `${(waitingTimeLeft / 180) * 100}%` },
-                    waitingTimeLeft <= 60 && styles.waitingProgressUrgent
-                  ]} />
-                </View>
-                <View style={styles.waitingFeeRow}>
-                  <Text style={styles.waitingFeeLabel}>
-                    {waitingFee > 0 ? t('rides.paidWaiting') : t('rides.freeWaiting')}
-                  </Text>
-                  {waitingFee > 0 && (
-                    <Text style={styles.waitingFeeValue}>+${waitingFee.toFixed(2)}</Text>
-                  )}
-                </View>
-                {waitingTimeLeft <= 60 && (
-                  <Text style={styles.waitingWarning}>{t('rides.rideWillCancel')}</Text>
+            {/* Dropoff */}
+            <View style={styles.timelineItem}>
+              <View style={styles.timelineDotRed} />
+              <View style={styles.timelineContent}>
+                <Text style={styles.timelineLabel}>{t('rides.dropoff')}</Text>
+                <Text style={styles.timelineAddress}>{ride.dropoff?.address || '—'}</Text>
+                {!isReadOnly && ride.dropoff?.lat && (
+                  <TouchableOpacity
+                    style={styles.timelineNavButton}
+                    onPress={() => handleNavigate(ride.dropoff?.address, ride.dropoff?.lat, ride.dropoff?.lng)}
+                  >
+                    <Ionicons name="navigate" size={14} color={colors.primary} />
+                    <Text style={styles.timelineNavText}>{t('rides.navigation')}</Text>
+                  </TouchableOpacity>
                 )}
               </View>
-            )}
+            </View>
+          </View>
+        </View>
 
-            {/* Waiting Fee Display - shown after ride started with waiting fee */}
-            {ride.waitingFee > 0 && ride.status === 'in_progress' && (
-              <View style={[styles.card, styles.waitingFeeCard]}>
-                <View style={styles.waitingFeeInfoRow}>
-                  <Ionicons name="time" size={20} color={colors.warning} />
-                  <Text style={styles.waitingFeeInfoLabel}>{t('rides.waitingFeeAdded')}</Text>
-                  <Text style={styles.waitingFeeInfoValue}>+${ride.waitingFee.toFixed(2)}</Text>
-                </View>
-              </View>
-            )}
+        {/* Ride Info Grid */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>{t('rides.rideDetails')}</Text>
+          <View style={styles.infoGrid}>
+            <View style={styles.infoItem}>
+              <Ionicons name="car-outline" size={20} color={colors.primary} />
+              <Text style={styles.infoLabel}>{t('rides.vehicleType')}</Text>
+              <Text style={styles.infoValue}>{t(`rides.${ride.vehicleType || 'economy'}`)}</Text>
+            </View>
+            <View style={styles.infoItem}>
+              <Ionicons name="cash-outline" size={20} color={colors.primary} />
+              <Text style={styles.infoLabel}>{t('rides.fare')}</Text>
+              <Text style={styles.infoValue}>
+                {ride.fare ? ride.fare.toFixed(2) : (ride.quote?.totalPrice || '0.00')} ₾
+              </Text>
+            </View>
+            <View style={styles.infoItem}>
+              <Ionicons name="navigate-outline" size={20} color={colors.primary} />
+              <Text style={styles.infoLabel}>{t('rides.distance')}</Text>
+              <Text style={styles.infoValue}>
+                {ride.quote?.distanceText || `${(ride.quote?.distance || 0).toFixed(1)} ${t('rides.km')}`}
+              </Text>
+            </View>
+            <View style={styles.infoItem}>
+              <Ionicons name="time-outline" size={20} color={colors.primary} />
+              <Text style={styles.infoLabel}>{t('rides.duration')}</Text>
+              <Text style={styles.infoValue}>
+                {actualDuration || ride.quote?.durationText || `${ride.quote?.duration || 0} ${t('rides.min')}`}
+              </Text>
+            </View>
+          </View>
+        </View>
 
-            {!isReadOnly && (
-              <View style={styles.actionButtons}>
-                {ride.status === 'accepted' && (
-                <TouchableOpacity
-                  style={[styles.actionButton, styles.arrivedButton]}
-                  onPress={handleNotifyArrival}
-                  disabled={actionLoading}
-                >
-                  {actionLoading ? (
-                    <ActivityIndicator color={colors.background} />
-                  ) : (
-                    <>
-                      <Ionicons name="location-sharp" size={20} color={colors.background} />
-                      <Text style={styles.actionButtonText}>{t('rides.imHere')}</Text>
-                    </>
-                  )}
-                </TouchableOpacity>
+        {/* Payment */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>{t('rides.payment')}</Text>
+          <View style={styles.paymentRow}>
+            <Ionicons
+              name={ride.paymentMethod === 'cash' ? 'cash-outline' : 'card-outline'}
+              size={20}
+              color={colors.primary}
+            />
+            <Text style={styles.paymentMethod}>
+              {t(`rides.${ride.paymentMethod || 'cash'}`)}
+            </Text>
+            <Text style={styles.paymentAmount}>
+              {ride.fare ? ride.fare.toFixed(2) : (ride.quote?.totalPrice || '0.00')} ₾
+            </Text>
+          </View>
+          {ride.waitingFee > 0 && (
+            <View style={styles.paymentRow}>
+              <Ionicons name="hourglass-outline" size={20} color={colors.warning} />
+              <Text style={styles.paymentMethod}>{t('rides.waitingFee')}</Text>
+              <Text style={styles.paymentAmount}>{ride.waitingFee.toFixed(2)} ₾</Text>
+            </View>
+          )}
+        </View>
+
+        {/* Passenger Info */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>{t('rides.passenger')}</Text>
+          <View style={styles.passengerCard}>
+            <View style={styles.passengerAvatar}>
+              <Ionicons name="person" size={24} color={colors.primary} />
+            </View>
+            <View style={styles.passengerInfo}>
+              <Text style={styles.passengerName}>{ride.passengerName || t('common.unknown')}</Text>
+              {ride.passengerPhone && (
+                <Text style={styles.passengerPhone}>{ride.passengerPhone}</Text>
               )}
-
-              {ride.status === 'driver_arrived' && (
-                <TouchableOpacity
-                  style={[styles.actionButton, styles.startButton]}
-                  onPress={handleStartRide}
-                  disabled={actionLoading}
-                >
-                  {actionLoading ? (
-                    <ActivityIndicator color={colors.background} />
-                  ) : (
-                    <>
-                      <Ionicons name="play" size={20} color={colors.background} />
-                      <Text style={styles.actionButtonText}>{t('rides.startRide')}</Text>
-                    </>
-                  )}
-                </TouchableOpacity>
-              )}
-
-              {ride.status === 'in_progress' && (
-                <TouchableOpacity
-                  style={[styles.actionButton, styles.completeButton]}
-                  onPress={handleCompleteRide}
-                  disabled={actionLoading}
-                >
-                  {actionLoading ? (
-                    <ActivityIndicator color={colors.background} />
-                  ) : (
-                    <>
-                      <Ionicons name="checkmark" size={20} color={colors.background} />
-                      <Text style={styles.actionButtonText}>{t('rides.completeRide')}</Text>
-                    </>
-                  )}
-                </TouchableOpacity>
-              )}
-              </View>
+            </View>
+            {ride.passengerPhone && (
+              <TouchableOpacity
+                style={styles.contactButton}
+                onPress={() => Linking.openURL(`tel:${ride.passengerPhone}`)}
+              >
+                <Ionicons name="call" size={18} color={colors.primary} />
+              </TouchableOpacity>
             )}
-          </>
+          </View>
+        </View>
+
+        {/* Waiting Time Card - active rides only */}
+        {ride.status === 'driver_arrived' && waitingTimeLeft !== null && (
+          <View style={[styles.card, styles.waitingCard]}>
+            <View style={styles.waitingHeader}>
+              <Ionicons
+                name="time-outline"
+                size={24}
+                color={waitingTimeLeft <= 60 ? colors.destructive : colors.warning}
+              />
+              <Text style={styles.waitingTitle}>{t('rides.waitingForPassenger')}</Text>
+            </View>
+            <View style={styles.waitingTimeDisplay}>
+              <Text style={[
+                styles.waitingTimeValue,
+                waitingTimeLeft <= 60 && styles.waitingTimeUrgent
+              ]}>
+                {Math.floor(waitingTimeLeft / 60)}:{(waitingTimeLeft % 60).toString().padStart(2, '0')}
+              </Text>
+              <Text style={styles.waitingTimeLabel}>{t('rides.timeRemaining')}</Text>
+            </View>
+            <View style={styles.waitingProgressBar}>
+              <View style={[
+                styles.waitingProgressFill,
+                { width: `${(waitingTimeLeft / 180) * 100}%` },
+                waitingTimeLeft <= 60 && styles.waitingProgressUrgent
+              ]} />
+            </View>
+            <View style={styles.waitingFeeRow}>
+              <Text style={styles.waitingFeeLabel}>
+                {waitingFee > 0 ? t('rides.paidWaiting') : t('rides.freeWaiting')}
+              </Text>
+              {waitingFee > 0 && (
+                <Text style={styles.waitingFeeValue}>+{waitingFee.toFixed(2)} ₾</Text>
+              )}
+            </View>
+            {waitingTimeLeft <= 60 && (
+              <Text style={styles.waitingWarning}>{t('rides.rideWillCancel')}</Text>
+            )}
+          </View>
         )}
+
+        {/* Waiting Fee Display - in_progress with fee */}
+        {ride.waitingFee > 0 && ride.status === 'in_progress' && (
+          <View style={[styles.card, styles.waitingFeeCard]}>
+            <View style={styles.waitingFeeInfoRow}>
+              <Ionicons name="time" size={20} color={colors.warning} />
+              <Text style={styles.waitingFeeInfoLabel}>{t('rides.waitingFeeAdded')}</Text>
+              <Text style={styles.waitingFeeInfoValue}>+{ride.waitingFee.toFixed(2)} ₾</Text>
+            </View>
+          </View>
+        )}
+
+        {/* Timeline */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>{t('rides.timeline')}</Text>
+          <View style={styles.timestampList}>
+            <TimestampRow icon="create-outline" label={t('rides.requested')} value={formatDate(ride.createdAt)} styles={styles} />
+            {ride.arrivalTime && (
+              <TimestampRow icon="flag-outline" label={t('rides.driverArrived')} value={formatDate(ride.arrivalTime)} styles={styles} />
+            )}
+            {ride.startTime && (
+              <TimestampRow icon="play-outline" label={t('rides.started')} value={formatDate(ride.startTime)} styles={styles} />
+            )}
+            {ride.endTime && (
+              <TimestampRow icon="checkmark-circle-outline" label={t('rides.ended')} value={formatDate(ride.endTime)} styles={styles} />
+            )}
+          </View>
+        </View>
+
+        {/* Rating */}
+        {ride.rating > 0 && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>{t('rides.passengerRating')}</Text>
+            <View style={styles.ratingRow}>
+              {[1, 2, 3, 4, 5].map(star => (
+                <Ionicons
+                  key={star}
+                  name={star <= ride.rating ? 'star' : 'star-outline'}
+                  size={24}
+                  color={star <= ride.rating ? '#FFA500' : colors.border}
+                  style={{ marginRight: 4 }}
+                />
+              ))}
+            </View>
+            {ride.review && <Text style={styles.reviewText}>{ride.review}</Text>}
+          </View>
+        )}
+
+        {/* Cancellation Info */}
+        {ride.status === 'cancelled' && (
+          <View style={[styles.card, styles.cancelledCard]}>
+            <Text style={styles.cardTitle}>{t('rides.cancellation')}</Text>
+            {ride.cancelledBy && (
+              <Text style={styles.cancelInfo}>
+                {t('rides.cancelledBy')}: {ride.cancelledBy}
+              </Text>
+            )}
+            {ride.cancellationReason && (
+              <Text style={styles.cancelInfo}>
+                {ride.cancellationReason.replace(/_/g, ' ')}
+              </Text>
+            )}
+            {ride.cancellationNote && (
+              <Text style={styles.cancelNote}>{ride.cancellationNote}</Text>
+            )}
+          </View>
+        )}
+
+        {/* Action Buttons - active rides only */}
+        {!isReadOnly && (
+          <View style={styles.actionButtons}>
+            {ride.status === 'accepted' && (
+              <TouchableOpacity
+                style={[styles.actionButton, styles.arrivedButton]}
+                onPress={handleNotifyArrival}
+                disabled={actionLoading}
+              >
+                {actionLoading ? (
+                  <ActivityIndicator color={colors.background} />
+                ) : (
+                  <>
+                    <Ionicons name="location-sharp" size={20} color={colors.background} />
+                    <Text style={styles.actionButtonText}>{t('rides.imHere')}</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            )}
+            {ride.status === 'driver_arrived' && (
+              <TouchableOpacity
+                style={[styles.actionButton, styles.startButton]}
+                onPress={handleStartRide}
+                disabled={actionLoading}
+              >
+                {actionLoading ? (
+                  <ActivityIndicator color={colors.background} />
+                ) : (
+                  <>
+                    <Ionicons name="play" size={20} color={colors.background} />
+                    <Text style={styles.actionButtonText}>{t('rides.startRide')}</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            )}
+            {ride.status === 'in_progress' && (
+              <TouchableOpacity
+                style={[styles.actionButton, styles.completeButton]}
+                onPress={handleCompleteRide}
+                disabled={actionLoading}
+              >
+                {actionLoading ? (
+                  <ActivityIndicator color={colors.background} />
+                ) : (
+                  <>
+                    <Ionicons name="checkmark" size={20} color={colors.background} />
+                    <Text style={styles.actionButtonText}>{t('rides.completeRide')}</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+
+        <View style={{ height: 32 }} />
       </ScrollView>
+    </View>
+  );
+}
+
+function TimestampRow({ icon, label, value, styles }) {
+  return (
+    <View style={styles.timestampRow}>
+      <Ionicons name={icon} size={18} color={colors.mutedForeground} />
+      <Text style={styles.timestampLabel}>{label}</Text>
+      <Text style={styles.timestampValue}>{value}</Text>
     </View>
   );
 }
@@ -434,177 +711,322 @@ const createStyles = (typography) => StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: colors.background,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+  scrollView: {
+    flex: 1,
   },
-  backButton: {
+  // Map
+  mapContainer: {
+    height: 260,
+    backgroundColor: colors.muted,
+    overflow: 'hidden',
+  },
+  map: {
+    flex: 1,
+  },
+  backButtonOverlay: {
+    position: 'absolute',
+    left: 16,
+    zIndex: 20,
     width: 40,
     height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.background,
+    alignItems: 'center',
     justifyContent: 'center',
-  },
-  title: {
-    ...typography.h2,
-    color: colors.foreground,
-  },
-  content: {
-    flex: 1,
-    padding: 16,
-  },
-  card: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: 16,
-    marginBottom: 12,
     ...shadows.md,
   },
-  cardTitle: {
-    ...typography.caption,
+  // Markers
+  pickupMarker: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: colors.success + '30',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pickupDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: colors.success,
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  stopMarker: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#f97316',
+    borderWidth: 2,
+    borderColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...Platform.select({
+      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 3 },
+      android: { elevation: 3 },
+    }),
+  },
+  stopMarkerText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  dropoffMarker: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: colors.destructive,
+    borderWidth: 2,
+    borderColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...Platform.select({
+      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 3 },
+      android: { elevation: 3 },
+    }),
+  },
+  // Status row
+  statusRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: radius.full,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 8,
+  },
+  statusText: {
+    ...typography.bodyMedium,
     fontWeight: '600',
-    color: colors.mutedForeground,
-    marginBottom: 12,
   },
-  locationRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  addressText: {
-    ...typography.body,
-    flex: 1,
-    color: colors.foreground,
-    marginLeft: 12,
-  },
-  navButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
-  navButtonText: {
+  rideDate: {
     ...typography.bodySmall,
+    color: colors.mutedForeground,
+  },
+  // Cards
+  card: {
+    backgroundColor: colors.background,
+    marginHorizontal: 16,
+    marginBottom: 12,
+    borderRadius: radius.xl,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  cancelledCard: {
+    borderColor: colors.destructive + '30',
+    backgroundColor: colors.destructive + '05',
+  },
+  cardTitle: {
+    ...typography.bodyMedium,
+    fontWeight: '600',
+    color: colors.foreground,
+    marginBottom: 14,
+  },
+  // Route timeline
+  routeTimeline: {},
+  timelineItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  timelineContent: {
+    flex: 1,
+    marginLeft: 12,
+    paddingBottom: 4,
+  },
+  timelineLabel: {
+    ...typography.captionSmall,
+    color: colors.mutedForeground,
+    marginBottom: 2,
+  },
+  timelineAddress: {
+    ...typography.bodyMedium,
+    color: colors.foreground,
+  },
+  timelineNavButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 6,
+    paddingVertical: 4,
+  },
+  timelineNavText: {
+    ...typography.captionSmall,
     fontWeight: '600',
     color: colors.primary,
-    marginLeft: 8,
+    marginLeft: 4,
   },
-  passengerInfo: {
-    flexDirection: 'row',
+  timelineConnector: {
+    width: 2,
+    height: 20,
+    backgroundColor: colors.border,
+    marginLeft: 7,
+  },
+  timelineDotGreen: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: colors.success,
+    borderWidth: 2,
+    borderColor: colors.success + '30',
+    marginTop: 2,
+  },
+  timelineDotRed: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: colors.destructive,
+    borderWidth: 2,
+    borderColor: colors.destructive + '30',
+    marginTop: 2,
+  },
+  timelineDotOrange: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#f97316',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
+    marginTop: 2,
   },
-  passengerDetails: {
-    flex: 1,
+  timelineDotOrangeText: {
+    color: '#fff',
+    fontSize: 9,
+    fontWeight: '700',
   },
-  passengerName: {
-    ...typography.body,
+  // Info grid
+  infoGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  infoItem: {
+    width: '50%',
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  infoLabel: {
+    ...typography.captionSmall,
+    color: colors.mutedForeground,
+    marginTop: 6,
+  },
+  infoValue: {
+    ...typography.bodyMedium,
     fontWeight: '600',
     color: colors.foreground,
-    marginBottom: 4,
+    marginTop: 2,
+  },
+  // Payment
+  paymentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  paymentMethod: {
+    ...typography.body,
+    color: colors.foreground,
+    marginLeft: 12,
+    flex: 1,
+  },
+  paymentAmount: {
+    ...typography.bodyMedium,
+    fontWeight: '600',
+    color: colors.foreground,
+  },
+  // Passenger
+  passengerCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  passengerAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: colors.primary + '15',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  passengerInfo: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  passengerName: {
+    ...typography.bodyMedium,
+    fontWeight: '600',
+    color: colors.foreground,
   },
   passengerPhone: {
     ...typography.bodySmall,
     color: colors.mutedForeground,
+    marginTop: 2,
   },
   contactButton: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.primary + '15',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  actionButtons: {
-    marginTop: 12,
-  },
-  actionButton: {
+  // Timestamps
+  timestampList: {},
+  timestampRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: radius.lg,
-    padding: 16,
-    marginBottom: 12,
-  },
-  arrivedButton: {
-    backgroundColor: colors.warning || '#FFA500',
-  },
-  startButton: {
-    backgroundColor: colors.primary,
-  },
-  completeButton: {
-    backgroundColor: colors.success,
-  },
-  actionButtonText: {
-    ...typography.button,
-    color: colors.background,
-    marginLeft: 8,
-  },
-  detailsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
   },
-  detailLabel: {
+  timestampLabel: {
     ...typography.bodySmall,
     color: colors.mutedForeground,
+    marginLeft: 10,
+    flex: 1,
   },
-  detailValue: {
+  timestampValue: {
     ...typography.bodySmall,
-    fontWeight: '600',
     color: colors.foreground,
+    fontWeight: '500',
   },
-  fareText: {
-    ...typography.body,
-    color: colors.primary,
-  },
-  statusCard: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: 16,
-    marginBottom: 12,
-    alignItems: 'center',
-    ...shadows.md,
-  },
-  statusBadgeLarge: {
+  // Rating
+  ratingRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: radius.lg,
-    gap: 8,
+    marginBottom: 8,
   },
-  statusTextLarge: {
-    ...typography.h2,
-    fontWeight: '700',
+  reviewText: {
+    ...typography.body,
+    color: colors.mutedForeground,
+    fontStyle: 'italic',
+    marginTop: 4,
+  },
+  // Cancellation
+  cancelInfo: {
+    ...typography.body,
+    color: colors.destructive,
+    marginBottom: 4,
     textTransform: 'capitalize',
   },
-  completedFare: {
-    ...typography.h1,
-    fontWeight: '700',
-    color: colors.success,
-    marginTop: 12,
-  },
-  cancelReason: {
+  cancelNote: {
     ...typography.bodySmall,
     color: colors.mutedForeground,
-    marginTop: 8,
-    textAlign: 'center',
-    textTransform: 'capitalize',
+    fontStyle: 'italic',
+    marginTop: 4,
   },
-  ratingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  // Waiting time styles
+  // Waiting time
   waitingCard: {
     backgroundColor: colors.warning + '15',
-    borderWidth: 1,
     borderColor: colors.warning + '30',
   },
   waitingHeader: {
@@ -618,7 +1040,7 @@ const createStyles = (typography) => StyleSheet.create({
     color: colors.foreground,
     marginLeft: 8,
   },
-  waitingTimeRow: {
+  waitingTimeDisplay: {
     alignItems: 'center',
     marginBottom: 16,
   },
@@ -637,7 +1059,7 @@ const createStyles = (typography) => StyleSheet.create({
   },
   waitingProgressBar: {
     height: 8,
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.muted,
     borderRadius: radius.full,
     overflow: 'hidden',
     marginBottom: 16,
@@ -673,7 +1095,6 @@ const createStyles = (typography) => StyleSheet.create({
   },
   waitingFeeCard: {
     backgroundColor: colors.warning + '10',
-    borderWidth: 1,
     borderColor: colors.warning + '20',
   },
   waitingFeeInfoRow: {
@@ -690,5 +1111,32 @@ const createStyles = (typography) => StyleSheet.create({
     ...typography.body,
     fontWeight: '700',
     color: colors.warning,
+  },
+  // Action buttons
+  actionButtons: {
+    marginHorizontal: 16,
+    marginTop: 4,
+  },
+  actionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radius.xl,
+    padding: 16,
+    marginBottom: 12,
+  },
+  arrivedButton: {
+    backgroundColor: colors.warning,
+  },
+  startButton: {
+    backgroundColor: colors.primary,
+  },
+  completeButton: {
+    backgroundColor: colors.success,
+  },
+  actionButtonText: {
+    ...typography.button,
+    color: colors.background,
+    marginLeft: 8,
   },
 });

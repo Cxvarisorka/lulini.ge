@@ -38,6 +38,11 @@ export const SocketProvider = ({ children }) => {
   // Debounce timer for fetchPendingRides to prevent burst calls
   const fetchDebounceRef = useRef(null);
 
+  // Stable user ID ref — prevents socket churn when user object reference
+  // changes (e.g., refreshUser() returns a new object with same _id).
+  const userIdRef = useRef(null);
+  const userId = user?._id || user?.id;
+
   // Set up notification channel for Android
   useEffect(() => {
     const setupNotificationChannel = async () => {
@@ -58,16 +63,22 @@ export const SocketProvider = ({ children }) => {
   }, []);
 
   useEffect(() => {
-    if (isAuthenticated && user) {
+    if (isAuthenticated && userId) {
+      // Skip reconnection if userId hasn't actually changed
+      if (userIdRef.current === userId && socketRef.current?.connected) {
+        return;
+      }
+      userIdRef.current = userId;
       connectSocket();
     } else {
       disconnectSocket();
+      userIdRef.current = null;
     }
 
     return () => {
       disconnectSocket();
     };
-  }, [isAuthenticated, user]);
+  }, [isAuthenticated, userId]);
 
   // Reconnect socket when app comes back to foreground
   useEffect(() => {
@@ -143,6 +154,13 @@ export const SocketProvider = ({ children }) => {
 
   const connectSocket = async () => {
     try {
+      // Disconnect any existing socket before creating a new one
+      // (prevents orphaned sockets during async gap)
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
+      }
+
       const token = await SecureStore.getItemAsync('token');
       if (!token) {
         console.log('[Socket] No token found, skipping connection');
@@ -240,10 +258,19 @@ export const SocketProvider = ({ children }) => {
         // Ride updated event received
       });
 
-      // Listen for ride cancelled
-      socketInstance.on('ride:cancelled', () => {
-        setNewRideRequest(null);
-        notifiedRideIdsRef.current.clear();
+      // Listen for ride cancelled (by passenger or admin)
+      socketInstance.on('ride:cancelled', (ride) => {
+        const rideId = ride?._id || ride?.rideId;
+        if (rideId) {
+          notifiedRideIdsRef.current.delete(rideId);
+        } else {
+          notifiedRideIdsRef.current.clear();
+        }
+        // Clear ride request modal if it matches (or if no ID to compare)
+        setNewRideRequest((current) => {
+          if (!current || !rideId || current._id === rideId) return null;
+          return current;
+        });
       });
 
       // Listen for ride unavailable (accepted by another driver or cancelled by user)
@@ -278,7 +305,7 @@ export const SocketProvider = ({ children }) => {
           content: {
             title: 'Ride Cancelled',
             body: data.message || 'Passenger did not show up within 3 minutes',
-            data: { rideId: data.rideId, type: 'waiting_timeout' },
+            data: { rideId: data.rideId, type: 'waiting_timeout', _local: true },
             sound: true,
           },
           trigger: null,
@@ -331,7 +358,7 @@ export const SocketProvider = ({ children }) => {
         content: {
           title: 'New Ride Request!',
           body: `Pickup: ${rideData.pickup?.address || 'Unknown location'}`,
-          data: { rideId: rideData._id, type: 'ride_request' },
+          data: { rideId: rideData._id, type: 'ride_request', _local: true },
           sound: true,
           priority: Notifications.AndroidNotificationPriority.MAX,
           ...(Platform.OS === 'android' && {

@@ -32,7 +32,7 @@ export default function HomeScreen({ navigation }) {
   const styles = useMemo(() => createStyles(typography), [typography]);
 
   const { user } = useAuth();
-  const { isOnline, goOnline, goOffline, loading, stats, addActiveRide } = useDriver();
+  const { isOnline, goOnline, goOffline, loading, stats, addActiveRide, activeRides } = useDriver();
   const { location } = useLocation();
   const { newRideRequest, clearRideRequest, isConnected, fetchPendingRides, socket } = useSocket();
 
@@ -55,6 +55,31 @@ export default function HomeScreen({ navigation }) {
       `);
     }
   }, [location]);
+
+  // Show active ride locations on map (pickup, stops, dropoff)
+  useEffect(() => {
+    if (!webViewRef.current) return;
+    const ride = activeRides?.[0];
+    if (!ride) {
+      webViewRef.current.injectJavaScript('showRideLocations([]); true;');
+      return;
+    }
+    const locations = [];
+    if (ride.pickup?.lat && ride.pickup?.lng) {
+      locations.push({ lat: ride.pickup.lat, lng: ride.pickup.lng, color: '#22c55e', label: t('rides.pickup') });
+    }
+    if (ride.stops?.length > 0) {
+      ride.stops.forEach((stop, i) => {
+        if (stop.lat && stop.lng) {
+          locations.push({ lat: stop.lat, lng: stop.lng, color: '#f97316', label: `${t('rides.stop')} ${i + 1}` });
+        }
+      });
+    }
+    if (ride.dropoff?.lat && ride.dropoff?.lng) {
+      locations.push({ lat: ride.dropoff.lat, lng: ride.dropoff.lng, color: '#ef4444', label: t('rides.dropoff') });
+    }
+    webViewRef.current.injectJavaScript(`showRideLocations(${JSON.stringify(locations)}); true;`);
+  }, [activeRides, t]);
 
   const handleToggleOnline = async () => {
     if (isOnline) {
@@ -153,6 +178,32 @@ export default function HomeScreen({ navigation }) {
           function updateDriverLocation(lat, lng) {
             driverMarker.setLatLng([lat, lng]);
             map.setView([lat, lng], map.getZoom());
+          }
+
+          var rideMarkers = [];
+          function showRideLocations(locations) {
+            // Clear existing ride markers
+            rideMarkers.forEach(function(m) { map.removeLayer(m); });
+            rideMarkers = [];
+            if (!locations || locations.length === 0) return;
+
+            var bounds = [driverMarker.getLatLng()];
+            locations.forEach(function(loc) {
+              var icon = L.divIcon({
+                className: '',
+                html: '<div style="background:' + loc.color + ';border:2px solid white;border-radius:50%;width:16px;height:16px;box-shadow:0 2px 6px rgba(0,0,0,0.3);"></div>',
+                iconSize: [16, 16],
+                iconAnchor: [8, 8]
+              });
+              var marker = L.marker([loc.lat, loc.lng], {icon: icon}).addTo(map);
+              if (loc.label) marker.bindTooltip(loc.label, {permanent: false, direction: 'top'});
+              rideMarkers.push(marker);
+              bounds.push([loc.lat, loc.lng]);
+            });
+
+            if (bounds.length >= 2) {
+              map.fitBounds(bounds, {padding: [30, 30]});
+            }
           }
         </script>
       </body>
@@ -355,6 +406,19 @@ export default function HomeScreen({ navigation }) {
                       </Text>
                     </View>
                   </View>
+
+                  {newRideRequest.stops?.length > 0 && newRideRequest.stops.map((stop, index) => (
+                    <React.Fragment key={`stop-${index}`}>
+                      <View style={styles.locationLine} />
+                      <View style={styles.rideDetailRow}>
+                        <View style={[styles.locationDot, { backgroundColor: '#f97316' }]} />
+                        <View style={styles.rideDetailText}>
+                          <Text style={styles.rideDetailLabel} numberOfLines={1}>{t('rides.stop')} {index + 1}</Text>
+                          <Text style={styles.rideDetailValue} numberOfLines={2}>{stop.address}</Text>
+                        </View>
+                      </View>
+                    </React.Fragment>
+                  ))}
 
                   <View style={styles.locationLine} />
 

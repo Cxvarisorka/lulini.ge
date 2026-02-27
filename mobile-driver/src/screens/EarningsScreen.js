@@ -11,7 +11,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { driverAPI } from '../services/api';
+import { useDriver } from '../context/DriverContext';
 import { colors, shadows, radius, spacing, useTypography } from '../theme/colors';
 
 export default function EarningsScreen() {
@@ -19,6 +19,7 @@ export default function EarningsScreen() {
   const insets = useSafeAreaInsets();
   const typography = useTypography();
   const styles = useMemo(() => createStyles(typography), [typography]);
+  const { loadEarnings: loadEarningsCached } = useDriver();
 
   const [selectedPeriod, setSelectedPeriod] = useState('today');
   const [earnings, setEarnings] = useState({
@@ -29,16 +30,14 @@ export default function EarningsScreen() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    loadEarnings(selectedPeriod);
+    fetchEarnings(selectedPeriod);
   }, [selectedPeriod]);
 
-  const loadEarnings = async (period) => {
+  const fetchEarnings = async (period) => {
     setLoading(true);
     try {
-      const response = await driverAPI.getEarnings(period);
-      if (response.data.success) {
-        setEarnings(response.data.data.earnings);
-      }
+      const { earnings: data } = await loadEarningsCached(period);
+      setEarnings(data);
     } catch (error) {
       // Failed to load earnings
     } finally {

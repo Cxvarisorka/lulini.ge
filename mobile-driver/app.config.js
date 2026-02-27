@@ -31,9 +31,14 @@ export default {
         UIBackgroundModes: ['location', 'fetch'],
         ITSAppUsesNonExemptEncryption: false
       },
-      config: {
-        googleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || ''
-      }
+      // Only configure Google Maps SDK on iOS if a valid API key is provided.
+      // An empty key causes the Google Maps iOS SDK to crash during
+      // [GMSServices provideAPIKey:] in AppDelegate.
+      ...(process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ? {
+        config: {
+          googleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY
+        }
+      } : {})
     },
     android: {
       adaptiveIcon: {
@@ -50,11 +55,14 @@ export default {
         'FOREGROUND_SERVICE_LOCATION',
         'POST_NOTIFICATIONS'
       ],
-      config: {
-        googleMaps: {
-          apiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || ''
+      // Only configure Google Maps if a valid API key is provided
+      ...(process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ? {
+        config: {
+          googleMaps: {
+            apiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY
+          }
         }
-      }
+      } : {})
     },
     web: {
       favicon: './assets/favicon.png'

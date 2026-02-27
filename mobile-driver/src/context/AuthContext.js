@@ -1,5 +1,6 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import * as SecureStore from 'expo-secure-store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { authAPI } from '../services/api';
 import { registerForPushNotifications, unregisterPushToken } from '../services/pushNotifications';
 import i18n from '../i18n';
@@ -98,6 +99,7 @@ export const AuthProvider = ({ children }) => {
     } finally {
       await SecureStore.deleteItemAsync('token');
       await SecureStore.deleteItemAsync('user');
+      await AsyncStorage.removeItem('@driver_rides_cache').catch(() => {});
       setUser(null);
       setIsAuthenticated(false);
     }
