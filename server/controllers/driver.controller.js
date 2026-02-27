@@ -285,10 +285,8 @@ const updateDriverLocation = catchAsync(async (req, res, next) => {
         return next(new AppError('Latitude and longitude are required', 400));
     }
 
-    const driver = await Driver.findOne({ user: req.user.id });
-    if (!driver) {
-        return next(new AppError('Driver profile not found', 404));
-    }
+    // Reuse driver from isDriver middleware (eliminates 1 DB query per request)
+    const driver = req.driver;
 
     // Speed/distance validation against previous location
     if (driver.location && driver.location.coordinates &&
@@ -306,17 +304,17 @@ const updateDriverLocation = catchAsync(async (req, res, next) => {
         }
     }
 
-    // Atomic update — skips Mongoose validation/middleware overhead
-    await Driver.updateOne(
-        { _id: driver._id },
-        { $set: { location: { type: 'Point', coordinates: [longitude, latitude] } } }
-    );
-
-    // If driver has an active ride, broadcast location to the customer
-    const activeRide = await Ride.findOne({
-        driver: driver._id,
-        status: { $in: ['accepted', 'driver_arrived'] }
-    }).select('_id user').lean();
+    // Parallelize: update location + check for active ride simultaneously
+    const [, activeRide] = await Promise.all([
+        Driver.updateOne(
+            { _id: driver._id },
+            { $set: { location: { type: 'Point', coordinates: [longitude, latitude] } } }
+        ),
+        Ride.findOne({
+            driver: driver._id,
+            status: { $in: ['accepted', 'driver_arrived'] }
+        }).select('_id user').lean()
+    ]);
 
     if (activeRide) {
         const io = req.app.get('io');
@@ -354,6 +352,7 @@ const getDriverStats = catchAsync(async (req, res, next) => {
     const [statsResult, pendingRides] = await Promise.all([
         Ride.aggregate([
             { $match: { driver: driver._id, status: 'completed', endTime: { $gte: thisMonth } } },
+            { $project: { endTime: 1, fare: 1 } },
             {
                 $group: {
                     _id: null,
@@ -367,7 +366,7 @@ const getDriverStats = catchAsync(async (req, res, next) => {
                     monthTrips: { $sum: 1 },
                 }
             }
-        ]),
+        ]).read('secondaryPreferred'),
         Ride.countDocuments({ driver: driver._id, status: { $in: ['accepted', 'in_progress'] } })
     ]);
 
@@ -505,6 +504,7 @@ const getAllDriverStatistics = catchAsync(async (req, res, next) => {
     // Single aggregation for ALL drivers — replaces N separate queries
     const rideStats = await Ride.aggregate([
         { $match: { driver: { $in: driverIds } } },
+        { $project: { driver: 1, status: 1, endTime: 1, fare: 1, cancelledBy: 1 } },
         {
             $group: {
                 _id: '$driver',
@@ -532,7 +532,7 @@ const getAllDriverStatistics = catchAsync(async (req, res, next) => {
                 },
             }
         }
-    ]);
+    ]).read('secondaryPreferred');
 
     // Index by driver ID for O(1) lookup
     const statsMap = new Map(rideStats.map(s => [s._id.toString(), s]));
@@ -604,7 +604,7 @@ const getNearbyDrivers = catchAsync(async (req, res, next) => {
         query['vehicle.type'] = vehicleType;
     }
 
-    const drivers = await Driver.find(query).select('location').lean();
+    const drivers = await Driver.find(query).select('location').lean().read('secondaryPreferred');
 
     const locations = drivers
         .filter(d => d.location && d.location.coordinates)
@@ -634,10 +634,8 @@ const batchUpdateDriverLocation = catchAsync(async (req, res, next) => {
         return next(new AppError('Maximum 50 locations per batch', 400));
     }
 
-    const driver = await Driver.findOne({ user: req.user.id });
-    if (!driver) {
-        return next(new AppError('Driver profile not found', 404));
-    }
+    // Reuse driver from isDriver middleware (eliminates 1 DB query per request)
+    const driver = req.driver;
 
     // Sort by timestamp ascending so we process in chronological order
     const sorted = [...locations].sort((a, b) => a.timestamp - b.timestamp);
@@ -685,17 +683,17 @@ const batchUpdateDriverLocation = catchAsync(async (req, res, next) => {
         return res.json({ success: true, message: 'No valid locations in batch' });
     }
 
-    // Atomic update — skip Mongoose middleware for hot-path location writes
-    await Driver.updateOne(
-        { _id: driver._id },
-        { $set: { location: { type: 'Point', coordinates: [accepted.longitude, accepted.latitude] } } }
-    );
-
-    // Broadcast to passenger if driver has an active ride
-    const activeRide = await Ride.findOne({
-        driver: driver._id,
-        status: { $in: ['accepted', 'driver_arrived'] },
-    }).select('_id user').lean();
+    // Parallelize: update location + check for active ride simultaneously
+    const [, activeRide] = await Promise.all([
+        Driver.updateOne(
+            { _id: driver._id },
+            { $set: { location: { type: 'Point', coordinates: [accepted.longitude, accepted.latitude] } } }
+        ),
+        Ride.findOne({
+            driver: driver._id,
+            status: { $in: ['accepted', 'driver_arrived'] },
+        }).select('_id user').lean()
+    ]);
 
     if (activeRide) {
         const io = req.app.get('io');

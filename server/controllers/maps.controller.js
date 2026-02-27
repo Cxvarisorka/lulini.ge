@@ -6,28 +6,76 @@ const BASE_URL = 'https://maps.googleapis.com/maps/api';
 const ROADS_URL = 'https://roads.googleapis.com/v1';
 
 // ---------------------------------------------------------------------------
-// In-memory cache (swap with Redis for multi-instance production)
+// Maps cache — uses Redis when available, falls back to in-memory LRU
 // ---------------------------------------------------------------------------
 const cache = new Map();
 const DIRECTIONS_CACHE_TTL = 5 * 60 * 1000;    // 5 minutes
 const DISTANCE_MATRIX_CACHE_TTL = 3 * 60 * 1000; // 3 minutes
 const MAX_CACHE_SIZE = 2000;
 
-function getCached(key) {
-    const entry = cache.get(key);
-    if (entry && Date.now() - entry.ts < entry.ttl) return entry.data;
-    cache.delete(key);
-    return null;
+let _redisClient = null;
+async function getRedis() {
+    if (_redisClient) return _redisClient;
+    try {
+        const { getRedisClient } = require('../configs/redis.config');
+        _redisClient = await getRedisClient();
+        return _redisClient;
+    } catch {
+        return null;
+    }
 }
 
-function setCache(key, data, ttl) {
-    // Evict oldest entries when cache is full
+async function getCached(key) {
+    // Try Redis first
+    try {
+        const redis = process.env.REDIS_URL ? await getRedis() : null;
+        if (redis) {
+            const data = await redis.get(`maps:${key}`);
+            return data ? JSON.parse(data) : null;
+        }
+    } catch { /* fall through to in-memory */ }
+
+    // In-memory fallback with LRU
+    const entry = cache.get(key);
+    if (!entry) return null;
+    if (Date.now() - entry.ts > entry.ttl) {
+        cache.delete(key);
+        return null;
+    }
+    // LRU refresh: delete and re-insert to move to end of Map iteration order
+    cache.delete(key);
+    cache.set(key, entry);
+    return entry.data;
+}
+
+async function setCache(key, data, ttl) {
+    // Try Redis first
+    try {
+        const redis = process.env.REDIS_URL ? await getRedis() : null;
+        if (redis) {
+            await redis.set(`maps:${key}`, JSON.stringify(data), { PX: ttl });
+            return;
+        }
+    } catch { /* fall through to in-memory */ }
+
+    // In-memory fallback with LRU eviction
     if (cache.size >= MAX_CACHE_SIZE) {
         const firstKey = cache.keys().next().value;
         cache.delete(firstKey);
     }
     cache.set(key, { data, ts: Date.now(), ttl });
 }
+
+// Proactive cleanup of expired in-memory entries
+setInterval(() => {
+    if (process.env.REDIS_URL) return; // Redis handles TTL automatically
+    const now = Date.now();
+    for (const [key, entry] of cache) {
+        if (now - entry.ts > entry.ttl) {
+            cache.delete(key);
+        }
+    }
+}, 60 * 1000);
 
 // ---------------------------------------------------------------------------
 // Polyline decoder (server-side)
@@ -81,7 +129,7 @@ exports.getDirections = catchAsync(async (req, res, next) => {
     const dLng = (+destLng).toFixed(4);
     const cacheKey = `dir:${oLat},${oLng}-${dLat},${dLng}`;
 
-    const cached = getCached(cacheKey);
+    const cached = await getCached(cacheKey);
     if (cached) {
         return res.json({ success: true, data: cached, cached: true });
     }
@@ -119,7 +167,7 @@ exports.getDirections = catchAsync(async (req, res, next) => {
         })),
     };
 
-    setCache(cacheKey, result, DIRECTIONS_CACHE_TTL);
+    await setCache(cacheKey, result, DIRECTIONS_CACHE_TTL);
     res.json({ success: true, data: result });
 });
 
@@ -139,7 +187,7 @@ exports.getDistanceMatrix = catchAsync(async (req, res, next) => {
     }
 
     const cacheKey = `dm:${origins}-${destinations}`;
-    const cached = getCached(cacheKey);
+    const cached = await getCached(cacheKey);
     if (cached) {
         return res.json({ success: true, data: cached, cached: true });
     }
@@ -167,7 +215,7 @@ exports.getDistanceMatrix = catchAsync(async (req, res, next) => {
         }))
     );
 
-    setCache(cacheKey, result, DISTANCE_MATRIX_CACHE_TTL);
+    await setCache(cacheKey, result, DISTANCE_MATRIX_CACHE_TTL);
     res.json({ success: true, data: result });
 });
 

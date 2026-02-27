@@ -19,12 +19,52 @@ async function pushIfOffline(io, userId, titleKey, bodyKey, data = {}, params = 
     return pushService.sendToUser(userId, titleKey, bodyKey, data, params);
 }
 
-// ── Idempotency store (in-memory, 5-min TTL) ──
+// ── Idempotency store ──
+// Uses Redis when available (shared across instances), falls back to in-memory Map.
 // Prevents duplicate ride creation when the client retries on flaky networks.
 const idempotencyStore = new Map();
 const IDEMPOTENCY_TTL = 5 * 60 * 1000;
 
+let _redisClient = null;
+async function getRedis() {
+    if (_redisClient) return _redisClient;
+    try {
+        const { getRedisClient } = require('../configs/redis.config');
+        _redisClient = await getRedisClient();
+        return _redisClient;
+    } catch {
+        return null; // Redis not available, use in-memory fallback
+    }
+}
+
+async function getIdempotentResponse(key) {
+    try {
+        const redis = process.env.REDIS_URL ? await getRedis() : null;
+        if (redis) {
+            const data = await redis.get(`idem:${key}`);
+            return data ? JSON.parse(data) : null;
+        }
+    } catch { /* fall through to in-memory */ }
+    const cached = idempotencyStore.get(key);
+    if (cached && Date.now() - cached.timestamp < IDEMPOTENCY_TTL) return cached;
+    idempotencyStore.delete(key);
+    return null;
+}
+
+async function setIdempotentResponse(key, statusCode, body) {
+    try {
+        const redis = process.env.REDIS_URL ? await getRedis() : null;
+        if (redis) {
+            await redis.set(`idem:${key}`, JSON.stringify({ statusCode, body }), { EX: 300 });
+            return;
+        }
+    } catch { /* fall through to in-memory */ }
+    idempotencyStore.set(key, { statusCode, body, timestamp: Date.now() });
+}
+
+// In-memory cleanup (only needed when Redis is not available)
 setInterval(() => {
+    if (process.env.REDIS_URL) return; // Redis handles TTL automatically
     const now = Date.now();
     for (const [key, entry] of idempotencyStore) {
         if (now - entry.timestamp > IDEMPOTENCY_TTL) {
@@ -40,7 +80,7 @@ const createRide = catchAsync(async (req, res, next) => {
     // ── Idempotency: return cached response for duplicate requests ──
     const idempotencyKey = req.headers['x-idempotency-key'];
     if (idempotencyKey) {
-        const cached = idempotencyStore.get(idempotencyKey);
+        const cached = await getIdempotentResponse(idempotencyKey);
         if (cached) {
             return res.status(cached.statusCode).json(cached.body);
         }
@@ -130,51 +170,55 @@ const createRide = catchAsync(async (req, res, next) => {
         expiresAt
     });
 
-    const populatedRide = await Ride.findById(ride._id)
-        .populate('user', 'firstName lastName email phone');
+    // Populate user in-place (avoids re-fetching the ride from DB)
+    await ride.populate('user', 'firstName lastName email phone');
 
     // Broadcast to ALL online drivers via shared room (O(1) — no DB query needed)
     // Drivers filter by vehicleType on the client side
     const io = req.app.get('io');
     if (io) {
-        io.to('drivers:all').to('admin').emit('ride:request', populatedRide);
-    }
-
-    // Push notifications still need user IDs — query only IDs, lean, no populate
-    const onlineDrivers = await Driver.find({
-        status: 'online',
-        isActive: true,
-        isApproved: true,
-        'vehicle.type': vehicleType
-    }).select('user').lean();
-
-    const driverUserIds = onlineDrivers.map(d => d.user.toString());
-    if (driverUserIds.length > 0) {
-        pushService.sendToUsers(
-            driverUserIds,
-            'ride_request_title',
-            'ride_request_body',
-            { rideId: ride._id.toString(), channelId: 'ride-requests' },
-            { address: pickup?.address || '' }
-        ).catch(err => console.error('Push error (createRide):', err.message));
+        io.to('drivers:all').to('admin').emit('ride:request', ride);
     }
 
     const responseBody = {
         success: true,
         message: 'Ride requested successfully',
-        data: { ride: populatedRide }
+        data: { ride }
     };
 
-    // Cache response for idempotency replay
+    // Cache response for idempotency replay (Redis or in-memory)
     if (idempotencyKey) {
-        idempotencyStore.set(idempotencyKey, {
-            statusCode: 201,
-            body: responseBody,
-            timestamp: Date.now(),
-        });
+        setIdempotentResponse(idempotencyKey, 201, responseBody)
+            .catch(err => console.error('Idempotency cache error:', err.message));
     }
 
+    // Return response immediately — don't wait for push notifications
     res.status(201).json(responseBody);
+
+    // Fire-and-forget: query drivers + send push notifications after response
+    setImmediate(async () => {
+        try {
+            const onlineDrivers = await Driver.find({
+                status: 'online',
+                isActive: true,
+                isApproved: true,
+                'vehicle.type': vehicleType
+            }).select('user').lean();
+
+            const driverUserIds = onlineDrivers.map(d => d.user.toString());
+            if (driverUserIds.length > 0) {
+                await pushService.sendToUsers(
+                    driverUserIds,
+                    'ride_request_title',
+                    'ride_request_body',
+                    { rideId: ride._id.toString(), channelId: 'ride-requests' },
+                    { address: pickup?.address || '' }
+                );
+            }
+        } catch (err) {
+            console.error('Push error (createRide):', err.message);
+        }
+    });
 });
 
 // @desc    Accept a ride request (driver)
@@ -851,7 +895,8 @@ const getAvailableRides = catchAsync(async (req, res, next) => {
         ]
     })
         .populate('user', 'firstName lastName email phone')
-        .sort({ createdAt: -1 });
+        .sort({ createdAt: -1 })
+        .read('secondaryPreferred');
 
     res.json({
         success: true,
@@ -1030,16 +1075,26 @@ const expireOldRides = async (io) => {
             }
         );
 
-        // Notify users and drivers about expired rides via socket + push
+        // Batch check socket presence, then send pushes only to offline users
+        const offlineRides = [];
         for (const ride of expiredRides) {
             if (io) {
                 io.to(`user:${ride.user}`).emit('ride:expired', { rideId: ride._id });
-                // Broadcast to all drivers via room — no DB query needed
                 io.to('drivers:all').emit('ride:unavailable', { rideId: ride._id });
             }
 
-            pushIfOffline(
-                io, ride.user.toString(),
+            try {
+                const sockets = io ? await io.in(`user:${ride.user}`).fetchSockets() : [];
+                if (sockets.length === 0) offlineRides.push(ride);
+            } catch {
+                offlineRides.push(ride); // If check fails, send push as safety net
+            }
+        }
+
+        // Send pushes only to offline users (avoids duplicate fetchSockets inside pushIfOffline)
+        for (const ride of offlineRides) {
+            pushService.sendToUser(
+                ride.user.toString(),
                 'ride_expired_title',
                 'ride_expired_body',
                 { rideId: ride._id.toString() }
@@ -1065,11 +1120,12 @@ const expireWaitingRides = async (io) => {
             waitingExpiresAt: { $lte: now }
         }).populate({
             path: 'driver',
+            select: '_id user',
             populate: {
                 path: 'user',
                 select: '_id'
             }
-        });
+        }).lean();
 
         if (waitingExpiredRides.length === 0) {
             return { cancelled: 0 };
@@ -1093,21 +1149,27 @@ const expireWaitingRides = async (io) => {
             }
         );
 
-        // Set drivers back to online and notify via socket
-        for (const ride of waitingExpiredRides) {
-            // Set driver back to online
-            if (ride.driver) {
-                await Driver.findByIdAndUpdate(ride.driver._id, { status: 'online' });
-            }
+        // Bulk reset all drivers to online in one operation (replaces sequential loop)
+        const driverIds = waitingExpiredRides
+            .filter(r => r.driver && r.driver._id)
+            .map(r => r.driver._id);
 
+        if (driverIds.length > 0) {
+            await Driver.updateMany(
+                { _id: { $in: driverIds }, status: 'busy' },
+                { $set: { status: 'online' } }
+            );
+        }
+
+        // Notify via socket + batch push checks (per-ride targeting for sockets)
+        const offlinePassengers = [];
+        for (const ride of waitingExpiredRides) {
             if (io) {
-                // Notify user + admin (chained .to() deduplicates)
                 io.to(`user:${ride.user}`).to('admin').emit('ride:waitingTimeout', {
                     rideId: ride._id,
                     message: 'Ride cancelled - you did not arrive within 3 minutes'
                 });
 
-                // Notify driver that ride was cancelled
                 if (ride.driver && ride.driver.user) {
                     io.to(`driver:${ride.driver.user._id}`).emit('ride:waitingTimeout', {
                         rideId: ride._id,
@@ -1116,15 +1178,15 @@ const expireWaitingRides = async (io) => {
                 }
             }
 
-            // Push to passenger (only if they have no active socket)
-            pushIfOffline(
-                io, ride.user.toString(),
-                'waiting_timeout_passenger_title',
-                'waiting_timeout_passenger_body',
-                { rideId: ride._id.toString() }
-            ).catch(err => console.error('Push error (waitingTimeout/passenger):', err.message));
+            // Check passenger socket presence in batch
+            try {
+                const sockets = io ? await io.in(`user:${ride.user}`).fetchSockets() : [];
+                if (sockets.length === 0) offlinePassengers.push(ride);
+            } catch {
+                offlinePassengers.push(ride);
+            }
 
-            // Push to driver
+            // Push to driver (always — they may have backgrounded the app)
             if (ride.driver && ride.driver.user) {
                 pushService.sendToUser(
                     ride.driver.user._id.toString(),
@@ -1133,6 +1195,16 @@ const expireWaitingRides = async (io) => {
                     { rideId: ride._id.toString(), channelId: 'ride-requests' }
                 ).catch(err => console.error('Push error (waitingTimeout/driver):', err.message));
             }
+        }
+
+        // Send pushes only to offline passengers
+        for (const ride of offlinePassengers) {
+            pushService.sendToUser(
+                ride.user.toString(),
+                'waiting_timeout_passenger_title',
+                'waiting_timeout_passenger_body',
+                { rideId: ride._id.toString() }
+            ).catch(err => console.error('Push error (waitingTimeout/passenger):', err.message));
         }
 
         return { cancelled: waitingExpiredRides.length };

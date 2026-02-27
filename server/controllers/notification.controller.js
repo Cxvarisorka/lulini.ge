@@ -28,25 +28,26 @@ const registerToken = catchAsync(async (req, res, next) => {
         updateFields.preferredLanguage = language;
     }
 
-    // Remove existing entry for this token (if switching devices/re-registering)
-    // then add the new one — atomic upsert
-    await User.updateOne(
-        { _id: req.user.id },
-        {
-            $pull: { deviceTokens: { token } },
-            ...Object.keys(updateFields).length > 0 ? { $set: updateFields } : {}
-        }
-    );
+    // Step 1: Remove token from this user + all other users in parallel
+    // (different documents, no conflict)
+    await Promise.all([
+        User.updateOne(
+            { _id: req.user.id },
+            {
+                $pull: { deviceTokens: { token } },
+                ...Object.keys(updateFields).length > 0 ? { $set: updateFields } : {}
+            }
+        ),
+        User.updateMany(
+            { _id: { $ne: req.user.id }, 'deviceTokens.token': token },
+            { $pull: { deviceTokens: { token } } }
+        )
+    ]);
 
+    // Step 2: Add new token (must wait for $pull to complete on same doc)
     await User.updateOne(
         { _id: req.user.id },
         { $push: { deviceTokens: { token, platform, app: app || 'passenger' } } }
-    );
-
-    // Also remove this token from any other user (device changed owner)
-    await User.updateMany(
-        { _id: { $ne: req.user.id }, 'deviceTokens.token': token },
-        { $pull: { deviceTokens: { token } } }
     );
 
     res.status(200).json({
