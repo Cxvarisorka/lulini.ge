@@ -253,13 +253,15 @@ export const LocationProvider = ({ children }) => {
       const bgPermission = await Location.getBackgroundPermissionsAsync();
       if (bgPermission.status === 'granted') {
         await startBackgroundLocationUpdates(hasActiveRide);
-      } else if (Platform.OS === 'ios') {
-        // iOS requires "Always" location for background tracking — block going online without it
-        showAlert(
-          'Background Location Required',
-          'To go online as a driver, you must allow "Always" location access. Go to Settings > Lulini Driver > Location and select "Always".',
-        );
-        return false;
+      } else {
+        // Background not granted — foreground watcher will handle server updates instead
+        console.warn('[Location] Background permission not granted — using foreground-only tracking');
+        if (Platform.OS === 'ios') {
+          showAlert(
+            'Background Location',
+            'For best experience, set location to "Always" in Settings > Lulini Driver > Location. You can still go online with current permissions.',
+          );
+        }
       }
 
       // Start foreground watcher for UI updates (map marker position, heading)
