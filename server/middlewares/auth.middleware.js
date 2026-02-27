@@ -3,6 +3,7 @@ const User = require('../models/user.model');
 const Driver = require('../models/driver.model');
 const AppError = require('../utils/AppError');
 const catchAsync = require('../utils/catchAsync');
+const { userCache, driverCache, AUTH_CACHE_TTL } = require('../utils/authCache');
 
 const protect = catchAsync(async (req, res, next) => {
     let token;
@@ -19,12 +20,21 @@ const protect = catchAsync(async (req, res, next) => {
     }
 
     const decoded = verifyToken(token);
+
+    // Check cache first (60s TTL)
+    const cached = userCache.get(decoded.id);
+    if (cached && Date.now() - cached.ts < AUTH_CACHE_TTL) {
+        req.user = cached.user;
+        return next();
+    }
+
     const user = await User.findById(decoded.id).select('-password');
 
     if (!user) {
         return next(new AppError('User not found', 401));
     }
 
+    userCache.set(decoded.id, { user, ts: Date.now() });
     req.user = user;
     next();
 });
@@ -40,7 +50,22 @@ const authorize = (...roles) => {
 
 // Middleware to check if user is a driver (has driver profile)
 const isDriver = catchAsync(async (req, res, next) => {
-    const driver = await Driver.findOne({ user: req.user.id, isActive: true, isApproved: true });
+    const cacheKey = req.user._id?.toString() || req.user.id;
+
+    // Check cache first (60s TTL)
+    const cached = driverCache.get(cacheKey);
+    if (cached && Date.now() - cached.ts < AUTH_CACHE_TTL) {
+        if (!cached.driver) {
+            return next(new AppError('Driver profile not found or not approved', 403));
+        }
+        req.driver = cached.driver;
+        return next();
+    }
+
+    const driver = await Driver.findOne({ user: cacheKey, isActive: true, isApproved: true });
+
+    // Cache even negative results to avoid repeated queries for non-drivers
+    driverCache.set(cacheKey, { driver: driver || null, ts: Date.now() });
 
     if (!driver) {
         return next(new AppError('Driver profile not found or not approved', 403));

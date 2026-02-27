@@ -96,6 +96,24 @@ const io = new Server(server, {
     pingTimeout: 30000,   // Wait 30s for pong (Android on mobile networks can be slow)
 });
 
+// Redis adapter for Socket.io (enables horizontal scaling across multiple processes)
+if (process.env.REDIS_URL) {
+    const { createAdapter } = require('@socket.io/redis-adapter');
+    const { getRedisClient } = require('./configs/redis.config');
+
+    (async () => {
+        try {
+            const pubClient = await getRedisClient();
+            const subClient = pubClient.duplicate();
+            await subClient.connect();
+            io.adapter(createAdapter(pubClient, subClient));
+            console.log('Socket.io Redis adapter enabled');
+        } catch (err) {
+            console.error('Redis adapter setup failed, running in single-process mode:', err.message);
+        }
+    })();
+}
+
 // Helper to parse cookies from string
 const parseCookies = (cookieString) => {
     const cookies = {};
@@ -110,7 +128,9 @@ const parseCookies = (cookieString) => {
     return cookies;
 };
 
-// Socket.io authentication middleware
+// Socket.io authentication middleware (uses shared auth cache to avoid DB storm on reconnect)
+const { userCache, AUTH_CACHE_TTL } = require('./utils/authCache');
+
 io.use(async (socket, next) => {
     try {
         let token = null;
@@ -130,7 +150,18 @@ io.use(async (socket, next) => {
         }
 
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const user = await User.findById(decoded.id).select('-password');
+
+        // Check shared auth cache first (prevents thundering herd on mass reconnect)
+        const cached = userCache.get(decoded.id);
+        let user;
+        if (cached && Date.now() - cached.ts < AUTH_CACHE_TTL) {
+            user = cached.user;
+        } else {
+            user = await User.findById(decoded.id).select('-password');
+            if (user) {
+                userCache.set(decoded.id, { user, ts: Date.now() });
+            }
+        }
 
         if (!user) {
             return next(new Error('User not found'));
@@ -180,6 +211,16 @@ function createSocketRateLimiter() {
 
 io.use(createSocketRateLimiter());
 
+// Capacity-based admission control: reject new connections when server is at capacity
+const MAX_SOCKET_CONNECTIONS = parseInt(process.env.MAX_SOCKET_CONNECTIONS || '5000');
+io.use((socket, next) => {
+    const currentConnections = io.engine.clientsCount;
+    if (currentConnections >= MAX_SOCKET_CONNECTIONS) {
+        return next(new Error('Server at capacity. Please retry.'));
+    }
+    next();
+});
+
 // Socket.io connection handling
 // IMPORTANT: All socket.on() listeners MUST be registered synchronously (before any await)
 // to avoid race conditions where the client sends events before handlers are set up.
@@ -192,6 +233,14 @@ io.on('connection', async (socket) => {
 
     const driverRoom = `driver:${socket.user.id}`;
     const userRoom = `user:${socket.user.id}`;
+
+    // Limit to 3 concurrent connections per user (disconnect oldest on overflow)
+    try {
+        const existingSockets = await io.in(userRoom).fetchSockets();
+        if (existingSockets.length >= 3) {
+            existingSockets[0].disconnect(true);
+        }
+    } catch { /* ignore fetch errors */ }
 
     // Join user to their personal room (always - this is the fallback for event delivery)
     socket.join(userRoom);
@@ -375,40 +424,47 @@ const WAITING_CHECK_INTERVAL = 15 * 1000; // 15 seconds
 let expirationIntervalId = null;
 let waitingIntervalId = null;
 
+// In PM2 cluster mode, only run background jobs on instance 0 to avoid duplicate work.
+// When using the separate worker.js process, set DISABLE_BACKGROUND_JOBS=true.
+const isPrimaryWorker = !process.env.NODE_APP_INSTANCE || process.env.NODE_APP_INSTANCE === '0';
+const backgroundJobsEnabled = isPrimaryWorker && !process.env.DISABLE_BACKGROUND_JOBS;
+
 server.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
+    console.log(`Server is running on port ${PORT}${process.env.NODE_APP_INSTANCE ? ` (instance ${process.env.NODE_APP_INSTANCE})` : ''}`);
 
-    // Run initial expiration check on startup
-    expireOldRides(io).then(result => {
-        if (result.expired > 0) {
-            console.log(`Expired ${result.expired} old ride requests on startup`);
-        }
-    });
-
-    // Run initial waiting expiration check on startup
-    expireWaitingRides(io).then(result => {
-        if (result.cancelled > 0) {
-            console.log(`Cancelled ${result.cancelled} rides due to waiting timeout on startup`);
-        }
-    });
-
-    // Schedule periodic ride request expiration checks (1 hour timeout)
-    expirationIntervalId = setInterval(() => {
+    if (backgroundJobsEnabled) {
+        // Run initial expiration check on startup
         expireOldRides(io).then(result => {
             if (result.expired > 0) {
-                console.log(`Expired ${result.expired} old ride requests`);
+                console.log(`Expired ${result.expired} old ride requests on startup`);
             }
         });
-    }, EXPIRATION_CHECK_INTERVAL);
 
-    // Schedule periodic waiting expiration checks (3-minute timeout)
-    waitingIntervalId = setInterval(() => {
+        // Run initial waiting expiration check on startup
         expireWaitingRides(io).then(result => {
             if (result.cancelled > 0) {
-                console.log(`Cancelled ${result.cancelled} rides due to waiting timeout`);
+                console.log(`Cancelled ${result.cancelled} rides due to waiting timeout on startup`);
             }
         });
-    }, WAITING_CHECK_INTERVAL);
+
+        // Schedule periodic ride request expiration checks (1 hour timeout)
+        expirationIntervalId = setInterval(() => {
+            expireOldRides(io).then(result => {
+                if (result.expired > 0) {
+                    console.log(`Expired ${result.expired} old ride requests`);
+                }
+            });
+        }, EXPIRATION_CHECK_INTERVAL);
+
+        // Schedule periodic waiting expiration checks (3-minute timeout)
+        waitingIntervalId = setInterval(() => {
+            expireWaitingRides(io).then(result => {
+                if (result.cancelled > 0) {
+                    console.log(`Cancelled ${result.cancelled} rides due to waiting timeout`);
+                }
+            });
+        }, WAITING_CHECK_INTERVAL);
+    }
 });
 
 // Graceful shutdown handler
