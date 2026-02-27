@@ -1,6 +1,6 @@
 {
   "common": {
-    "book": "Book Transfer",
+    "book": "Book Taxi",
     "search": "Search",
     "continue": "Continue",
     "back": "Back",
@@ -17,70 +17,96 @@
     "no": "No"
   },
   "header": {
-    "title": "GoTours Georgia",
-    "subtitle": "Premium Airport & City Transfers",
+    "title": "Lulini",
+    "subtitle": "Taxi Service",
     "nav": {
       "home": "Home",
-      "transfers": "Transfers",
-      "carRentals": "Car Rentals",
-      "tours": "Tours",
+      "whyUs": "Why Us",
+      "passengers": "For Passengers",
+      "drivers": "For Drivers",
+      "faq": "FAQ",
       "contact": "Contact",
+      "careers": "Careers",
       "signIn": "Sign In"
     }
   },
   "hero": {
-    "title": "Book Your Private Transfer",
+    "title": "Your Reliable Taxi Service",
     "subtitle": "Safe, reliable and comfortable rides to any destination",
     "cta": "Get Started"
   },
   "home": {
     "hero": {
-      "title": "Your Travel Partner in Georgia",
-      "subtitle": "Premium car rentals, airport transfers, and guided tours. Experience Georgia with comfort and style."
+      "badge": "Available 24/7 across Georgia",
+      "title": "Georgian Premium Taxi",
+      "subtitle": "Comfortable rides with professional drivers across Georgia.",
+      "appPreview": "Lulini App"
+    },
+    "whyChooseUs": {
+      "title": "Why Choose Lulini",
+      "subtitle": "We built Lulini with one goal: to make getting around Georgia safe, simple, and enjoyable",
+      "items": {
+        "safety": {
+          "title": "Safe & Secure",
+          "description": "Your data is protected with modern security standards. All rides are tracked and monitored for your safety."
+        },
+        "simple": {
+          "title": "Simple to Use",
+          "description": "Request a ride in seconds. Saved payment methods, favorite locations, and a clean interface make it effortless."
+        },
+        "comfort": {
+          "title": "Comfortable Rides",
+          "description": "We carefully select our drivers and vehicles to ensure every ride meets our premium quality standards."
+        },
+        "local": {
+          "title": "Made in Georgia",
+          "description": "Built by a local team that truly understands the needs and culture of Georgian riders and drivers."
+        }
+      }
+    },
+    "passengers": {
+      "title": "For Passengers",
+      "description": "Experience the best ride-hailing service in Georgia. With Lulini, you get a premium experience from the moment you open the app to your final destination.",
+      "features": {
+        "realtime": "Real-time driver tracking on the map",
+        "payment": "Multiple payment options — cash and card",
+        "support": "24/7 customer support in Georgian and English",
+        "rating": "Rate your rides and choose top-rated drivers"
+      }
+    },
+    "drivers": {
+      "title": "Become a Partner Driver",
+      "description": "We value and respect our drivers. Join the Lulini platform and enjoy fair compensation, flexibility, and a supportive community.",
+      "benefits": {
+        "commission": "Low and transparent service commission",
+        "distance": "Distance reimbursement between you and the passenger",
+        "rewards": "Cash rewards for completed orders",
+        "support": "Easy registration, 24/7 driver support"
+      },
+      "cta": "Join as a Driver"
+    },
+    "social": {
+      "title": "Social Responsibility",
+      "description": "Lulini was founded with a simple belief — Georgia deserves a world-class ride-hailing service built by Georgians, for Georgians.",
+      "mission": "We are committed to creating jobs, supporting local communities, and proving that Georgian technology can compete on the world stage. Every ride you take helps build a stronger local tech ecosystem."
+    },
+    "trust": {
+      "title": "Your Trust, Our Commitment",
+      "subtitle": "We are dedicated to making your daily rides simpler, safer, and more enjoyable. That's a promise."
     },
     "services": {
       "title": "Our Services",
       "subtitle": "We offer a range of transportation services to meet all your travel needs",
       "learnMore": "Learn More",
       "comingSoon": "Coming Soon",
-      "carRentals": {
-        "title": "Car Rentals",
-        "description": "Rent a car without a driver and explore Georgia at your own pace. Wide selection of vehicles from economy to luxury."
-      },
-      "transfers": {
-        "title": "Airport Transfers",
-        "description": "Reliable and comfortable airport transfers with professional drivers. Meet & greet service included."
-      },
-      "tours": {
-        "title": "Guided Tours",
-        "description": "Discover Georgia's beauty with our expertly guided tours. From wine regions to mountain adventures."
-      }
-    },
-    "whyChooseUs": {
-      "title": "Why Choose Us",
-      "subtitle": "We're committed to providing the best travel experience in Georgia",
-      "items": {
-        "safety": {
-          "title": "Safety First",
-          "description": "All vehicles are regularly inspected and drivers are fully licensed"
-        },
-        "availability": {
-          "title": "24/7 Availability",
-          "description": "Book anytime, travel anytime. We're always here for you"
-        },
-        "quality": {
-          "title": "Premium Quality",
-          "description": "Modern fleet with top-notch amenities for your comfort"
-        },
-        "experience": {
-          "title": "Local Expertise",
-          "description": "Our team knows Georgia inside out to enhance your journey"
-        }
+      "taxi": {
+        "title": "Taxi Service",
+        "description": "Fast, reliable taxi rides with professional drivers. Available 24/7 across Georgia."
       }
     },
     "destinations": {
       "title": "Popular Destinations",
-      "subtitle": "Explore the most beautiful places in Georgia with our services",
+      "subtitle": "Explore the most beautiful places in Georgia with Lulini",
       "places": {
         "tbilisi": {
           "name": "Tbilisi",
@@ -118,170 +144,83 @@
           "location": "United States"
         },
         "review2": {
-          "text": "We rented a car for a week to explore Georgia. Great vehicle, fair price, and the staff was incredibly helpful.",
+          "text": "Fast and reliable taxi service. The driver arrived on time and knew all the best routes. Will definitely use again!",
           "name": "Maria Garcia",
           "location": "Spain"
         },
         "review3": {
-          "text": "Best transfer service in Georgia. They tracked our flight and were waiting for us despite the delay. Amazing!",
+          "text": "Best taxi service in Georgia. Professional drivers, clean cars, and very fair prices. Highly recommended!",
           "name": "Thomas Mueller",
           "location": "Germany"
         }
       }
     },
-    "transferSection": {
-      "label": "Airport Transfers",
-      "title": "Reliable Airport Pickup & Drop-off",
-      "description": "Start your journey stress-free with our premium airport transfer service. Professional drivers, flight tracking, and guaranteed punctuality.",
-      "features": {
-        "meetGreet": "Meet & Greet service with name sign",
-        "flightTracking": "Real-time flight tracking",
-        "fixedPrices": "Fixed prices with no hidden fees",
-        "professional": "Professional, English-speaking drivers"
-      },
-      "cta": "Book Airport Transfer",
-      "available": "Service Available"
-    },
-    "rentalSection": {
-      "label": "Car Rentals",
-      "title": "Explore Georgia at Your Own Pace",
-      "description": "Freedom to discover hidden gems and scenic routes. Choose from our diverse fleet of well-maintained vehicles for the ultimate road trip experience.",
-      "features": {
-        "wideSelection": "Wide selection from economy to luxury",
-        "flexibleRental": "Flexible rental periods",
-        "insurance": "Full insurance coverage included",
-        "support": "24/7 roadside assistance"
-      },
-      "cta": "Browse Our Fleet",
-      "cars": "Vehicles Available"
-    },
-    "cta": {
-      "title": "Ready to Start Your Journey?",
-      "subtitle": "Book your transfer or rent a car today and discover the beauty of Georgia",
-      "bookTransfer": "Book Transfer",
-      "rentCar": "Rent a Car",
-      "phone": "+995 555 123 456"
-    }
-  },
-  "transfers": {
-    "hero": {
-      "title": "Book Your Transfer",
-      "subtitle": "Safe, reliable and comfortable rides to any destination"
-    },
-    "howItWorks": {
-      "title": "How It Works",
-      "subtitle": "Book your transfer in 4 simple steps",
-      "steps": {
-        "book": {
-          "title": "Book Online",
-          "description": "Fill out the booking form with your trip details"
+    "faq": {
+      "title": "Frequently Asked Questions",
+      "subtitle": "Everything you need to know about using Lulini",
+      "items": {
+        "download": {
+          "question": "How do I download the Lulini app?",
+          "answer": "You can download the Lulini app for free from the Apple App Store or Google Play Store. Simply search for 'Lulini' and install it on your device."
         },
-        "confirm": {
-          "title": "Get Confirmation",
-          "description": "Receive instant confirmation via email"
+        "callTaxi": {
+          "question": "How do I call a taxi?",
+          "answer": "Open the Lulini app, set your pickup location and destination, choose your vehicle type, and confirm the ride. A driver will be assigned to you within moments."
         },
-        "pickup": {
-          "title": "Meet Your Driver",
-          "description": "Driver waits at pickup location with your name sign"
+        "payment": {
+          "question": "What payment methods are available?",
+          "answer": "Lulini supports cash payments as well as credit/debit cards. You can save your card details in the app for faster payments on future rides."
         },
-        "ride": {
-          "title": "Enjoy Your Ride",
-          "description": "Relax and enjoy a comfortable journey"
+        "fare": {
+          "question": "How is the fare calculated?",
+          "answer": "Fares are calculated based on distance traveled and ride duration. You'll see an estimated fare before confirming your ride, so there are no surprises."
+        },
+        "safety": {
+          "question": "What safety measures are in place for passengers?",
+          "answer": "All our drivers undergo thorough background checks. Every ride is tracked via GPS, and you can share your trip details with friends or family in real-time."
+        },
+        "privacy": {
+          "question": "How is my personal information protected?",
+          "answer": "We use industry-standard encryption to protect your data. Your personal information is never shared with third parties without your consent."
+        },
+        "share": {
+          "question": "Can I share my ride with someone?",
+          "answer": "Yes! You can share your real-time trip status with any contact directly from the app. They'll be able to see your route and estimated arrival time."
+        },
+        "rating": {
+          "question": "How does the rating system work?",
+          "answer": "After each ride, both drivers and passengers can rate each other on a 5-star scale. This helps us maintain high service quality across the platform."
         }
       }
     },
-    "fleet": {
-      "title": "Our Vehicle Fleet",
-      "subtitle": "Choose from a variety of comfortable and well-maintained vehicles"
-    },
-    "included": {
-      "title": "What's Included",
-      "subtitle": "All our transfers include these services at no extra cost",
-      "items": {
-        "flightTracking": "Flight Tracking",
-        "freeWaiting": "60 min Free Waiting",
-        "meetGreet": "Meet & Greet",
-        "wifi": "Free WiFi",
-        "water": "Bottled Water",
-        "noHidden": "No Hidden Fees"
+    "contactSection": {
+      "title": "Get in Touch",
+      "subtitle": "Have questions? We'd love to hear from you. Reach out through any of these channels.",
+      "methods": {
+        "call": {
+          "title": "Call Us",
+          "value": "+995 32 2 11 24 24"
+        },
+        "email": {
+          "title": "Email Us",
+          "value": "info@lulini.ge"
+        },
+        "app": {
+          "title": "In-App Support",
+          "value": "Open the support section in the Lulini app"
+        }
       }
     },
-    "routes": {
-      "title": "Popular Routes",
-      "subtitle": "Fixed prices for the most requested destinations",
-      "from": "from"
+    "download": {
+      "title": "Download the Lulini App",
+      "subtitle": "Get the app and start riding today. Available for iOS and Android."
     },
-    "stats": {
-      "transfers": "Completed Transfers",
-      "rating": "Customer Rating",
-      "drivers": "Professional Drivers",
-      "support": "Customer Support"
+    "cta": {
+      "title": "Ready to Start Your Journey?",
+      "subtitle": "Book a taxi today and get where you need to go in Georgia",
+      "bookTaxi": "Book a Taxi",
+      "phone": "+995 555 123 456"
     }
-  },
-  "booking": {
-    "title": "Book Your Transfer",
-    "pickupLocation": "Pickup Location",
-    "pickupPlaceholder": "Enter pickup address or airport",
-    "dropoffLocation": "Drop-off Location",
-    "dropoffPlaceholder": "Enter destination address",
-    "selectDate": "Select Date",
-    "selectTime": "Select Time",
-    "selectVehicle": "Select Vehicle",
-    "passengers": "Passengers",
-    "luggage": "Luggage pieces",
-    "roundTrip": "Round Trip",
-    "oneWay": "One Way",
-    "returnDate": "Return Date",
-    "returnTime": "Return Time",
-    "additionalInfo": "Additional Information",
-    "flightNumber": "Flight Number (optional)",
-    "specialRequests": "Special Requests",
-    "getQuote": "Get Quote",
-    "bookNow": "Book Now",
-    "booking": "Booking...",
-    "loginRequired": "Sign in required to book",
-    "loginRequiredDesc": "Please sign in to complete your booking",
-    "signInButton": "Sign In"
-  },
-  "vehicles": {
-    "title": "Choose Your Vehicle",
-    "economy": {
-      "name": "Economy",
-      "description": "Comfortable sedan for up to 3 passengers",
-      "features": ["3 passengers", "2 luggage", "Free WiFi", "Water included"]
-    },
-    "business": {
-      "name": "Business",
-      "description": "Premium sedan for business travelers",
-      "features": ["3 passengers", "3 luggage", "Free WiFi", "Water & snacks", "Leather seats"]
-    },
-    "firstClass": {
-      "name": "First Class",
-      "description": "Luxury vehicle for the ultimate comfort",
-      "features": ["3 passengers", "3 luggage", "Free WiFi", "Champagne", "Premium amenities"]
-    },
-    "van": {
-      "name": "Van",
-      "description": "Spacious van for groups and families",
-      "features": ["7 passengers", "7 luggage", "Free WiFi", "Water included"]
-    },
-    "minibus": {
-      "name": "Minibus",
-      "description": "Perfect for larger groups",
-      "features": ["16 passengers", "16 luggage", "Free WiFi", "Air conditioning"]
-    }
-  },
-  "quote": {
-    "title": "Your Quote",
-    "distance": "Distance",
-    "duration": "Estimated Duration",
-    "basePrice": "Base Price",
-    "total": "Total",
-    "included": "Included in price",
-    "meetGreet": "Meet & Greet",
-    "flightTracking": "Flight Tracking",
-    "freeWaiting": "60 min free waiting",
-    "freeCancellation": "Free cancellation"
   },
   "contact": {
     "title": "Contact Information",
@@ -290,17 +229,16 @@
     "phone": "Phone Number",
     "notes": "Additional Notes"
   },
-  "confirmation": {
-    "title": "Booking Confirmed",
-    "message": "Thank you for your booking. You will receive a confirmation email shortly.",
-    "bookingRef": "Booking Reference",
-    "newBooking": "Make Another Booking"
-  },
   "footer": {
     "rights": "All rights reserved",
     "privacy": "Privacy Policy",
     "terms": "Terms of Service",
-    "contact": "Contact Us"
+    "contact": "Contact Us",
+    "company": "Lulini LLC",
+    "services": "Services",
+    "taxiService": "Taxi Service",
+    "businessTravel": "Business Travel",
+    "legal": "Legal"
   },
   "features": {
     "safeRides": {
@@ -353,147 +291,74 @@
       "sendAnother": "Send Another Message"
     }
   },
-  "carRentals": {
-    "title": "Car Rentals",
-    "subtitle": "Rent a car without a driver and explore at your own pace",
-    "perDay": "per day",
-    "day": "day",
-    "viewDetails": "View Details",
-    "bookNow": "Book Now",
-    "backToList": "Back to Car Rentals",
-    "notFound": "Car not found",
-    "noCars": "No cars available in this category",
-    "searchPlaceholder": "Search by brand, model, or feature...",
-    "pickupLocations": "Pickup Locations",
-    "allLocations": "All Locations",
-    "carsFound": "cars found",
-    "clearFilters": "Clear filters",
-    "pickupLocation": "Pickup Location",
-    "available": "Available for Rent",
-    "unavailable": "Currently Unavailable",
-    "specifications": "Specifications",
-    "features": "Features",
-    "rentalInfo": "Rental Information",
-    "unlimited": "Unlimited",
-    "contactInfo": "Need help? Contact us at +1 (555) 123-4567",
-    "categories": {
-      "all": "All Cars",
-      "economy": "Economy",
-      "business": "Business",
-      "luxury": "Luxury",
-      "suv": "SUV",
-      "sports": "Sports"
+  "careers": {
+    "hero": {
+      "title": "Drive with Lulini",
+      "subtitle": "Join Georgia's premier ride-hailing platform and take control of your earning potential"
     },
-    "transmission": {
-      "automatic": "Automatic",
-      "manual": "Manual"
+    "benefits": {
+      "title": "Why Drive with Us",
+      "subtitle": "We offer the best conditions for partner drivers",
+      "flexibility": {
+        "title": "Flexible Schedule",
+        "description": "Work when you want, as much as you want. You're in complete control."
+      },
+      "earnings": {
+        "title": "Great Earnings",
+        "description": "Low commission rates mean more money in your pocket."
+      },
+      "support": {
+        "title": "24/7 Support",
+        "description": "Our support team is always available to help you."
+      },
+      "community": {
+        "title": "Driver Community",
+        "description": "Join a supportive network of professional drivers."
+      }
     },
-    "fuel": {
-      "petrol": "Petrol",
-      "diesel": "Diesel",
-      "hybrid": "Hybrid",
-      "electric": "Electric"
+    "requirements": {
+      "title": "Requirements",
+      "subtitle": "What you need to get started",
+      "license": "Valid driver's license",
+      "age": "Minimum 21 years old",
+      "vehicle": "Vehicle in good condition (2015 or newer)",
+      "clean": "Clean driving record",
+      "smartphone": "Smartphone with internet access"
     },
-    "specs": {
-      "passengers": "Passengers",
-      "luggage": "Luggage",
-      "doors": "Doors",
-      "transmission": "Transmission",
-      "fuel": "Fuel Type",
-      "ac": "Air Conditioning"
+    "howToApply": {
+      "title": "How to Get Started",
+      "subtitle": "Three simple steps to start driving",
+      "steps": {
+        "apply": {
+          "title": "Apply Online",
+          "description": "Fill out a simple application form"
+        },
+        "review": {
+          "title": "Get Approved",
+          "description": "We'll review your application quickly"
+        },
+        "drive": {
+          "title": "Start Driving",
+          "description": "Download the driver app and hit the road"
+        }
+      }
     },
-    "info": {
-      "pricePerDay": "Price per Day",
-      "deposit": "Security Deposit",
-      "mileage": "Mileage Limit",
-      "minAge": "Minimum Age"
-    }
-  },
-  "tours": {
-    "title": "Tours",
-    "subtitle": "Discover Georgia with our expertly guided tours",
-    "perPerson": "per person",
-    "perGroup": "per group",
-    "viewDetails": "View Details",
-    "bookNow": "Book Now",
-    "backToList": "Back to Tours",
-    "notFound": "Tour not found",
-    "noTours": "No tours available",
-    "searchPlaceholder": "Search by tour name, location...",
-    "toursFound": "tours found",
-    "clearFilters": "Clear filters",
-    "available": "Available",
-    "unavailable": "Currently Unavailable",
-    "featured": "Featured Tour",
-    "duration": "Duration",
-    "groupSize": "Group Size",
-    "meetingPoint": "Meeting Point",
-    "language": "Language",
-    "languages": "Languages",
-    "difficulty": "Difficulty",
-    "includes": "What's Included",
-    "excludes": "What's Not Included",
-    "itinerary": "Itinerary",
-    "requirements": "Requirements",
-    "cancellationPolicy": "Cancellation Policy",
-    "categories": {
-      "all": "All Tours",
-      "cultural": "Cultural",
-      "adventure": "Adventure",
-      "nature": "Nature",
-      "wine": "Wine Tours",
-      "food": "Food Tours",
-      "historical": "Historical",
-      "religious": "Religious",
-      "mountain": "Mountain",
-      "city": "City Tours"
-    },
-    "difficultyLevels": {
-      "easy": "Easy",
-      "moderate": "Moderate",
-      "challenging": "Challenging"
-    },
-    "booking": {
-      "title": "Book This Tour",
-      "date": "Select Date",
-      "time": "Select Time",
-      "participants": "Number of Participants",
-      "participantsPlaceholder": "Enter number of participants",
-      "language": "Preferred Language",
-      "languagePlaceholder": "Select language",
-      "withCarRental": "Add Car Rental",
-      "withTransfer": "Add Transfer",
-      "selectCarRental": "Select Car Rental",
-      "selectTransfer": "Select Transfer",
-      "noCarRentals": "No active car rentals. Book a car rental first.",
-      "noTransfers": "No active transfers. Book a transfer first.",
-      "yourInfo": "Your Information",
-      "name": "Full Name",
-      "email": "Email Address",
-      "phone": "Phone Number",
-      "notes": "Additional Notes",
-      "specialRequirements": "Special Requirements",
-      "bookingDetails": "Booking Details",
-      "tour": "Tour",
-      "totalPrice": "Total Price",
-      "carRental": "Car Rental",
-      "transfer": "Transfer",
-      "confirmBooking": "Confirm Booking",
-      "booking": "Booking...",
-      "success": "Tour booked successfully!",
-      "error": "Failed to book tour. Please try again."
+    "cta": {
+      "title": "Ready to Start Earning?",
+      "subtitle": "Join thousands of drivers who earn with Lulini",
+      "button": "Apply Now",
+      "callUs": "Or call us directly",
+      "phone": "+995 32 2 11 24 24"
     }
   },
   "profile": {
     "title": "Profile",
     "welcome": "Welcome back",
-    "overviewDescription": "Here's an overview of your bookings and activity",
+    "overviewDescription": "Here's an overview of your rides and activity",
     "recentActivity": "Recent Activity",
-    "viewAllTransfers": "View all transfers",
-    "viewAllRentals": "View all rentals",
     "noOrders": {
       "title": "No orders yet",
-      "description": "Start by booking a transfer or renting a car"
+      "description": "Start by booking a taxi ride"
     },
     "signInToView": "Sign in to view your profile",
     "signInDescription": "Access your bookings, track orders, and manage your account",
@@ -504,9 +369,6 @@
     "signOut": "Sign Out",
     "tabs": {
       "overview": "Overview",
-      "transfers": "Transfer Orders",
-      "rentals": "Rental Orders",
-      "tours": "Tour Bookings",
       "settings": "Profile Settings"
     },
     "stats": {
@@ -515,34 +377,9 @@
       "pending": "Pending",
       "totalSpent": "Total Spent"
     },
-    "recentTransfers": "Recent Transfers",
-    "recentRentals": "Recent Rentals",
-    "recentTours": "Recent Tours",
     "viewAll": "View All",
-    "viewAllTours": "View all tours",
-    "noTransferOrders": "No transfer orders yet",
-    "noRentalOrders": "No rental orders yet",
-    "noTourOrders": "No tour bookings yet",
     "quickActions": "Quick Actions",
-    "bookTransfer": "Book Transfer",
-    "rentACar": "Rent a Car",
-    "bookATour": "Book a Tour",
     "contactSupport": "Contact Support",
-    "noTransfers": {
-      "title": "No Transfer Orders",
-      "description": "You haven't booked any transfers yet",
-      "cta": "Book Your First Transfer"
-    },
-    "noRentals": {
-      "title": "No Rental Orders",
-      "description": "You haven't rented any cars yet",
-      "cta": "Browse Cars"
-    },
-    "noTours": {
-      "title": "No Tour Bookings",
-      "description": "You haven't booked any tours yet",
-      "cta": "Browse Tours"
-    },
     "tripDetails": "Trip Details",
     "pickup": "Pickup",
     "dropoff": "Drop-off",
@@ -552,11 +389,6 @@
     "passengers": "Passengers",
     "roundTrip": "Round Trip",
     "oneWay": "One Way",
-    "rentalDetails": "Rental Details",
-    "pickupLocation": "Pickup Location",
-    "rentalPeriod": "Rental Period",
-    "pricing": "Pricing",
-    "dailyRate": "Daily Rate",
     "duration": "Duration",
     "days": "days",
     "notes": "Notes",
@@ -583,20 +415,11 @@
     "title": "Admin Panel",
     "sidebar": {
       "dashboard": "Dashboard",
-      "transferOrders": "Transfer Orders",
-      "rentalOrders": "Rental Orders",
-      "tourOrders": "Tour Bookings",
-      "carRentals": "Car Rentals",
-      "tours": "Tours",
-      "transferPricing": "Transfer Pricing",
       "backToSite": "Back to Site"
     },
     "dashboard": {
       "title": "Dashboard",
       "welcome": "Welcome to the Admin Panel",
-      "totalTransfers": "Total Transfers",
-      "totalRentals": "Total Rentals",
-      "totalTours": "Total Tours",
       "pendingOrders": "Pending Orders",
       "revenue": "Revenue"
     },
@@ -614,38 +437,6 @@
       "confirm": "Confirm",
       "cancel": "Cancel",
       "complete": "Complete"
-    },
-    "cars": {
-      "title": "Cars",
-      "addCar": "Add Car",
-      "editCar": "Edit Car",
-      "brand": "Brand",
-      "model": "Model",
-      "year": "Year",
-      "price": "Price per Day",
-      "category": "Category",
-      "available": "Available",
-      "unavailable": "Unavailable"
-    },
-    "tours": {
-      "title": "Tours",
-      "addTour": "Add Tour",
-      "editTour": "Edit Tour",
-      "name": "Tour Name",
-      "duration": "Duration",
-      "price": "Price",
-      "category": "Category",
-      "location": "Location",
-      "available": "Available",
-      "unavailable": "Unavailable",
-      "featured": "Featured"
-    },
-    "pricing": {
-      "title": "Pricing Management",
-      "route": "Route",
-      "basePrice": "Base Price",
-      "addRoute": "Add Route",
-      "editRoute": "Edit Route"
     },
     "common": {
       "save": "Save",
@@ -671,18 +462,16 @@
       "forgotPassword": "Forgot password?",
       "signInButton": "Sign In",
       "signingIn": "Signing in...",
-      "orContinueWith": "or continue with",
-      "noAccount": "Don't have an account?",
-      "signUp": "Sign up",
+      "adminOnly": "This login is for administrators only.",
       "heroTitle": "Your Journey Starts Here",
-      "heroSubtitle": "Access your bookings, manage reservations, and enjoy exclusive member benefits with GoTours Georgia.",
+      "heroSubtitle": "Access your bookings, manage reservations, and enjoy exclusive member benefits with Lulini.",
       "feature1": "Track your bookings in real-time",
       "feature2": "Exclusive member discounts",
       "feature3": "Priority customer support"
     },
     "signUp": {
       "title": "Create an account",
-      "subtitle": "Join GoTours to book transfers and rentals easily",
+      "subtitle": "Join Lulini to book taxi rides easily",
       "firstName": "First Name",
       "firstNamePlaceholder": "John",
       "lastName": "Last Name",
@@ -706,7 +495,7 @@
       "haveAccount": "Already have an account?",
       "signIn": "Sign in",
       "heroTitle": "Start Your Journey Today",
-      "heroSubtitle": "Join thousands of travelers who trust GoTours for their transportation needs in Georgia.",
+      "heroSubtitle": "Join thousands of travelers who trust Lulini for their transportation needs in Georgia.",
       "benefit1Title": "Safe & Reliable",
       "benefit1Desc": "All our drivers are vetted and vehicles regularly inspected",
       "benefit2Title": "24/7 Availability",

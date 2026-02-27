@@ -6,9 +6,11 @@ import { Footer } from '../components/Footer';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
+import { useScrollAnimation } from '../hooks/useScrollAnimation';
 
 export function Contact() {
   const { t } = useTranslation();
+  const scrollRef = useScrollAnimation();
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -40,8 +42,8 @@ export function Contact() {
     {
       icon: Mail,
       title: t('contactPage.info.email'),
-      value: 'info@gotours.ge',
-      link: 'mailto:info@gotours.ge'
+      value: 'info@lulini.ge',
+      link: 'mailto:info@lulini.ge'
     },
     {
       icon: Phone,
@@ -62,18 +64,22 @@ export function Contact() {
   ];
 
   return (
-    <div className="min-h-screen flex flex-col bg-background">
+    <div ref={scrollRef} className="min-h-screen flex flex-col bg-background">
       <Header />
 
       {/* Hero Section */}
-      <section className="pt-24 pb-16 md:pt-28 md:pb-20 bg-foreground text-background relative overflow-hidden">
-        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4wMyI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iMiIvPjwvZz48L2c+PC9zdmc+')] opacity-50" />
+      <section className="pt-24 pb-16 md:pt-28 md:pb-20 bg-purple-gradient text-white relative overflow-hidden">
+        <div className="absolute inset-0 opacity-20 bg-no-repeat bg-cover bg-center" style={{ backgroundImage: "url('/pattern03.png')" }} />
+        <div className="absolute inset-0 opacity-10">
+          <div className="absolute top-10 right-20 w-72 h-72 bg-white rounded-full blur-3xl" />
+          <div className="absolute bottom-10 left-10 w-96 h-96 bg-purple-300 rounded-full blur-3xl" />
+        </div>
         <div className="container mx-auto px-4 relative">
           <div className="max-w-2xl mx-auto text-center">
-            <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold mb-6 tracking-tight">
+            <h1 className="anim-hero text-4xl md:text-5xl lg:text-6xl font-bold mb-6 tracking-tight">
               {t('contactPage.hero.title')}
             </h1>
-            <p className="text-background/70 text-lg md:text-xl leading-relaxed">
+            <p className="anim-hero-delay-1 text-white/80 text-lg md:text-xl leading-relaxed">
               {t('contactPage.hero.subtitle')}
             </p>
           </div>
@@ -87,10 +93,10 @@ export function Contact() {
             {contactCards.map((card, index) => (
               <div
                 key={index}
-                className="group bg-background rounded-xl p-6 shadow-lg hover:shadow-xl transition-all duration-300 border border-border hover:-translate-y-1"
+                className={`anim-ready anim-fade-up anim-duration-500 anim-delay-${index} group bg-background rounded-xl p-6 shadow-purple-sm hover:shadow-purple transition-all duration-300 border border-border card-hover`}
               >
-                <div className="w-12 h-12 rounded-xl bg-foreground flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
-                  <card.icon className="h-6 w-6 text-background" />
+                <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
+                  <card.icon className="h-6 w-6 text-primary" />
                 </div>
                 <h3 className="text-sm font-medium text-muted-foreground mb-1">{card.title}</h3>
                 {card.link ? (
@@ -112,7 +118,7 @@ export function Contact() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
 
             {/* Left Side - Info */}
-            <div className="space-y-8">
+            <div className="anim-ready anim-fade-left anim-duration-600 space-y-8">
               <div>
                 <h2 className="text-2xl md:text-3xl font-bold mb-4">
                   {t('contactPage.info.title')}
@@ -127,7 +133,7 @@ export function Contact() {
                 <div className="absolute inset-0 bg-foreground/5 flex items-center justify-center">
                   <div className="text-center">
                     <MapPin className="h-12 w-12 text-foreground/20 mx-auto mb-3" />
-                    <p className="text-muted-foreground font-medium">123 Transfer Street</p>
+                    <p className="text-muted-foreground font-medium">Tbilisi, Georgia</p>
                     <p className="text-muted-foreground">Tbilisi, Georgia</p>
                   </div>
                 </div>
@@ -135,7 +141,7 @@ export function Contact() {
             </div>
 
             {/* Right Side - Form */}
-            <div>
+            <div className="anim-ready anim-fade-right anim-duration-600 anim-delay-1">
               <div className="bg-secondary/50 rounded-2xl p-6 md:p-8 border border-border">
                 <h2 className="text-2xl md:text-3xl font-bold mb-8">
                   {t('contactPage.form.title')}
@@ -143,8 +149,8 @@ export function Contact() {
 
                 {isSubmitted ? (
                   <div className="text-center py-12">
-                    <div className="w-20 h-20 bg-foreground rounded-full flex items-center justify-center mx-auto mb-6">
-                      <Send className="h-8 w-8 text-background" />
+                    <div className="w-20 h-20 bg-primary rounded-full flex items-center justify-center mx-auto mb-6 shadow-purple">
+                      <Send className="h-8 w-8 text-white" />
                     </div>
                     <h3 className="text-xl md:text-2xl font-bold mb-3">
                       {t('contactPage.form.successTitle')}

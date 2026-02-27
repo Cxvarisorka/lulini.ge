@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { useState, useCallback } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Menu, X, Globe, ChevronDown, User, LogOut } from 'lucide-react';
 import { Button } from './ui/button';
@@ -7,10 +7,8 @@ import { cn } from '../lib/utils';
 import { useUser } from '../context/UserContext';
 
 const languages = [
-  { code: 'en', name: 'English', flag: '🇬🇧' },
-  { code: 'es', name: 'Español', flag: '🇪🇸' },
-  { code: 'ru', name: 'Русский', flag: '🇷🇺' },
-  { code: 'ka', name: 'ქართული', flag: '🇬🇪' }
+  { code: 'en', name: 'English', flag: '\u{1F1EC}\u{1F1E7}' },
+  { code: 'ka', name: '\u10E5\u10D0\u10E0\u10D7\u10E3\u10DA\u10D8', flag: '\u{1F1EC}\u{1F1EA}' }
 ];
 
 export function Header() {
@@ -20,6 +18,8 @@ export function Header() {
   const [isLangOpen, setIsLangOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
 
+  const navigate = useNavigate();
+  const location = useLocation();
   const currentLang = languages.find(l => l.code === i18n.language) || languages[0];
 
   const changeLanguage = (code) => {
@@ -27,14 +27,27 @@ export function Header() {
     setIsLangOpen(false);
   };
 
-  const location = useLocation();
+  const handleHashClick = useCallback((e, hash) => {
+    e.preventDefault();
+    const id = hash.replace('#', '');
+    if (location.pathname === '/') {
+      document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' });
+    } else {
+      navigate('/');
+      setTimeout(() => {
+        document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' });
+      }, 100);
+    }
+    setIsMenuOpen(false);
+  }, [location.pathname, navigate]);
 
   const navItems = [
-    { key: 'home', href: '/', isRoute: true },
-    { key: 'transfers', href: '/transfers', isRoute: true },
-    { key: 'carRentals', href: '/car-rentals', isRoute: true },
-    { key: 'tours', href: '/tours', isRoute: true },
-    { key: 'contact', href: '/contact', isRoute: true }
+    { key: 'whyUs', href: '/#why-us' },
+    { key: 'passengers', href: '/#passengers' },
+    { key: 'drivers', href: '/#drivers' },
+    { key: 'faq', href: '/#faq' },
+    { key: 'contact', href: '/contact', isRoute: true },
+    { key: 'careers', href: '/careers', isRoute: true }
   ];
 
   return (
@@ -42,17 +55,12 @@ export function Header() {
       <div className="container mx-auto px-4">
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
-          <a href="/" className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-foreground rounded-md flex items-center justify-center">
-              <span className="text-background font-bold text-lg">G</span>
-            </div>
-            <span className="font-semibold text-lg hidden sm:block">
-              {t('header.title')}
-            </span>
-          </a>
+          <Link to="/" className="flex items-center gap-2">
+            <img src="/logo/png_files_ App 1024 × 1024.png" alt="Lulini" className="w-40" />
+          </Link>
 
           {/* Desktop Navigation */}
-          <nav className="hidden lg:flex items-center gap-8">
+          <nav className="hidden lg:flex items-center gap-6">
             {navItems.map((item) => (
               item.isRoute ? (
                 <Link
@@ -61,7 +69,7 @@ export function Header() {
                   className={cn(
                     "text-sm font-medium transition-colors whitespace-nowrap",
                     location.pathname === item.href
-                      ? "text-foreground"
+                      ? "text-primary"
                       : "text-muted-foreground hover:text-foreground"
                   )}
                 >
@@ -71,7 +79,8 @@ export function Header() {
                 <a
                   key={item.key}
                   href={item.href}
-                  className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors whitespace-nowrap"
+                  onClick={(e) => handleHashClick(e, item.href.replace('/', ''))}
+                  className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors whitespace-nowrap cursor-pointer"
                 >
                   {t(`header.nav.${item.key}`)}
                 </a>
@@ -128,7 +137,7 @@ export function Header() {
                   onClick={() => setIsProfileOpen(!isProfileOpen)}
                   className="flex items-center gap-1.5"
                 >
-                  <div className="w-7 h-7 bg-foreground text-background rounded-full flex items-center justify-center text-xs font-medium flex-shrink-0">
+                  <div className="w-7 h-7 bg-primary text-white rounded-full flex items-center justify-center text-xs font-medium flex-shrink-0">
                     {user.name?.charAt(0)?.toUpperCase() || user.email?.charAt(0)?.toUpperCase() || 'U'}
                   </div>
                   <span className="max-w-[100px] truncate text-sm">{user.name || 'User'}</span>
@@ -176,12 +185,6 @@ export function Header() {
               </Link>
             )}
 
-            <Link to="/transfers">
-              <Button className="hidden lg:flex ml-2 flex-shrink-0">
-                {t('common.book')}
-              </Button>
-            </Link>
-
             {/* Mobile Menu Button */}
             <Button
               variant="ghost"
@@ -214,8 +217,8 @@ export function Header() {
                   className={cn(
                     "px-4 py-3 text-base font-medium rounded-lg transition-colors",
                     location.pathname === item.href
-                      ? "text-white bg-foreground"
-                      : "text-foreground hover:bg-gray-100"
+                      ? "text-white bg-primary"
+                      : "text-foreground hover:bg-accent"
                   )}
                   onClick={() => setIsMenuOpen(false)}
                 >
@@ -225,8 +228,8 @@ export function Header() {
                 <a
                   key={item.key}
                   href={item.href}
-                  className="px-4 py-3 text-base font-medium text-foreground hover:bg-gray-100 rounded-lg transition-colors"
-                  onClick={() => setIsMenuOpen(false)}
+                  className="px-4 py-3 text-base font-medium text-foreground hover:bg-accent rounded-lg transition-colors cursor-pointer"
+                  onClick={(e) => handleHashClick(e, item.href.replace('/', ''))}
                 >
                   {t(`header.nav.${item.key}`)}
                 </a>
@@ -238,7 +241,7 @@ export function Header() {
 
             {/* Mobile Language Selector */}
             <div className="px-4 py-2">
-              <p className="text-sm text-gray-600 mb-3 flex items-center gap-2 font-medium">
+              <p className="text-sm text-muted-foreground mb-3 flex items-center gap-2 font-medium">
                 <Globe className="h-4 w-4" />
                 Language
               </p>
@@ -253,8 +256,8 @@ export function Header() {
                     className={cn(
                       "px-3 py-2.5 text-sm rounded-lg flex items-center gap-2 transition-colors border",
                       lang.code === i18n.language
-                        ? "bg-foreground text-white border-foreground"
-                        : "bg-white text-foreground border-gray-200 hover:border-gray-300 hover:bg-gray-50"
+                        ? "bg-primary text-white border-primary"
+                        : "bg-white text-foreground border-border hover:border-purple-300 hover:bg-accent"
                     )}
                   >
                     <span>{lang.flag}</span>
@@ -271,7 +274,7 @@ export function Header() {
               {isLoggedIn ? (
                 <>
                   <Link to="/profile" className="block" onClick={() => setIsMenuOpen(false)}>
-                    <Button variant="outline" className="w-full flex items-center justify-center gap-2 py-2.5 text-foreground border-gray-200 hover:bg-gray-50">
+                    <Button variant="outline" className="w-full flex items-center justify-center gap-2 py-2.5 text-foreground border-border hover:bg-accent">
                       <User className="h-4 w-4" />
                       My Profile
                     </Button>
@@ -290,16 +293,11 @@ export function Header() {
                 </>
               ) : (
                 <Link to="/signin" className="block" onClick={() => setIsMenuOpen(false)}>
-                  <Button variant="outline" className="w-full py-2.5 text-foreground border-gray-200 hover:bg-gray-50">
+                  <Button variant="outline" className="w-full py-2.5 text-foreground border-border hover:bg-accent">
                     {t('header.nav.signIn')}
                   </Button>
                 </Link>
               )}
-              <Link to="/transfers" className="block" onClick={() => setIsMenuOpen(false)}>
-                <Button className="w-full py-2.5 bg-foreground text-white hover:bg-foreground/90">
-                  {t('common.book')}
-                </Button>
-              </Link>
             </div>
           </nav>
         </div>

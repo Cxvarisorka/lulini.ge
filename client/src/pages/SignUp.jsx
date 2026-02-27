@@ -84,8 +84,8 @@ export function SignUp() {
         <div className="w-full max-w-md mx-auto">
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2 mb-8">
-            <div className="w-10 h-10 bg-foreground rounded-xl flex items-center justify-center">
-              <span className="text-background font-bold text-xl">L</span>
+            <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center shadow-purple-sm">
+              <span className="text-white font-bold text-xl">L</span>
             </div>
             <span className="font-semibold text-xl">{t('header.title')}</span>
           </Link>
@@ -102,11 +102,11 @@ export function SignUp() {
 
           {/* Progress Steps */}
           <div className="flex items-center gap-3 mb-8">
-            <div className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-medium transition-colors ${step >= 1 ? 'bg-foreground text-background' : 'bg-secondary text-muted-foreground'}`}>
+            <div className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-medium transition-colors ${step >= 1 ? 'bg-primary text-white' : 'bg-secondary text-muted-foreground'}`}>
               1
             </div>
-            <div className={`flex-1 h-1 rounded-full transition-colors ${step >= 2 ? 'bg-foreground' : 'bg-secondary'}`} />
-            <div className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-medium transition-colors ${step >= 2 ? 'bg-foreground text-background' : 'bg-secondary text-muted-foreground'}`}>
+            <div className={`flex-1 h-1 rounded-full transition-colors ${step >= 2 ? 'bg-primary' : 'bg-secondary'}`} />
+            <div className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-medium transition-colors ${step >= 2 ? 'bg-primary text-white' : 'bg-secondary text-muted-foreground'}`}>
               2
             </div>
           </div>
@@ -247,7 +247,7 @@ export function SignUp() {
                     checked={formData.agreeToTerms}
                     onChange={handleChange}
                     required
-                    className="mt-1 h-4 w-4 rounded border-border text-foreground focus:ring-foreground"
+                    className="mt-1 h-4 w-4 rounded border-border text-primary focus:ring-primary"
                   />
                   <Label htmlFor="agreeToTerms" className="text-sm text-muted-foreground font-normal leading-relaxed">
                     {t('auth.signUp.agreeToTerms')}{' '}
@@ -348,18 +348,22 @@ export function SignUp() {
       </div>
 
       {/* Right Side - Image/Branding */}
-      <div className="hidden lg:flex lg:flex-1 bg-foreground text-background relative overflow-hidden">
-        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4wMyI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iMiIvPjwvZz48L2c+PC9zdmc+')] opacity-50" />
+      <div className="hidden lg:flex lg:flex-1 bg-purple-gradient-dark text-white relative overflow-hidden">
+        <div className="absolute inset-0 opacity-20 bg-no-repeat bg-cover bg-center" style={{ backgroundImage: "url('/pattern03.png')" }} />
+        <div className="absolute inset-0 opacity-15">
+          <div className="absolute top-20 right-10 w-72 h-72 bg-purple-500 rounded-full blur-[100px]" />
+          <div className="absolute bottom-20 left-10 w-96 h-96 bg-purple-400 rounded-full blur-[120px]" />
+        </div>
 
         <div className="relative flex flex-col justify-center items-center px-12 xl:px-16 w-full">
           <div className="max-w-lg text-center">
-            <div className="w-16 h-16 bg-background/10 rounded-2xl flex items-center justify-center mb-8 mx-auto">
+            <div className="w-16 h-16 bg-white/10 rounded-2xl flex items-center justify-center mb-8 mx-auto">
               <Car className="h-8 w-8" />
             </div>
             <h2 className="text-4xl xl:text-5xl font-bold mb-6 leading-tight">
               {t('auth.signUp.heroTitle')}
             </h2>
-            <p className="text-background/70 text-lg leading-relaxed mb-10">
+            <p className="text-white/70 text-lg leading-relaxed mb-10">
               {t('auth.signUp.heroSubtitle')}
             </p>
 
@@ -367,12 +371,12 @@ export function SignUp() {
             <div className="space-y-5">
               {benefits.map(({ icon: Icon, key }) => (
                 <div key={key} className="flex items-center justify-center gap-4">
-                  <div className="w-10 h-10 rounded-xl bg-background/10 flex items-center justify-center flex-shrink-0">
+                  <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center flex-shrink-0">
                     <Icon className="h-5 w-5" />
                   </div>
                   <div className="text-left">
                     <h3 className="font-medium mb-1">{t(`auth.signUp.${key}Title`)}</h3>
-                    <p className="text-sm text-background/60">{t(`auth.signUp.${key}Desc`)}</p>
+                    <p className="text-sm text-white/60">{t(`auth.signUp.${key}Desc`)}</p>
                   </div>
                 </div>
               ))}

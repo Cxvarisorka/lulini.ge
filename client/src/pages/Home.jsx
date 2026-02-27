@@ -1,241 +1,103 @@
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { Header } from '../components/Header';
 import { Footer } from '../components/Footer';
-import { Car, Plane, Map, Shield, Clock, Award, Users, MapPin, Star, Phone, CheckCircle, ArrowRight } from 'lucide-react';
+import { useScrollAnimation } from '../hooks/useScrollAnimation';
+import {
+  Car, Shield, Clock, Award, Phone, CheckCircle,
+  ArrowRight, Smartphone, Zap, Heart, ChevronDown, ChevronUp,
+  DollarSign, Headphones, Navigation
+} from 'lucide-react';
 import { Button } from '../components/ui/button';
-import { TrustpilotCarousel, TrustpilotHorizontal } from '../components/TrustpilotWidget';
 
 export function Home() {
   const { t } = useTranslation();
+  const [openFaq, setOpenFaq] = useState(null);
+  const scrollRef = useScrollAnimation();
 
-  const services = [
-    {
-      id: 'carRentals',
-      icon: Car,
-      link: '/car-rentals'
-    },
-    {
-      id: 'transfers',
-      icon: Plane,
-      link: '/transfers'
-    },
-    {
-      id: 'tours',
-      icon: Map,
-      link: null
-    }
+  const toggleFaq = (index) => {
+    setOpenFaq(openFaq === index ? null : index);
+  };
+
+  const faqItems = [
+    'download', 'callTaxi', 'payment', 'fare', 'safety', 'privacy', 'share', 'rating'
   ];
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div ref={scrollRef} className="min-h-screen flex flex-col">
       <Header />
 
-      {/* Hero Section with Background Image */}
-      <section className="relative min-h-[600px] md:min-h-[700px] flex items-center">
-        <div className="absolute inset-0">
-          <img
-            src="https://images.unsplash.com/photo-1565008576549-57569a49371d?w=1920&h=1080&fit=crop"
-            alt="Tbilisi Georgia"
-            className="w-full h-full object-cover"
-          />
-          <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/50 to-black/30" />
+      {/* ===== HERO SECTION ===== */}
+      <section className="relative min-h-[650px] md:min-h-[750px] flex items-center overflow-hidden">
+        <div className="absolute inset-0 bg-purple-gradient-dark" />
+        <div className="absolute inset-0 opacity-20 bg-no-repeat bg-cover bg-center" style={{ backgroundImage: "url('/pattern03.png')" }} />
+        <div className="absolute inset-0 opacity-15">
+          <div className="absolute top-20 right-[10%] w-[500px] h-[500px] bg-purple-500 rounded-full blur-[120px]" />
+          <div className="absolute bottom-10 left-[5%] w-[400px] h-[400px] bg-purple-400 rounded-full blur-[100px]" />
         </div>
-        <div className="container mx-auto px-4 relative z-10 pt-20">
-          <div className="max-w-2xl">
-            <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight mb-6 text-white">
-              {t('home.hero.title')}
-            </h1>
-            <p className="text-lg md:text-xl text-white/90 mb-8">
-              {t('home.hero.subtitle')}
-            </p>
-            <div className="flex flex-col sm:flex-row gap-4">
-              <Link to="/transfers">
-                <Button size="lg" className="gap-2 w-full sm:w-auto">
-                  <Plane className="w-5 h-5" />
-                  {t('home.cta.bookTransfer')}
-                </Button>
-              </Link>
-              <Link to="/car-rentals">
-                <Button size="lg" variant="outline" className="gap-2 w-full sm:w-auto bg-white/10 border-white text-white hover:bg-white hover:text-foreground">
-                  <Car className="w-5 h-5" />
-                  {t('home.cta.rentCar')}
-                </Button>
-              </Link>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Services Cards Section */}
-      <section className="py-16 bg-secondary/30" id="services">
-        <div className="container mx-auto px-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 -mt-24 relative z-20">
-            {services.map((service) => {
-              const Icon = service.icon;
-              return (
-                <div
-                  key={service.id}
-                  className="bg-white rounded-xl border border-border overflow-hidden hover:shadow-xl transition-all hover:-translate-y-1 p-8 text-center"
-                >
-                  <div className="w-16 h-16 bg-foreground text-background rounded-full flex items-center justify-center mx-auto mb-6">
-                    <Icon className="w-8 h-8" />
-                  </div>
-                  <h3 className="text-xl font-semibold mb-3">
-                    {t(`home.services.${service.id}.title`)}
-                  </h3>
-                  <p className="text-muted-foreground mb-6">
-                    {t(`home.services.${service.id}.description`)}
-                  </p>
-                  {service.link ? (
-                    <Link to={service.link}>
-                      <Button variant="outline" className="gap-2">
-                        {t('home.services.learnMore')}
-                        <ArrowRight className="w-4 h-4" />
-                      </Button>
-                    </Link>
-                  ) : (
-                    <Button variant="outline" disabled>
-                      {t('home.services.comingSoon')}
-                    </Button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Trustpilot Rating Banner */}
-          <div className="mt-12 flex flex-col sm:flex-row items-center justify-center gap-4 bg-white rounded-xl p-6 shadow-sm border border-border max-w-2xl mx-auto">
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-muted-foreground">Rated</span>
-              <span className="font-bold text-lg">Excellent</span>
-              <div className="flex gap-0.5">
-                {[...Array(5)].map((_, i) => (
-                  <Star key={i} className="w-5 h-5 fill-[#00b67a] text-[#00b67a]" />
-                ))}
-              </div>
-            </div>
-            <div className="flex-1 max-w-xs">
-              <TrustpilotHorizontal />
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Airport Transfers Section - Image Left, Text Right */}
-      <section className="py-20">
-        <div className="container mx-auto px-4">
+        <div className="container mx-auto px-4 relative z-10 pt-24 pb-12">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
-            <div className="relative">
-              <img
-                src="https://images.unsplash.com/photo-1449965408869-eaa3f722e40d?w=800&h=600&fit=crop"
-                alt="Airport Transfer"
-                className="rounded-2xl shadow-2xl w-full"
-              />
-              <div className="absolute -bottom-6 -right-6 bg-foreground text-background p-4 rounded-xl shadow-lg hidden md:block">
-                <p className="text-3xl font-bold">24/7</p>
-                <p className="text-sm opacity-80">{t('home.transferSection.available')}</p>
-              </div>
-            </div>
             <div>
-              <span className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-                {t('home.transferSection.label')}
-              </span>
-              <h2 className="text-3xl md:text-4xl font-bold mt-2 mb-6">
-                {t('home.transferSection.title')}
-              </h2>
-              <p className="text-muted-foreground mb-6 text-lg">
-                {t('home.transferSection.description')}
+              <div className="anim-hero inline-flex items-center gap-2 bg-white/10 backdrop-blur-sm border border-white/20 rounded-full px-4 py-1.5 mb-6">
+                <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+                <span className="text-white/90 text-sm font-medium">{t('home.hero.badge')}</span>
+              </div>
+              <h1 className="anim-hero-delay-1 text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight mb-6 text-white leading-tight">
+                {t('home.hero.title')}
+              </h1>
+              <p className="anim-hero-delay-2 text-lg md:text-xl text-white/80 mb-8 leading-relaxed max-w-lg">
+                {t('home.hero.subtitle')}
               </p>
-              <ul className="space-y-3 mb-8">
-                {['meetGreet', 'flightTracking', 'fixedPrices', 'professional'].map((item) => (
-                  <li key={item} className="flex items-center gap-3">
-                    <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
-                    <span>{t(`home.transferSection.features.${item}`)}</span>
-                  </li>
-                ))}
-              </ul>
-              <Link to="/transfers">
-                <Button size="lg" className="gap-2">
-                  {t('home.transferSection.cta')}
-                  <ArrowRight className="w-5 h-5" />
-                </Button>
-              </Link>
+              <div className="anim-hero-delay-3 flex flex-col sm:flex-row gap-3">
+                <a href="#" className="inline-block transition-transform hover:scale-105">
+                  <img src="https://developer.apple.com/assets/elements/badges/download-on-the-app-store.svg" alt="App Store" className="h-12" />
+                </a>
+                <a href="#" className="inline-block transition-transform hover:scale-105">
+                  <img src="https://upload.wikimedia.org/wikipedia/commons/7/78/Google_Play_Store_badge_EN.svg" alt="Google Play" className="h-12" />
+                </a>
+              </div>
             </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Car Rentals Section - Text Left, Image Right */}
-      <section className="py-20 bg-secondary/30">
-        <div className="container mx-auto px-4">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
-            <div className="order-2 lg:order-1">
-              <span className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-                {t('home.rentalSection.label')}
-              </span>
-              <h2 className="text-3xl md:text-4xl font-bold mt-2 mb-6">
-                {t('home.rentalSection.title')}
-              </h2>
-              <p className="text-muted-foreground mb-6 text-lg">
-                {t('home.rentalSection.description')}
-              </p>
-              <ul className="space-y-3 mb-8">
-                {['wideSelection', 'flexibleRental', 'insurance', 'support'].map((item) => (
-                  <li key={item} className="flex items-center gap-3">
-                    <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
-                    <span>{t(`home.rentalSection.features.${item}`)}</span>
-                  </li>
-                ))}
-              </ul>
-              <Link to="/car-rentals">
-                <Button size="lg" className="gap-2">
-                  {t('home.rentalSection.cta')}
-                  <ArrowRight className="w-5 h-5" />
-                </Button>
-              </Link>
-            </div>
-            <div className="relative order-1 lg:order-2">
-              <img
-                src="https://images.unsplash.com/photo-1502877338535-766e1452684a?w=800&h=600&fit=crop"
-                alt="Car Rental"
-                className="rounded-2xl shadow-2xl w-full"
-              />
-              <div className="absolute -bottom-6 -left-6 bg-foreground text-background p-4 rounded-xl shadow-lg hidden md:block">
-                <p className="text-3xl font-bold">50+</p>
-                <p className="text-sm opacity-80">{t('home.rentalSection.cars')}</p>
+            <div className="anim-hero-delay-2 hidden lg:flex justify-center">
+              <div className="relative">
+                <div className="w-[280px] h-[560px] bg-white/5 backdrop-blur-sm rounded-[3rem] border border-white/10 p-3 shadow-purple-glow">
+                  <img src="/screenshot.jpg" alt="Lulini App" className="w-full h-full object-cover object-top rounded-[2.4rem]" />
+                </div>
+                <div className="absolute -bottom-4 -right-4 w-20 h-20 bg-primary rounded-2xl flex items-center justify-center shadow-purple-lg">
+                  <Car className="w-10 h-10 text-white" />
+                </div>
               </div>
             </div>
           </div>
         </div>
       </section>
 
-      {/* Why Choose Us Section */}
-      <section className="py-16 bg-secondary/30">
+      {/* ===== WHY US SECTION ===== */}
+      <section className="py-20 bg-purple-mesh" id="why-us">
         <div className="container mx-auto px-4">
-          <h2 className="text-3xl font-bold text-center mb-4">
-            {t('home.whyChooseUs.title')}
-          </h2>
-          <p className="text-center text-muted-foreground mb-12 max-w-2xl mx-auto">
-            {t('home.whyChooseUs.subtitle')}
-          </p>
+          <div className="anim-ready anim-fade-up anim-duration-500 text-center mb-16">
+            <h2 className="text-3xl md:text-4xl font-bold mb-4">{t('home.whyChooseUs.title')}</h2>
+            <p className="text-muted-foreground text-lg max-w-2xl mx-auto">
+              {t('home.whyChooseUs.subtitle')}
+            </p>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             {[
               { icon: Shield, key: 'safety' },
-              { icon: Clock, key: 'availability' },
-              { icon: Award, key: 'quality' },
-              { icon: Users, key: 'experience' }
-            ].map((item) => {
+              { icon: Smartphone, key: 'simple' },
+              { icon: Heart, key: 'comfort' },
+              { icon: Zap, key: 'local' }
+            ].map((item, index) => {
               const Icon = item.icon;
               return (
-                <div key={item.key} className="text-center p-6">
-                  <div className="w-14 h-14 bg-foreground text-background rounded-full flex items-center justify-center mx-auto mb-4">
+                <div key={item.key} className={`anim-ready anim-fade-up anim-duration-500 anim-delay-${index} bg-white rounded-2xl p-8 border border-border card-hover`}>
+                  <div className="w-14 h-14 bg-primary/10 text-primary rounded-xl flex items-center justify-center mb-6">
                     <Icon className="w-7 h-7" />
                   </div>
-                  <h3 className="font-semibold mb-2">
+                  <h3 className="text-lg font-semibold mb-3">
                     {t(`home.whyChooseUs.items.${item.key}.title`)}
                   </h3>
-                  <p className="text-sm text-muted-foreground">
+                  <p className="text-muted-foreground leading-relaxed">
                     {t(`home.whyChooseUs.items.${item.key}.description`)}
                   </p>
                 </div>
@@ -245,124 +107,201 @@ export function Home() {
         </div>
       </section>
 
-      {/* Popular Destinations Section */}
-      <section className="py-16">
+      {/* ===== FOR PASSENGERS SECTION ===== */}
+      <section className="py-12 md:py-20 overflow-hidden" id="passengers">
         <div className="container mx-auto px-4">
-          <h2 className="text-3xl font-bold text-center mb-4">
-            {t('home.destinations.title')}
-          </h2>
-          <p className="text-center text-muted-foreground mb-12 max-w-2xl mx-auto">
-            {t('home.destinations.subtitle')}
-          </p>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {[
-              { key: 'tbilisi', image: 'https://images.unsplash.com/photo-1565008576549-57569a49371d?w=400&h=300&fit=crop' },
-              { key: 'batumi', image: 'https://images.unsplash.com/photo-1590077428593-a55bb07c4665?w=400&h=300&fit=crop' },
-              { key: 'kazbegi', image: 'https://images.unsplash.com/photo-1584646098378-0874589d76b1?w=400&h=300&fit=crop' },
-              { key: 'kakheti', image: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&h=300&fit=crop' },
-              { key: 'borjomi', image: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=400&h=300&fit=crop' },
-              { key: 'svaneti', image: 'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=400&h=300&fit=crop' }
-            ].map((dest) => (
-              <div
-                key={dest.key}
-                className="group relative h-64 rounded-xl overflow-hidden cursor-pointer"
-              >
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-16 items-center">
+            <div className="anim-ready anim-fade-up anim-duration-600">
+              <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold mb-4 sm:mb-6">{t('home.passengers.title')}</h2>
+              <p className="text-muted-foreground text-base sm:text-lg mb-6 sm:mb-8 leading-relaxed">
+                {t('home.passengers.description')}
+              </p>
+              <div className="space-y-3 sm:space-y-4 mb-6 sm:mb-8">
+                {['realtime', 'payment', 'support', 'rating'].map((key) => (
+                  <div key={key} className="flex items-start gap-3">
+                    <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center mt-0.5 shrink-0">
+                      <CheckCircle className="w-4 h-4 text-primary" />
+                    </div>
+                    <span className="text-sm sm:text-base text-foreground">{t(`home.passengers.features.${key}`)}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-3">
+                <a href="#" className="inline-block transition-transform hover:scale-105">
+                  <img src="https://developer.apple.com/assets/elements/badges/download-on-the-app-store.svg" alt="App Store" className="h-10 sm:h-11" />
+                </a>
+                <a href="#" className="inline-block transition-transform hover:scale-105">
+                  <img src="https://upload.wikimedia.org/wikipedia/commons/7/78/Google_Play_Store_badge_EN.svg" alt="Google Play" className="h-10 sm:h-11" />
+                </a>
+              </div>
+            </div>
+            <div className="anim-ready anim-fade-up anim-duration-600 anim-delay-1 relative">
+              <div className="bg-purple-gradient-subtle rounded-2xl sm:rounded-3xl p-4 sm:p-8 lg:p-12">
                 <img
-                  src={dest.image}
-                  alt={t(`home.destinations.places.${dest.key}.name`)}
-                  className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
+                  src="/woman-traveling-with-her-car.jpg"
+                  alt="Passenger"
+                  className="rounded-2xl w-full shadow-purple-lg object-cover"
                 />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
-                <div className="absolute bottom-0 left-0 right-0 p-6 text-white">
-                  <div className="flex items-center gap-2 mb-1">
-                    <MapPin className="w-4 h-4" />
-                    <span className="text-sm opacity-80">
-                      {t(`home.destinations.places.${dest.key}.distance`)}
-                    </span>
-                  </div>
-                  <h3 className="text-xl font-semibold">
-                    {t(`home.destinations.places.${dest.key}.name`)}
-                  </h3>
-                </div>
               </div>
-            ))}
+            </div>
           </div>
         </div>
       </section>
 
-      {/* Testimonials Section */}
-      <section className="py-16 bg-secondary/30">
+      {/* ===== FOR DRIVERS SECTION ===== */}
+      <section className="py-12 md:py-20 bg-purple-gradient-subtle overflow-hidden" id="drivers">
         <div className="container mx-auto px-4">
-          <h2 className="text-3xl font-bold text-center mb-4">
-            {t('home.testimonials.title')}
-          </h2>
-          <p className="text-center text-muted-foreground mb-12 max-w-2xl mx-auto">
-            {t('home.testimonials.subtitle')}
-          </p>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            {['review1', 'review2', 'review3'].map((review) => (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-16 items-center">
+            <div className="anim-ready anim-fade-up anim-duration-600 anim-delay-1 order-2 lg:order-1 relative">
+              <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-8 lg:p-12 shadow-purple-sm">
+                <img
+                  src="/switching-gears-modern-businessman-trying-his-new-car-automobile-salon.jpg"
+                  alt="Driver"
+                  className="rounded-2xl w-full object-cover"
+                />
+              </div>
+            </div>
+            <div className="anim-ready anim-fade-up anim-duration-600 order-1 lg:order-2">
+              <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold mb-4 sm:mb-6">{t('home.drivers.title')}</h2>
+              <p className="text-muted-foreground text-base sm:text-lg mb-6 sm:mb-8 leading-relaxed">
+                {t('home.drivers.description')}
+              </p>
+              <div className="space-y-3 sm:space-y-4 mb-6 sm:mb-8">
+                {[
+                  { icon: DollarSign, key: 'commission' },
+                  { icon: Navigation, key: 'distance' },
+                  { icon: Award, key: 'rewards' },
+                  { icon: Headphones, key: 'support' }
+                ].map(({ icon: Icon, key }) => (
+                  <div key={key} className="flex items-start gap-3">
+                    <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center mt-0.5 shrink-0">
+                      <Icon className="w-4 h-4 text-primary" />
+                    </div>
+                    <span className="text-sm sm:text-base text-foreground">{t(`home.drivers.benefits.${key}`)}</span>
+                  </div>
+                ))}
+              </div>
+              <Link to="/careers">
+                <Button size="lg" className="gap-2">
+                  {t('home.drivers.cta')}
+                  <ArrowRight className="w-4 h-4" />
+                </Button>
+              </Link>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ===== SOCIAL RESPONSIBILITY ===== */}
+      <section className="py-20">
+        <div className="container mx-auto px-4">
+          <div className="max-w-3xl mx-auto text-center">
+            <div className="anim-ready anim-scale anim-duration-500 w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center mx-auto mb-6">
+              <Heart className="w-8 h-8 text-primary" />
+            </div>
+            <h2 className="anim-ready anim-fade-up anim-duration-500 anim-delay-1 text-3xl md:text-4xl font-bold mb-6">{t('home.social.title')}</h2>
+            <p className="anim-ready anim-fade-up anim-duration-500 anim-delay-2 text-muted-foreground text-lg leading-relaxed mb-4">
+              {t('home.social.description')}
+            </p>
+            <p className="anim-ready anim-fade-up anim-duration-500 anim-delay-3 text-muted-foreground leading-relaxed">
+              {t('home.social.mission')}
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* ===== FAQ SECTION ===== */}
+      <section className="py-20 bg-purple-mesh" id="faq">
+        <div className="container mx-auto px-4">
+          <div className="anim-ready anim-fade-up anim-duration-500 text-center mb-16">
+            <h2 className="text-3xl md:text-4xl font-bold mb-4">{t('home.faq.title')}</h2>
+            <p className="text-muted-foreground text-lg max-w-2xl mx-auto">
+              {t('home.faq.subtitle')}
+            </p>
+          </div>
+          <div className="max-w-3xl mx-auto space-y-3">
+            {faqItems.map((key, index) => (
               <div
-                key={review}
-                className="bg-white rounded-xl p-6 shadow-sm border border-border"
+                key={key}
+                className={`anim-ready anim-fade-up anim-duration-400 anim-delay-${Math.min(index, 4)} bg-white rounded-xl border border-border overflow-hidden transition-all`}
               >
-                <div className="flex gap-1 mb-4">
-                  {[...Array(5)].map((_, i) => (
-                    <Star key={i} className="w-5 h-5 fill-yellow-400 text-yellow-400" />
-                  ))}
-                </div>
-                <p className="text-muted-foreground mb-4 italic">
-                  "{t(`home.testimonials.reviews.${review}.text`)}"
-                </p>
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-secondary rounded-full flex items-center justify-center font-semibold">
-                    {t(`home.testimonials.reviews.${review}.name`).charAt(0)}
+                <button
+                  onClick={() => toggleFaq(index)}
+                  className="w-full px-6 py-5 flex items-center justify-between text-left hover:bg-accent/50 transition-colors"
+                >
+                  <span className="font-medium pr-4">{t(`home.faq.items.${key}.question`)}</span>
+                  {openFaq === index ? (
+                    <ChevronUp className="w-5 h-5 text-primary shrink-0" />
+                  ) : (
+                    <ChevronDown className="w-5 h-5 text-muted-foreground shrink-0" />
+                  )}
+                </button>
+                {openFaq === index && (
+                  <div className="px-6 pb-5 text-muted-foreground leading-relaxed border-t border-border pt-4">
+                    {t(`home.faq.items.${key}.answer`)}
                   </div>
-                  <div>
-                    <p className="font-medium">{t(`home.testimonials.reviews.${review}.name`)}</p>
-                    <p className="text-sm text-muted-foreground">{t(`home.testimonials.reviews.${review}.location`)}</p>
-                  </div>
-                </div>
+                )}
               </div>
             ))}
           </div>
-          {/* Trustpilot Reviews */}
-          <div className="mt-12 max-w-4xl mx-auto">
-            <TrustpilotCarousel />
+        </div>
+      </section>
+
+      {/* ===== CONTACT SECTION ===== */}
+      <section className="py-20" id="contact-section">
+        <div className="container mx-auto px-4">
+          <div className="anim-ready anim-fade-up anim-duration-500 text-center mb-16">
+            <h2 className="text-3xl md:text-4xl font-bold mb-4">{t('home.contactSection.title')}</h2>
+            <p className="text-muted-foreground text-lg max-w-2xl mx-auto">
+              {t('home.contactSection.subtitle')}
+            </p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl mx-auto">
+            {[
+              { icon: Phone, key: 'call', link: 'tel:+995322112424' },
+              { icon: Smartphone, key: 'email', link: 'mailto:info@lulini.ge' },
+              { icon: Headphones, key: 'app' }
+            ].map(({ icon: Icon, key, link }, index) => (
+              <div key={key} className={`anim-ready anim-fade-up anim-duration-500 anim-delay-${index} bg-white rounded-2xl p-8 border border-border text-center card-hover`}>
+                <div className="w-14 h-14 bg-primary/10 text-primary rounded-xl flex items-center justify-center mx-auto mb-5">
+                  <Icon className="w-7 h-7" />
+                </div>
+                <h3 className="font-semibold mb-2">{t(`home.contactSection.methods.${key}.title`)}</h3>
+                {link ? (
+                  <a href={link} className="text-primary hover:underline text-sm">
+                    {t(`home.contactSection.methods.${key}.value`)}
+                  </a>
+                ) : (
+                  <p className="text-muted-foreground text-sm">{t(`home.contactSection.methods.${key}.value`)}</p>
+                )}
+              </div>
+            ))}
           </div>
         </div>
       </section>
 
-      {/* CTA Section */}
-      <section className="py-20 bg-foreground text-background">
-        <div className="container mx-auto px-4 text-center">
-          <h2 className="text-3xl md:text-4xl font-bold mb-4">
-            {t('home.cta.title')}
-          </h2>
-          <p className="text-lg opacity-80 mb-8 max-w-2xl mx-auto">
-            {t('home.cta.subtitle')}
+      {/* ===== DOWNLOAD CTA ===== */}
+      <section className="py-20 bg-purple-gradient-dark text-white relative overflow-hidden">
+        <div className="absolute inset-0 opacity-20 bg-no-repeat bg-cover bg-center" style={{ backgroundImage: "url('/pattern03.png')" }} />
+        <div className="absolute inset-0 opacity-10">
+          <div className="absolute top-10 right-[20%] w-80 h-80 bg-purple-400 rounded-full blur-[120px]" />
+          <div className="absolute bottom-10 left-[15%] w-64 h-64 bg-purple-300 rounded-full blur-[100px]" />
+        </div>
+        <div className="container mx-auto px-4 text-center relative z-10">
+          <h2 className="anim-ready anim-fade-up anim-duration-500 text-3xl md:text-4xl font-bold mb-4">{t('home.download.title')}</h2>
+          <p className="anim-ready anim-fade-up anim-duration-500 anim-delay-1 text-white/70 text-lg mb-8 max-w-2xl mx-auto">
+            {t('home.download.subtitle')}
           </p>
-          <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Link to="/transfers">
-              <Button size="lg" variant="secondary" className="gap-2">
-                <Plane className="w-5 h-5" />
-                {t('home.cta.bookTransfer')}
-              </Button>
-            </Link>
-            <Link to="/car-rentals">
-              <Button size="lg" variant="outline" className="gap-2 border-background text-background hover:bg-background hover:text-foreground">
-                <Car className="w-5 h-5" />
-                {t('home.cta.rentCar')}
-              </Button>
-            </Link>
-          </div>
-          <div className="mt-8 flex items-center justify-center gap-2 text-sm opacity-80">
-            <Phone className="w-4 h-4" />
-            <span>{t('home.cta.phone')}</span>
+          <div className="anim-ready anim-fade-up anim-duration-500 anim-delay-2 flex flex-col sm:flex-row gap-4 justify-center">
+            <a href="#" className="inline-block transition-transform hover:scale-105">
+              <img src="https://developer.apple.com/assets/elements/badges/download-on-the-app-store.svg" alt="App Store" className="h-14" />
+            </a>
+            <a href="#" className="inline-block transition-transform hover:scale-105">
+              <img src="https://upload.wikimedia.org/wikipedia/commons/7/78/Google_Play_Store_badge_EN.svg" alt="Google Play" className="h-14" />
+            </a>
           </div>
         </div>
       </section>
-
-      <div className="flex-1" />
 
       <Footer />
     </div>
