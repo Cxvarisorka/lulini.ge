@@ -60,9 +60,6 @@ const User = require('./models/user.model');
 
 // Routers
 const authRouter = require('./routers/auth.router');
-const transferRouter = require('./routers/transfer.router');
-const rentalRouter = require('./routers/rental.router');
-const tourRouter = require('./routers/tour.router');
 const driverRouter = require('./routers/driver.router');
 const rideRouter = require('./routers/ride.router');
 const mapsRouter = require('./routers/maps.router');
@@ -341,13 +338,10 @@ app.use(passport.initialize());
 
 // Routes
 app.use('/api/auth', authRouter);
-app.use('/api/transfers', transferRouter);
 app.use('/api/drivers', driverRouter);
 app.use('/api/rides', rideRouter);
 app.use('/api/maps', mapsRouter);
 app.use('/api/notifications', notificationRouter);
-app.use('/api', rentalRouter);
-app.use('/api', tourRouter);
 
 // Health check
 app.get('/health', (req, res) => {

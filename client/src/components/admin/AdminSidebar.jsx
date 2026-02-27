@@ -1,28 +1,16 @@
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Car, DollarSign, ArrowLeft, ClipboardList, FileText, Menu, X, MapIcon, Ticket, Users, Navigation } from 'lucide-react';
-import { useAdmin } from '../../context/AdminContext';
+import { LayoutDashboard, ArrowLeft, Menu, X, Users, Navigation } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
 export function AdminSidebar() {
   const location = useLocation();
-  const { transferOrders, rentalOrders, tourOrders } = useAdmin();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-
-  const pendingTransfers = transferOrders.filter(o => o.status === 'pending').length;
-  const pendingRentals = rentalOrders.filter(o => o.status === 'pending').length;
-  const pendingTours = tourOrders.filter(o => o.status === 'pending').length;
 
   const navItems = [
     { path: '/admin', icon: LayoutDashboard, label: 'Dashboard' },
     { path: '/admin/rides', icon: Navigation, label: 'Taxi Rides' },
     { path: '/admin/drivers', icon: Users, label: 'Drivers' },
-    { path: '/admin/transfer-orders', icon: ClipboardList, label: 'Transfer Orders', badge: pendingTransfers },
-    { path: '/admin/rental-orders', icon: FileText, label: 'Rental Orders', badge: pendingRentals },
-    { path: '/admin/tour-orders', icon: Ticket, label: 'Tour Bookings', badge: pendingTours },
-    { path: '/admin/car-rentals', icon: Car, label: 'Car Rentals' },
-    { path: '/admin/tours', icon: MapIcon, label: 'Tours' },
-    { path: '/admin/transfer-pricing', icon: DollarSign, label: 'Transfer Pricing' },
   ];
 
   const isActive = (path) => {
@@ -42,10 +30,10 @@ export function AdminSidebar() {
       <div className="lg:hidden fixed top-0 left-0 right-0 z-50 bg-foreground text-background h-16 flex items-center justify-between px-4">
         <Link to="/admin" className="flex items-center gap-3">
           <div className="w-8 h-8 bg-background rounded-lg flex items-center justify-center">
-            <span className="text-foreground font-bold text-lg">G</span>
+            <span className="text-foreground font-bold text-lg">L</span>
           </div>
           <div>
-            <span className="font-semibold block">GoTours</span>
+            <span className="font-semibold block">Lulini</span>
             <span className="text-xs text-background/60">Admin</span>
           </div>
         </Link>
@@ -81,7 +69,7 @@ export function AdminSidebar() {
               <span className="text-foreground font-bold text-xl">L</span>
             </div>
             <div>
-              <span className="font-semibold text-lg block">GoTours</span>
+              <span className="font-semibold text-lg block">Lulini</span>
               <span className="text-xs text-background/60">Admin Panel</span>
             </div>
           </Link>

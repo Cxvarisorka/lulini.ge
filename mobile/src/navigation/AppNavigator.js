@@ -4,10 +4,10 @@ import {
   View,
   StyleSheet,
   TouchableOpacity,
-  Modal,
   Animated,
   Dimensions,
   TouchableWithoutFeedback,
+  Platform,
 } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -21,6 +21,7 @@ import { colors } from '../theme/colors';
 
 // Auth Screens
 import WelcomeScreen from '../screens/WelcomeScreen';
+import LoginScreen from '../screens/LoginScreen';
 import PhoneAuthScreen from '../screens/PhoneAuthScreen';
 import OtpVerificationScreen from '../screens/OtpVerificationScreen';
 import PhoneRegistrationScreen from '../screens/PhoneRegistrationScreen';
@@ -31,6 +32,7 @@ import HomeScreen from '../screens/HomeScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import TaxiScreen from '../screens/TaxiScreen';
 import TaxiHistoryScreen from '../screens/TaxiHistoryScreen';
+import RideDetailScreen from '../screens/RideDetailScreen';
 import LanguageSelectScreen from '../screens/LanguageSelectScreen';
 import UpdatePhoneScreen from '../screens/UpdatePhoneScreen';
 
@@ -63,9 +65,12 @@ function AuthStack() {
     <Stack.Navigator
       screenOptions={{
         headerShown: false,
+        animation: 'slide_from_right',
+        contentStyle: { backgroundColor: colors.background },
       }}
     >
       <Stack.Screen name="Welcome" component={WelcomeScreen} />
+      <Stack.Screen name="Login" component={LoginScreen} />
       <Stack.Screen name="PhoneAuth" component={PhoneAuthScreen} />
       <Stack.Screen name="OtpVerification" component={OtpVerificationScreen} />
       <Stack.Screen name="PhoneRegistration" component={PhoneRegistrationScreen} />
@@ -147,7 +152,7 @@ function MainStackNavigator() {
   return (
     <Stack.Navigator
       initialRouteName="Taxi"
-      screenOptions={{
+      screenOptions={({ navigation }) => ({
         headerStyle: {
           backgroundColor: colors.background,
         },
@@ -158,18 +163,37 @@ function MainStackNavigator() {
         headerBackTitle: '',
         headerTintColor: colors.primary,
         headerShadowVisible: false,
-      }}
+        contentStyle: { backgroundColor: colors.background },
+        freezeOnBlur: false,
+        animation: 'slide_from_right',
+        headerLeft: navigation.canGoBack()
+          ? () => (
+              <TouchableOpacity
+                onPress={() => navigation.goBack()}
+                style={styles.headerBackButton}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Ionicons
+                  name={Platform.OS === 'ios' ? 'chevron-back' : 'arrow-back'}
+                  size={24}
+                  color={colors.primary}
+                />
+              </TouchableOpacity>
+            )
+          : undefined,
+      })}
     >
       <Stack.Screen
         name="MainTabs"
         component={MainTabs}
-        options={{ headerShown: false }}
+        options={{ headerShown: false, title: '' }}
       />
       <Stack.Screen
         name="Taxi"
         component={TaxiScreen}
         options={{
           headerShown: false,
+          title: '',
           animation: 'slide_from_bottom',
         }}
       />
@@ -178,6 +202,16 @@ function MainStackNavigator() {
         component={TaxiHistoryScreen}
         options={{
           title: t('taxi.rideHistory'),
+          contentStyle: { backgroundColor: colors.background },
+          animation: 'fade',
+        }}
+      />
+      <Stack.Screen
+        name="RideDetail"
+        component={RideDetailScreen}
+        options={{
+          title: t('taxi.rideDetails'),
+          contentStyle: { backgroundColor: colors.background },
         }}
       />
       <Stack.Screen
@@ -186,6 +220,7 @@ function MainStackNavigator() {
         options={{
           title: t('profile.selectLanguage'),
           presentation: 'modal',
+          animation: 'slide_from_bottom',
         }}
       />
       <Stack.Screen
@@ -194,6 +229,7 @@ function MainStackNavigator() {
         options={{
           headerShown: false,
           presentation: 'modal',
+          animation: 'slide_from_bottom',
         }}
       />
       <Stack.Screen
@@ -201,6 +237,7 @@ function MainStackNavigator() {
         component={SettingsScreen}
         options={{
           title: t('drawer.appSettings'),
+          contentStyle: { backgroundColor: colors.muted },
         }}
       />
       <Stack.Screen
@@ -208,6 +245,8 @@ function MainStackNavigator() {
         component={PaymentSettingsScreen}
         options={{
           title: t('drawer.paymentSettings'),
+          contentStyle: { backgroundColor: colors.muted },
+          animation: 'fade',
         }}
       />
       <Stack.Screen
@@ -215,6 +254,7 @@ function MainStackNavigator() {
         component={SupportScreen}
         options={{
           title: t('drawer.helpCenter'),
+          contentStyle: { backgroundColor: colors.muted },
         }}
       />
       <Stack.Screen
@@ -222,6 +262,7 @@ function MainStackNavigator() {
         component={SupportHistoryScreen}
         options={{
           title: t('drawer.supportHistory'),
+          contentStyle: { backgroundColor: colors.muted },
         }}
       />
       <Stack.Screen
@@ -229,6 +270,7 @@ function MainStackNavigator() {
         component={NotificationSettingsScreen}
         options={{
           title: t('drawer.notifications'),
+          contentStyle: { backgroundColor: colors.muted },
         }}
       />
       <Stack.Screen
@@ -236,6 +278,7 @@ function MainStackNavigator() {
         component={AboutScreen}
         options={{
           title: t('drawer.about'),
+          contentStyle: { backgroundColor: colors.muted },
         }}
       />
       <Stack.Screen
@@ -243,14 +286,16 @@ function MainStackNavigator() {
         component={FAQDetailScreen}
         options={{
           title: t('support.faqTitle'),
+          contentStyle: { backgroundColor: colors.muted },
         }}
       />
     </Stack.Navigator>
   );
 }
 
-// Custom Drawer Modal Component
-function CustomDrawerModal({ isOpen, onClose, navigation }) {
+// Custom Drawer Component — always mounted, uses pointerEvents to
+// let touches pass through when closed. No Modal, no mount/unmount.
+function CustomDrawerOverlay({ isOpen, onClose, navigation }) {
   const slideAnim = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const [visible, setVisible] = useState(false);
@@ -258,75 +303,58 @@ function CustomDrawerModal({ isOpen, onClose, navigation }) {
   React.useEffect(() => {
     if (isOpen) {
       setVisible(true);
-      Animated.parallel([
-        Animated.timing(slideAnim, {
-          toValue: 0,
-          duration: 250,
-          useNativeDriver: true,
-        }),
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: 250,
-          useNativeDriver: true,
-        }),
-      ]).start();
-    } else if (visible) {
-      Animated.parallel([
-        Animated.timing(slideAnim, {
-          toValue: -DRAWER_WIDTH,
-          duration: 200,
-          useNativeDriver: true,
-        }),
-        Animated.timing(fadeAnim, {
-          toValue: 0,
-          duration: 200,
-          useNativeDriver: true,
-        }),
-      ]).start(({ finished }) => {
-        if (finished) {
-          setVisible(false);
-        }
-      });
     }
+    Animated.parallel([
+      Animated.timing(slideAnim, {
+        toValue: isOpen ? 0 : -DRAWER_WIDTH,
+        duration: isOpen ? 250 : 200,
+        useNativeDriver: true,
+      }),
+      Animated.timing(fadeAnim, {
+        toValue: isOpen ? 1 : 0,
+        duration: isOpen ? 250 : 200,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      if (!isOpen) {
+        setVisible(false);
+      }
+    });
   }, [isOpen]);
 
-  if (!visible) return null;
-
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="none"
-      onRequestClose={onClose}
-      statusBarTranslucent
+    <View
+      style={[
+        styles.drawerContainer,
+        !visible && styles.drawerContainerHidden,
+      ]}
+      pointerEvents={isOpen ? 'auto' : 'none'}
     >
-      <View style={styles.drawerContainer}>
-        <TouchableWithoutFeedback onPress={onClose}>
-          <Animated.View
-            style={[
-              styles.drawerOverlay,
-              { opacity: fadeAnim },
-            ]}
-          />
-        </TouchableWithoutFeedback>
+      <TouchableWithoutFeedback onPress={onClose}>
         <Animated.View
           style={[
-            styles.drawerContent,
-            { transform: [{ translateX: slideAnim }] },
+            styles.drawerOverlay,
+            { opacity: fadeAnim },
           ]}
-        >
-          <DrawerContent
-            navigation={{
-              navigate: (screen, params) => {
-                onClose();
-                navigation.navigate(screen, params);
-              },
-              closeDrawer: onClose,
-            }}
-          />
-        </Animated.View>
-      </View>
-    </Modal>
+        />
+      </TouchableWithoutFeedback>
+      <Animated.View
+        style={[
+          styles.drawerContent,
+          { transform: [{ translateX: slideAnim }] },
+        ]}
+      >
+        <DrawerContent
+          navigation={{
+            navigate: (screen, params) => {
+              onClose();
+              if (navigation) navigation.navigate(screen, params);
+            },
+            closeDrawer: onClose,
+          }}
+        />
+      </Animated.View>
+    </View>
   );
 }
 
@@ -340,7 +368,7 @@ function DrawerProvider({ children, navigation }) {
   return (
     <DrawerContext.Provider value={{ openDrawer, closeDrawer, isDrawerOpen }}>
       {children}
-      <CustomDrawerModal
+      <CustomDrawerOverlay
         isOpen={isDrawerOpen}
         onClose={closeDrawer}
         navigation={navigation}
@@ -417,8 +445,14 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   drawerContainer: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
     flexDirection: 'row',
+    zIndex: 999,
+    elevation: 999,
+  },
+  drawerContainerHidden: {
+    zIndex: -1,
+    elevation: 0,
   },
   drawerOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -437,5 +471,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 10,
     elevation: 10,
+  },
+  headerBackButton: {
+    padding: 4,
+    marginLeft: Platform.OS === 'ios' ? -4 : 0,
   },
 });

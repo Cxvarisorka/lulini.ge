@@ -27,26 +27,17 @@ export default function DrawerContent({ navigation }) {
         {
           icon: 'car',
           label: t('drawer.bookRide'),
-          onPress: () => {
-            navigation.closeDrawer();
-            navigation.navigate('Taxi');
-          },
+          onPress: () => navigation.navigate('Taxi'),
         },
         {
           icon: 'time',
           label: t('drawer.rideHistory'),
-          onPress: () => {
-            navigation.closeDrawer();
-            navigation.navigate('TaxiHistory');
-          },
+          onPress: () => navigation.navigate('TaxiHistory'),
         },
         {
           icon: 'card',
           label: t('drawer.paymentSettings'),
-          onPress: () => {
-            navigation.closeDrawer();
-            navigation.navigate('PaymentSettings');
-          },
+          onPress: () => navigation.navigate('PaymentSettings'),
         },
       ],
     },
@@ -56,26 +47,17 @@ export default function DrawerContent({ navigation }) {
         {
           icon: 'help-circle',
           label: t('drawer.helpCenter'),
-          onPress: () => {
-            navigation.closeDrawer();
-            navigation.navigate('Support');
-          },
+          onPress: () => navigation.navigate('Support'),
         },
         {
           icon: 'chatbubbles',
           label: t('drawer.supportHistory'),
-          onPress: () => {
-            navigation.closeDrawer();
-            navigation.navigate('SupportHistory');
-          },
+          onPress: () => navigation.navigate('SupportHistory'),
         },
         {
           icon: 'information-circle',
           label: t('drawer.about'),
-          onPress: () => {
-            navigation.closeDrawer();
-            navigation.navigate('About');
-          },
+          onPress: () => navigation.navigate('About'),
         },
       ],
     },
@@ -85,26 +67,17 @@ export default function DrawerContent({ navigation }) {
         {
           icon: 'settings',
           label: t('drawer.appSettings'),
-          onPress: () => {
-            navigation.closeDrawer();
-            navigation.navigate('Settings');
-          },
+          onPress: () => navigation.navigate('Settings'),
         },
         {
           icon: 'language',
           label: t('drawer.language'),
-          onPress: () => {
-            navigation.closeDrawer();
-            navigation.navigate('LanguageSelect');
-          },
+          onPress: () => navigation.navigate('LanguageSelect'),
         },
         {
           icon: 'notifications',
           label: t('drawer.notifications'),
-          onPress: () => {
-            navigation.closeDrawer();
-            navigation.navigate('NotificationSettings');
-          },
+          onPress: () => navigation.navigate('NotificationSettings'),
         },
       ],
     },
@@ -112,7 +85,8 @@ export default function DrawerContent({ navigation }) {
 
   const handleLogout = async () => {
     navigation.closeDrawer();
-    await logout();
+    // Small delay to let drawer close before logout unmounts everything
+    setTimeout(() => logout(), 300);
   };
 
   return (
@@ -120,10 +94,7 @@ export default function DrawerContent({ navigation }) {
       {/* User Profile Header */}
       <TouchableOpacity
         style={styles.profileSection}
-        onPress={() => {
-          navigation.closeDrawer();
-          navigation.navigate('MainTabs', { screen: 'Profile' });
-        }}
+        onPress={() => navigation.navigate('MainTabs', { screen: 'Profile' })}
       >
         <View style={styles.avatarContainer}>
           {user?.profileImage ? (

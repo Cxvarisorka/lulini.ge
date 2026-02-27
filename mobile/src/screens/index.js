@@ -10,9 +10,5 @@ export { default as ProfileScreen } from './ProfileScreen';
 export { default as TaxiScreen } from './TaxiScreen';
 export { default as TaxiHistoryScreen } from './TaxiHistoryScreen';
 
-// Rental screens
-export { default as RentalsScreen } from './RentalsScreen';
-export { default as RentalDetailScreen } from './RentalDetailScreen';
-
 // Settings screens
 export { default as LanguageSelectScreen } from './LanguageSelectScreen';
