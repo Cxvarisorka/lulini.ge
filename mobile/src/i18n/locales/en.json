@@ -44,7 +44,6 @@
   "tabs": {
     "home": "Home",
     "taxi": "Taxi",
-    "rentals": "Rentals",
     "profile": "Profile"
   },
   "home": {
@@ -67,10 +66,7 @@
     "fairPrices": "Fair Prices",
     "fairPricesDesc": "Transparent pricing, no surprises",
     "support247": "24/7 Support",
-    "support247Desc": "Help whenever you need it",
-    "carRentals": "Car Rentals",
-    "carRentalsSubtitle": "Explore Georgia at your own pace",
-    "browseCars": "Browse Cars"
+    "support247Desc": "Help whenever you need it"
   },
   "taxi": {
     "title": "Request a Taxi",
@@ -80,6 +76,11 @@
     "whereTo": "Where to?",
     "enterDestination": "Enter destination address",
     "selectOnMap": "Select on map",
+    "addStop": "Add Stop",
+    "stop": "Stop",
+    "enterStopAddress": "Enter stop address",
+    "removeStop": "Remove stop",
+    "yourRoute": "Your Route",
     "recentPlaces": "Recent Places",
     "home": "Home",
     "work": "Work",
@@ -107,6 +108,7 @@
     "applePayDesc": "Fast and secure payment with Apple Pay",
     "googlePayDesc": "Fast and secure payment with Google Pay",
     "distance": "Distance",
+    "km": "km",
     "duration": "Duration",
     "cancelRide": "Cancel Ride",
     "confirmCancel": "Are you sure you want to cancel this ride?",
@@ -206,36 +208,8 @@
     "reconnecting": "Reconnecting...",
     "connected": "Connected"
   },
-  "rentals": {
-    "title": "Car Rentals",
-    "subtitle": "Rent a car without a driver",
-    "perDay": "per day",
-    "viewDetails": "View Details",
-    "bookNow": "Book Now",
-    "available": "Available",
-    "unavailable": "Unavailable",
-    "specifications": "Specifications",
-    "features": "Features",
-    "passengers": "Passengers",
-    "luggage": "Luggage",
-    "doors": "Doors",
-    "transmission": "Transmission",
-    "fuelType": "Fuel Type",
-    "automatic": "Automatic",
-    "manual": "Manual",
-    "noResults": "No cars match your search",
-    "noCars": "No cars available at the moment",
-    "description": "Description",
-    "categories": {
-      "all": "All Cars",
-      "economy": "Economy",
-      "business": "Business",
-      "luxury": "Luxury",
-      "suv": "SUV"
-    }
-  },
   "auth": {
-    "welcome": "Welcome to Lulini",
+    "welcome": "Welcome",
     "welcomeSubtitle": "Your trusted ride in Georgia",
     "welcomeBack": "Welcome Back",
     "signInToContinue": "Sign in to continue",
@@ -250,6 +224,7 @@
     "continueWithGoogle": "Continue with Google",
     "continueWithApple": "Continue with Apple",
     "continueWithPhone": "Continue with Phone",
+    "continueWithEmail": "Continue with Email",
     "continueWithEmail": "Sign in with Email",
     "noAccount": "Don't have an account?",
     "signUp": "Sign Up",
@@ -324,7 +299,6 @@
     "emailPassword": "Email & Password",
     "quickActions": "Quick Actions",
     "myRides": "My Taxi Rides",
-    "myRentals": "My Rentals",
     "bookTaxi": "Book a Taxi",
     "settings": "Settings",
     "language": "Language",
@@ -345,8 +319,6 @@
   },
   "languages": {
     "en": "English",
-    "es": "Spanish",
-    "ru": "Russian",
     "ka": "Georgian"
   },
   "errors": {
@@ -505,6 +477,51 @@
       "rideExpired": "Your ride request has expired. Please try again.",
       "waitingTimeout": "The ride was cancelled because you didn't arrive at the pickup point within 3 minutes"
     }
+  },
+  "history": {
+    "filters": "Filters",
+    "resetAll": "Reset All",
+    "ridesFound": "rides found",
+    "allStatuses": "All",
+    "allVehicles": "All",
+    "status": "Status",
+    "vehicleType": "Vehicle",
+    "priceRange": "Price Range",
+    "minPrice": "Min",
+    "maxPrice": "Max",
+    "dateRange": "Date Range",
+    "from": "From",
+    "to": "To",
+    "applyFilters": "Apply Filters",
+    "clearFilters": "Clear Filters",
+    "noFilterResults": "No matching rides",
+    "noFilterResultsDesc": "Try changing your filters to see more rides",
+    "viewDetails": "View Details",
+    "routeDetails": "Route Details",
+    "fare": "Fare",
+    "waitingFee": "Waiting Fee",
+    "timeline": "Timeline",
+    "requested": "Requested",
+    "started": "Started",
+    "driverArrived": "Driver Arrived",
+    "ended": "Completed",
+    "yourRating": "Your Rating",
+    "cancellation": "Cancellation",
+    "cancelledBy": "Cancelled by",
+    "user": "Passenger",
+    "driver": "Driver",
+    "admin": "Admin"
+  },
+  "rideNotification": {
+    "channelName": "Ride Status",
+    "channelDescription": "Real-time updates about your current ride",
+    "driverOnTheWay": "{{driverName}} is on the way",
+    "etaMinutes": "Arriving in {{minutes}} min",
+    "driverArrived": "Your driver has arrived!",
+    "waitingAtPickup": "Waiting at pickup location",
+    "rideInProgress": "Ride in progress",
+    "etaDropoff": "{{minutes}} min until drop-off",
+    "ridingNow": "Heading to destination"
   },
   "about": {
     "tagline": "Your ride, your way",

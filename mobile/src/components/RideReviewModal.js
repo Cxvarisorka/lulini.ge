@@ -57,7 +57,11 @@ const typography = useTypography();
 
   if (!ride) return null;
 
-  const driverName = ride.driver?.user?.firstName || t('taxi.driver');
+  const driver = ride.driver;
+  const driverUser = driver?.user;
+  const driverName = [driverUser?.firstName, driverUser?.lastName].filter(Boolean).join(' ')
+    || driverUser?.fullName
+    || t('taxi.driver');
 
   return (
     <Modal
@@ -86,12 +90,32 @@ const typography = useTypography();
                 <Ionicons name="person" size={32} color={colors.primary} />
               </View>
               <View style={styles.driverDetails}>
-                <Text style={styles.driverName}>{driverName}</Text>
+                <Text style={styles.driverName} numberOfLines={1}>{driverName}</Text>
+                <View style={styles.driverMeta}>
+                  {driver?.rating > 0 && (
+                    <View style={styles.driverRatingRow}>
+                      <Ionicons name="star" size={14} color="#FFA500" />
+                      <Text style={styles.driverRating}>
+                        {driver.rating.toFixed(1)}
+                      </Text>
+                    </View>
+                  )}
+                  {driver?.totalTrips > 0 && (
+                    <Text style={styles.driverTrips}>
+                      {driver.rating > 0 ? '• ' : ''}{driver.totalTrips} {t('taxi.trips')}
+                    </Text>
+                  )}
+                </View>
                 <View style={styles.vehicleInfo}>
                   <Ionicons name="car" size={14} color={colors.mutedForeground} />
                   <Text style={styles.vehicleText}>
-                    {ride.driver?.vehicle?.make} {ride.driver?.vehicle?.model}
+                    {driver?.vehicle?.make} {driver?.vehicle?.model}
                   </Text>
+                  {driver?.vehicle?.licensePlate && (
+                    <View style={styles.licensePlateBadge}>
+                      <Text style={styles.licensePlateText}>{driver.vehicle.licensePlate}</Text>
+                    </View>
+                  )}
                 </View>
               </View>
             </View>
@@ -155,7 +179,7 @@ const typography = useTypography();
               <View style={styles.summaryRow}>
                 <Ionicons name="cash-outline" size={20} color={colors.mutedForeground} />
                 <Text style={styles.summaryLabel}>{t('taxi.totalFare')}</Text>
-                <Text style={styles.summaryValue}>${ride.fare || ride.quote?.totalPrice}</Text>
+                <Text style={styles.summaryValue}>{ride.fare || ride.quote?.totalPrice} ₾</Text>
               </View>
               <View style={styles.summaryRow}>
                 <Ionicons name="time-outline" size={20} color={colors.mutedForeground} />
@@ -253,18 +277,51 @@ const createStyles = (typography) => StyleSheet.create({
     flex: 1,
   },
   driverName: {
-    ...typography.h1,
+    ...typography.h2,
     color: colors.foreground,
     marginBottom: 4,
+  },
+  driverMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  driverRatingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  driverRating: {
+    ...typography.bodySmall,
+    fontWeight: '500',
+    color: colors.foreground,
+    marginLeft: 4,
+  },
+  driverTrips: {
+    ...typography.bodySmall,
+    color: colors.mutedForeground,
+    marginLeft: 4,
   },
   vehicleInfo: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   vehicleText: {
-    ...typography.body,
+    ...typography.bodySmall,
     color: colors.mutedForeground,
     marginLeft: 4,
+  },
+  licensePlateBadge: {
+    backgroundColor: colors.muted,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radius.sm,
+    marginLeft: 8,
+  },
+  licensePlateText: {
+    ...typography.caption,
+    fontWeight: '600',
+    color: colors.foreground,
+    letterSpacing: 1,
   },
   ratingContainer: {
     alignItems: 'center',

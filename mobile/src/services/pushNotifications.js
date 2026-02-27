@@ -46,7 +46,7 @@ export async function registerForPushNotifications(language = 'ka') {
                 try {
                     await axios.post(
                         `${API_URL}/notifications/register-token`,
-                        { token: pushToken, platform: Platform.OS, language },
+                        { token: pushToken, platform: Platform.OS, language, app: 'passenger' },
                         { headers: { Authorization: `Bearer ${token}` }, timeout: 5000 }
                     );
                 } catch (err) {
@@ -61,7 +61,7 @@ export async function registerForPushNotifications(language = 'ka') {
         if (authToken) {
             await axios.post(
                 `${API_URL}/notifications/register-token`,
-                { token: pushToken, platform: Platform.OS, language },
+                { token: pushToken, platform: Platform.OS, language, app: 'passenger' },
                 { headers: { Authorization: `Bearer ${authToken}` }, timeout: 5000 }
             );
             await SecureStore.setItemAsync('pushToken', pushToken);

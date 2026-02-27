@@ -47,6 +47,12 @@ export default {
         "POST_NOTIFICATIONS"
       ]
     },
+    updates: {
+      url: "https://u.expo.dev/6a0101ac-1b4b-48f4-914b-6e467f03f395"
+    },
+    runtimeVersion: {
+      policy: "appVersion"
+    },
     web: {
       favicon: "./assets/favicon.png"
     },
@@ -68,10 +74,6 @@ export default {
           color: "#171717"
         }
       ],
-      ["@sentry/react-native/expo", {
-        organization: "cryptalyst",
-        project: "mobile-client",
-      }]
     ],
     extra: {
       googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY || "",

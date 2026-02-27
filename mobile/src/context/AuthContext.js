@@ -3,6 +3,7 @@ import * as SecureStore from 'expo-secure-store';
 import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
 import * as AppleAuthentication from 'expo-apple-authentication';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import { authAPI } from '../services/api';
 import { GOOGLE_CONFIG } from '../config/google.config';
@@ -318,6 +319,7 @@ export const AuthProvider = ({ children }) => {
       // Logout API error
     } finally {
       await SecureStore.deleteItemAsync('token');
+      await AsyncStorage.removeItem('@rides_cache').catch(() => {});
       setUser(null);
     }
   };

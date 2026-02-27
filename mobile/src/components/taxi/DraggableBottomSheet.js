@@ -19,6 +19,8 @@ const DraggableBottomSheet = forwardRef(function DraggableBottomSheet({
   initialSnapIndex = 1,
   onChange,
   floatingButton,
+  headerBar,
+  isFullscreen = false,
 }, ref) {
   const insets = useSafeAreaInsets();
 
@@ -32,17 +34,24 @@ const DraggableBottomSheet = forwardRef(function DraggableBottomSheet({
   const lastGestureDy = useRef(0);
   const currentSnapIndex = useRef(initialSnapIndex);
   const preKeyboardSnapIndex = useRef(initialSnapIndex);
+  const snapPointsRef = useRef(snapPointsPixels);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
 
-  // Update snap points when they change
+  // Keep ref in sync with latest snap points
   useEffect(() => {
+    snapPointsRef.current = snapPointsPixels;
+    // Clamp current index to new range
+    if (currentSnapIndex.current >= snapPointsPixels.length) {
+      currentSnapIndex.current = snapPointsPixels.length - 1;
+    }
     Animated.spring(translateY, {
       toValue: snapPointsPixels[currentSnapIndex.current],
       useNativeDriver: true,
       tension: 100,
       friction: 12,
     }).start();
+    onChange?.(currentSnapIndex.current);
   }, [snapPoints]);
 
   // Handle keyboard events
@@ -54,7 +63,7 @@ const DraggableBottomSheet = forwardRef(function DraggableBottomSheet({
         setIsKeyboardVisible(true);
         // Save current position and snap to highest point
         preKeyboardSnapIndex.current = currentSnapIndex.current;
-        const highestIndex = snapPointsPixels.length - 1;
+        const highestIndex = snapPointsRef.current.length - 1;
         if (currentSnapIndex.current < highestIndex) {
           snapToIndex(highestIndex);
         }
@@ -75,25 +84,30 @@ const DraggableBottomSheet = forwardRef(function DraggableBottomSheet({
       keyboardWillShow.remove();
       keyboardWillHide.remove();
     };
-  }, [snapPointsPixels]);
+  }, []);
+
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
   const snapToIndex = useCallback((index) => {
-    currentSnapIndex.current = index;
+    const pts = snapPointsRef.current;
+    const clampedIndex = Math.min(index, pts.length - 1);
+    currentSnapIndex.current = clampedIndex;
     Animated.spring(translateY, {
-      toValue: snapPointsPixels[index],
+      toValue: pts[clampedIndex],
       useNativeDriver: true,
       tension: 100,
       friction: 12,
     }).start();
-    onChange?.(index);
-  }, [snapPointsPixels, onChange]);
+    onChangeRef.current?.(clampedIndex);
+  }, []);
 
   // Expose snapToIndex method via ref
   useImperativeHandle(ref, () => ({
     snapToIndex,
     collapse: () => snapToIndex(0),
-    expand: () => snapToIndex(snapPointsPixels.length - 1),
-  }), [snapToIndex, snapPointsPixels]);
+    expand: () => snapToIndex(snapPointsRef.current.length - 1),
+  }), [snapToIndex]);
 
   const panResponder = useRef(
     PanResponder.create({
@@ -106,17 +120,19 @@ const DraggableBottomSheet = forwardRef(function DraggableBottomSheet({
       },
       onPanResponderMove: (_, gestureState) => {
         // Clamp the movement within bounds
-        const minY = snapPointsPixels[snapPointsPixels.length - 1]; // Highest point
-        const maxY = snapPointsPixels[0]; // Lowest point
+        const pts = snapPointsRef.current;
+        const minY = pts[pts.length - 1]; // Highest point
+        const maxY = pts[0]; // Lowest point
 
-        translateY.setValue(Math.max(minY - snapPointsPixels[currentSnapIndex.current],
-          Math.min(maxY - snapPointsPixels[currentSnapIndex.current], gestureState.dy)));
+        translateY.setValue(Math.max(minY - pts[currentSnapIndex.current],
+          Math.min(maxY - pts[currentSnapIndex.current], gestureState.dy)));
         lastGestureDy.current = gestureState.dy;
       },
       onPanResponderRelease: (_, gestureState) => {
         translateY.flattenOffset();
 
-        const currentY = snapPointsPixels[currentSnapIndex.current] + gestureState.dy;
+        const pts = snapPointsRef.current;
+        const currentY = pts[currentSnapIndex.current] + gestureState.dy;
         const velocity = gestureState.vy;
 
         // Find the nearest snap point
@@ -127,11 +143,11 @@ const DraggableBottomSheet = forwardRef(function DraggableBottomSheet({
           targetIndex = Math.max(0, currentSnapIndex.current - 1);
         } else if (velocity < -0.5) {
           // Swiping up - go to higher snap point
-          targetIndex = Math.min(snapPointsPixels.length - 1, currentSnapIndex.current + 1);
+          targetIndex = Math.min(pts.length - 1, currentSnapIndex.current + 1);
         } else {
           // Find nearest snap point based on position
           let minDistance = Infinity;
-          snapPointsPixels.forEach((point, index) => {
+          pts.forEach((point, index) => {
             const distance = Math.abs(currentY - point);
             if (distance < minDistance) {
               minDistance = distance;
@@ -153,6 +169,11 @@ const DraggableBottomSheet = forwardRef(function DraggableBottomSheet({
           transform: [{ translateY }],
           paddingBottom: insets.bottom,
         },
+        isFullscreen && {
+          borderTopLeftRadius: 0,
+          borderTopRightRadius: 0,
+          paddingTop: insets.top,
+        },
       ]}
     >
       {/* Floating Button (positioned above the sheet) */}
@@ -162,9 +183,9 @@ const DraggableBottomSheet = forwardRef(function DraggableBottomSheet({
         </View>
       )}
 
-      {/* Handle */}
+      {/* Handle / Header Bar */}
       <View {...panResponder.panHandlers} style={styles.handleContainer}>
-        <View style={styles.handle} />
+        {headerBar || <View style={styles.handle} />}
       </View>
 
       {/* Content */}
@@ -201,6 +222,7 @@ const styles = StyleSheet.create({
   handleContainer: {
     alignItems: 'center',
     paddingVertical: 12,
+    paddingHorizontal: 20,
   },
   handle: {
     width: 40,

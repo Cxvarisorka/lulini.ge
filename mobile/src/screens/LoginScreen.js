@@ -10,6 +10,7 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
+  Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
@@ -67,10 +68,11 @@ export default function LoginScreen({ navigation }) {
       >
         {/* Logo / Brand */}
         <View style={styles.brandContainer}>
-          <View style={styles.logoContainer}>
-            <Ionicons name="car-sport" size={48} color={colors.primary} />
-          </View>
-          <Text style={styles.brandName}>Lulini</Text>
+          <Image
+            source={require('../../assets/logo/png_files_app 512 × 512-26.png')}
+            style={styles.logoImage}
+            resizeMode="contain"
+          />
         </View>
 
         <View style={styles.header}>
@@ -175,23 +177,14 @@ const createStyles = (typography) => StyleSheet.create({
   },
   brandContainer: {
     alignItems: 'center',
-    marginBottom: 32,
-  },
-  logoContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: colors.secondary,
-    justifyContent: 'center',
-    alignItems: 'center',
     marginBottom: 12,
   },
-  brandName: {
-    ...typography.h1,
-    color: colors.foreground,
+  logoImage: {
+    width: 360,
+    height: 170,
   },
   header: {
-    marginBottom: 32,
+    marginBottom: 24,
   },
   title: {
     fontSize: typography.display.fontSize * 1.3,
@@ -219,7 +212,7 @@ const createStyles = (typography) => StyleSheet.create({
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.muted,
     borderRadius: radius.lg,
     paddingHorizontal: 16,
     borderWidth: 1,

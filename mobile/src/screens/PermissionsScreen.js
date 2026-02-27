@@ -1,11 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
@@ -22,7 +21,32 @@ const typography = useTypography();
   const [isLoading, setIsLoading] = useState(false);
   const [locationGranted, setLocationGranted] = useState(null);
   const [notificationsGranted, setNotificationsGranted] = useState(null);
+  const [checkingPermissions, setCheckingPermissions] = useState(true);
   const { completeOnboarding, user } = useAuth();
+
+  // Check if permissions are already granted — auto-skip if so
+  useEffect(() => {
+    (async () => {
+      try {
+        const [locStatus, notifStatus] = await Promise.all([
+          Location.getForegroundPermissionsAsync(),
+          Notifications.getPermissionsAsync(),
+        ]);
+        if (locStatus.status === 'granted' && notifStatus.status === 'granted') {
+          // Permissions already granted, complete onboarding silently
+          await completeOnboarding();
+          return;
+        }
+        // Pre-fill the status icons for already-granted permissions
+        if (locStatus.status === 'granted') setLocationGranted(true);
+        if (notifStatus.status === 'granted') setNotificationsGranted(true);
+      } catch {
+        // Ignore errors, show the screen normally
+      } finally {
+        setCheckingPermissions(false);
+      }
+    })();
+  }, []);
 
   const requestLocationPermission = async () => {
     try {
@@ -69,6 +93,16 @@ const typography = useTypography();
     if (granted === null) return colors.mutedForeground;
     return granted ? colors.primary : colors.destructive;
   };
+
+  if (checkingPermissions) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.content}>
+          <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>

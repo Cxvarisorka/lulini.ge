@@ -134,8 +134,8 @@ export const taxiAPI = {
   requestRide: (data, config) =>
     api.post('/rides', data, config),
 
-  getMyRides: () =>
-    api.get('/rides/my'),
+  getMyRides: (params = {}) =>
+    api.get('/rides/my', { params }),
 
   getRideById: (id) =>
     api.get(`/rides/${id}`),
@@ -148,45 +148,6 @@ export const taxiAPI = {
 
   getNearbyDrivers: (lat, lng, vehicleType) =>
     api.get('/drivers/nearby', { params: { lat, lng, vehicleType } }),
-};
-
-// Rental API
-export const rentalAPI = {
-  getCars: (params) =>
-    api.get('/rentals/cars', { params }),
-
-  getCarById: (id) =>
-    api.get(`/rentals/cars/${id}`),
-
-  getCategories: () =>
-    api.get('/rentals/categories'),
-
-  createBooking: (data) =>
-    api.post('/rentals/bookings', data),
-
-  getMyBookings: () =>
-    api.get('/rentals/my-bookings'),
-
-  getBookingById: (id) =>
-    api.get(`/rentals/bookings/${id}`),
-
-  cancelBooking: (id) =>
-    api.patch(`/rentals/bookings/${id}/cancel`),
-};
-
-// Transfer API (kept for backwards compatibility)
-export const transferAPI = {
-  create: (data) =>
-    api.post('/transfers', data),
-
-  getMyTransfers: () =>
-    api.get('/transfers/my'),
-
-  getById: (id) =>
-    api.get(`/transfers/${id}`),
-
-  cancel: (id) =>
-    api.patch(`/transfers/${id}/cancel`),
 };
 
 export { API_URL };

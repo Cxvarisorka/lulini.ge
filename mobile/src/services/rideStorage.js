@@ -21,6 +21,7 @@ export const persistRideState = async (state) => {
       estimatedDuration: state.estimatedDuration,
       driverLocation: state.driverLocation || null,
       driverName: state.driverName || null,
+      driverVehicle: state.driverVehicle || null,
       savedAt: Date.now(),
     };
     await SecureStore.setItemAsync(RIDE_STATE_KEY, JSON.stringify(payload));

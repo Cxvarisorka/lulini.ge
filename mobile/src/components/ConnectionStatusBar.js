@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { useSocket } from '../context/SocketContext';
 import { useNetwork } from '../context/NetworkContext';
+import { useAuth } from '../context/AuthContext';
 
 // Three-state connectivity indicator:
 //   offline       = no internet (red)
@@ -14,6 +15,7 @@ import { useNetwork } from '../context/NetworkContext';
 const ConnectionStatusBar = () => {
   const { connected: socketConnected } = useSocket();
   const { isInternetReachable } = useNetwork();
+  const { user } = useAuth();
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const slideAnim = useRef(new Animated.Value(-60)).current;
@@ -58,6 +60,9 @@ const ConnectionStatusBar = () => {
       return () => clearTimeout(timer);
     }
   }, [currentState]);
+
+  // Don't show on auth screens
+  if (!user) return null;
 
   if (!visible) return null;
 

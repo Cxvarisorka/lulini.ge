@@ -5,28 +5,55 @@ import { useTranslation } from 'react-i18next';
 import { colors, radius, useTypography } from '../../theme/colors';
 import { searchPlaces } from '../../services/googleMaps';
 
+const MAX_STOPS = 2;
+
 export default function LocationSearchSheet({
   pickup,
   destination,
   onDestinationChange,
   onDestinationSelect,
   onPickupRefresh,
+  onPickupSelect,
   isLoadingLocation,
   userLocation,
-  onSelectOnMap, // New prop for map pin selection
+  onSelectOnMap,
+  stops = [],
+  onAddStop,
+  onRemoveStop,
+  onStopSelect,
 }) {
   const typography = useTypography();
   const styles = React.useMemo(() => createStyles(typography), [typography]);
   const { t } = useTranslation();
   const [searchQuery, setSearchQuery] = useState(destination || '');
+  const [pickupQuery, setPickupQuery] = useState('');
+  const [pickupEdited, setPickupEdited] = useState(false);
   const [suggestions, setSuggestions] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
+  // Track which input is active: 'pickup', 'destination', or stop index (0, 1)
+  const [activeInput, setActiveInput] = useState('destination');
+  const [stopQueries, setStopQueries] = useState({});
   const scrollViewRef = useRef(null);
   const inputRef = useRef(null);
 
-  // Debounce search
+  // Sync pickup address from GPS when not manually edited
   useEffect(() => {
-    if (searchQuery.length < 3) {
+    if (!pickupEdited && pickup?.address) {
+      setPickupQuery(pickup.address);
+    }
+  }, [pickup?.address, pickupEdited]);
+
+  // Get the active search query based on which input is focused
+  const getActiveQuery = () => {
+    if (activeInput === 'pickup') return pickupQuery;
+    if (activeInput === 'destination') return searchQuery;
+    return stopQueries[activeInput] || '';
+  };
+  const activeQuery = getActiveQuery();
+
+  // Debounce search for active input
+  useEffect(() => {
+    if (activeQuery.length < 3) {
       setSuggestions([]);
       return;
     }
@@ -34,56 +61,139 @@ export default function LocationSearchSheet({
     const timer = setTimeout(async () => {
       setIsSearching(true);
       try {
-        const results = await searchPlaces(searchQuery, userLocation);
+        const results = await searchPlaces(activeQuery, userLocation);
         setSuggestions(results);
       } catch (error) {
         setSuggestions([]);
       } finally {
         setIsSearching(false);
       }
-    }, 500); // 500ms debounce to respect Nominatim rate limits
+    }, 500);
 
     return () => clearTimeout(timer);
-  }, [searchQuery, userLocation]);
+  }, [activeQuery, userLocation]);
 
-  // Handle text change
+  // Handle pickup text change
+  const handlePickupTextChange = useCallback((text) => {
+    setPickupQuery(text);
+    setPickupEdited(true);
+    setActiveInput('pickup');
+  }, []);
+
+  // Handle destination text change
   const handleTextChange = useCallback((text) => {
     setSearchQuery(text);
+    setActiveInput('destination');
+  }, []);
+
+  // Handle stop text change
+  const handleStopTextChange = useCallback((index, text) => {
+    setStopQueries(prev => ({ ...prev, [index]: text }));
+    setActiveInput(index);
   }, []);
 
   // Handle place selection from suggestions
   const handlePlaceSelect = useCallback((place) => {
     Keyboard.dismiss();
-    setSearchQuery(place.description);
     setSuggestions([]);
-    // Nominatim always returns coordinates
-    if (place.coordinates) {
-      onDestinationSelect(place.description, place.coordinates);
-    } else {
-      onDestinationChange(place.description);
-    }
-  }, [onDestinationSelect, onDestinationChange]);
 
-  // Handle manual submit (when typing address without selecting)
+    if (activeInput === 'pickup') {
+      setPickupQuery(place.description);
+      setPickupEdited(true);
+      if (onPickupSelect && place.coordinates) {
+        onPickupSelect(place.description, place.coordinates);
+      }
+    } else if (activeInput === 'destination') {
+      setSearchQuery(place.description);
+      if (place.coordinates) {
+        onDestinationSelect(place.description, place.coordinates);
+      } else {
+        onDestinationChange(place.description);
+      }
+    } else {
+      // Stop selection
+      const stopIndex = activeInput;
+      setStopQueries(prev => ({ ...prev, [stopIndex]: place.description }));
+      if (onStopSelect) {
+        onStopSelect(stopIndex, place.description, place.coordinates || null);
+      }
+    }
+  }, [activeInput, onPickupSelect, onDestinationSelect, onDestinationChange, onStopSelect]);
+
+  // Handle manual submit
   const handleSubmit = useCallback(() => {
-    if (searchQuery.length > 3) {
+    if (activeInput === 'destination' && searchQuery.length > 3) {
       Keyboard.dismiss();
       setSuggestions([]);
       onDestinationChange(searchQuery);
     }
-  }, [searchQuery, onDestinationChange]);
+  }, [activeInput, searchQuery, onDestinationChange]);
+
+  // Handle removing a stop
+  const handleRemoveStop = useCallback((index) => {
+    setStopQueries(prev => {
+      const updated = {};
+      Object.keys(prev).forEach(key => {
+        const k = parseInt(key);
+        if (k < index) updated[k] = prev[k];
+        else if (k > index) updated[k - 1] = prev[k];
+      });
+      return updated;
+    });
+    if (activeInput === index) {
+      setActiveInput('destination');
+    } else if (typeof activeInput === 'number' && activeInput > index) {
+      setActiveInput(activeInput - 1);
+    }
+    setSuggestions([]);
+    if (onRemoveStop) onRemoveStop(index);
+  }, [activeInput, onRemoveStop]);
+
+  // Reset pickup to GPS location
+  const handlePickupReset = useCallback(() => {
+    setPickupEdited(false);
+    setPickupQuery(pickup?.address || '');
+    setSuggestions([]);
+    if (onPickupRefresh) onPickupRefresh();
+  }, [pickup?.address, onPickupRefresh]);
 
   const recentPlaces = [
     { id: 1, name: t('taxi.home'), address: 'Tsereteli Street, Kutaisi', icon: 'home-outline' },
     { id: 2, name: t('taxi.work'), address: 'Kutaisi Central Park, Kutaisi', icon: 'briefcase-outline' },
   ];
 
-  // Scroll to top when input is focused to ensure visibility
   const handleInputFocus = useCallback(() => {
     setTimeout(() => {
       scrollViewRef.current?.scrollTo({ y: 0, animated: true });
     }, 100);
   }, []);
+
+  const handlePickupFocus = useCallback(() => {
+    setPickupQuery('');
+    setPickupEdited(true);
+    setActiveInput('pickup');
+    setSuggestions([]);
+    handleInputFocus();
+  }, [handleInputFocus]);
+
+  const handlePickupBlur = useCallback(() => {
+    // If user left the field empty, restore the GPS address
+    if (!pickupQuery.trim()) {
+      setPickupQuery(pickup?.address || '');
+      setPickupEdited(false);
+    }
+  }, [pickupQuery, pickup?.address]);
+
+  const handleStopInputFocus = useCallback((index) => {
+    setActiveInput(index);
+    setSuggestions([]);
+  }, []);
+
+  const handleDestinationFocus = useCallback(() => {
+    setActiveInput('destination');
+    setSuggestions([]);
+    handleInputFocus();
+  }, [handleInputFocus]);
 
   return (
     <ScrollView
@@ -98,22 +208,84 @@ export default function LocationSearchSheet({
         <View style={styles.inputWrapper}>
           {/* Dot Indicators */}
           <View style={styles.dotIndicator}>
-            <View style={[styles.dot, styles.greenDot]} />
+            <View style={styles.pulsingDotWrapper}>
+              <View style={styles.pulsingRing} />
+              <View style={[styles.dot, styles.purpleDot]} />
+            </View>
             <View style={styles.dotLine} />
-            <View style={[styles.dot, styles.redDot]} />
+            {stops.map((_, index) => (
+              <React.Fragment key={`stop-dot-${index}`}>
+                <View style={[styles.dot, styles.purpleDot]} />
+                <View style={styles.dotLine} />
+              </React.Fragment>
+            ))}
+            <View style={[styles.dot, styles.purpleDot]} />
           </View>
 
           <View style={styles.inputsColumn}>
-            {/* Pickup Location (Current Location) */}
-            <TouchableOpacity style={styles.locationInput} onPress={onPickupRefresh}>
-              <Text style={styles.locationLabel}>{t('taxi.currentLocation')}</Text>
-              <View style={styles.locationTextRow}>
-                <Text style={styles.locationText} numberOfLines={1}>
-                  {isLoadingLocation ? t('taxi.gettingLocation') : (pickup?.address || t('taxi.gettingLocation'))}
-                </Text>
-                <Ionicons name="refresh" size={16} color={colors.mutedForeground} />
+            {/* Pickup Location */}
+            <View style={styles.pickupContainer}>
+              <Text style={styles.locationLabel}>{t('taxi.pickup')}</Text>
+              <View style={styles.inputRow}>
+                <TextInput
+                  style={styles.destinationInput}
+                  placeholder={isLoadingLocation ? t('taxi.gettingLocation') : t('taxi.currentLocation')}
+                  placeholderTextColor={colors.mutedForeground}
+                  value={pickupQuery}
+                  onChangeText={handlePickupTextChange}
+                  onFocus={handlePickupFocus}
+                  onBlur={handlePickupBlur}
+                  autoCorrect={false}
+                  autoCapitalize="words"
+                  returnKeyType="next"
+                  blurOnSubmit={true}
+                />
+                {activeInput === 'pickup' && isSearching && (
+                  <ActivityIndicator size="small" color={colors.primary} style={styles.searchingIndicator} />
+                )}
+                <TouchableOpacity
+                  onPress={handlePickupReset}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  style={styles.refreshButton}
+                >
+                  <Ionicons name="locate" size={18} color={colors.mutedForeground} />
+                </TouchableOpacity>
               </View>
-            </TouchableOpacity>
+            </View>
+
+            {/* Stop Inputs */}
+            {stops.map((stop, index) => (
+              <React.Fragment key={`stop-input-${index}`}>
+                <View style={styles.inputDivider} />
+                <View style={styles.stopContainer}>
+                  <Text style={styles.locationLabel}>{t('taxi.stop')} {index + 1}</Text>
+                  <View style={styles.inputRow}>
+                    <TextInput
+                      style={styles.destinationInput}
+                      placeholder={t('taxi.enterStopAddress')}
+                      placeholderTextColor={colors.mutedForeground}
+                      value={stopQueries[index] !== undefined ? stopQueries[index] : stop.address}
+                      onChangeText={(text) => handleStopTextChange(index, text)}
+                      onFocus={() => handleStopInputFocus(index)}
+                      autoCorrect={false}
+                      autoCapitalize="words"
+                      returnKeyType="search"
+                      blurOnSubmit={true}
+                    />
+                    {activeInput === index && isSearching && (
+                      <ActivityIndicator size="small" color={colors.primary} style={styles.searchingIndicator} />
+                    )}
+                    <TouchableOpacity
+                      style={styles.removeStopButton}
+                      onPress={() => handleRemoveStop(index)}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <Ionicons name="close-circle" size={20} color={colors.mutedForeground} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </React.Fragment>
+            ))}
 
             <View style={styles.inputDivider} />
 
@@ -128,7 +300,7 @@ export default function LocationSearchSheet({
                   placeholderTextColor={colors.mutedForeground}
                   value={searchQuery}
                   onChangeText={handleTextChange}
-                  onFocus={handleInputFocus}
+                  onFocus={handleDestinationFocus}
                   selectTextOnFocus={false}
                   autoCorrect={false}
                   autoCapitalize="words"
@@ -136,13 +308,22 @@ export default function LocationSearchSheet({
                   blurOnSubmit={true}
                   onSubmitEditing={handleSubmit}
                 />
-                {isSearching && (
+                {activeInput === 'destination' && isSearching && (
                   <ActivityIndicator size="small" color={colors.primary} style={styles.searchingIndicator} />
+                )}
+                {stops.length < MAX_STOPS && onAddStop && (
+                  <TouchableOpacity
+                    style={styles.addStopButton}
+                    onPress={onAddStop}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Ionicons name="add-circle" size={20} color={colors.mutedForeground} />
+                  </TouchableOpacity>
                 )}
               </View>
 
               {/* Search button (show when no suggestions and query is long enough) */}
-              {searchQuery.length > 3 && suggestions.length === 0 && !isSearching && (
+              {activeInput === 'destination' && searchQuery.length > 3 && suggestions.length === 0 && !isSearching && (
                 <TouchableOpacity style={styles.searchButton} onPress={handleSubmit}>
                   <Ionicons name="search" size={18} color={colors.background} />
                   <Text style={styles.searchButtonText}>{t('common.search')}</Text>
@@ -260,11 +441,23 @@ const createStyles = (typography) => StyleSheet.create({
     height: 10,
     borderRadius: 5,
   },
-  greenDot: {
-    backgroundColor: colors.success,
+  purpleDot: {
+    backgroundColor: colors.primary,
   },
-  redDot: {
-    backgroundColor: colors.destructive,
+  pulsingDotWrapper: {
+    width: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  pulsingRing: {
+    position: 'absolute',
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: colors.primary,
+    opacity: 0.3,
   },
   dotLine: {
     width: 2,
@@ -276,7 +469,7 @@ const createStyles = (typography) => StyleSheet.create({
     flex: 1,
     marginLeft: 8,
   },
-  locationInput: {
+  pickupContainer: {
     paddingVertical: 12,
   },
   locationLabel: {
@@ -284,16 +477,9 @@ const createStyles = (typography) => StyleSheet.create({
     color: colors.mutedForeground,
     marginBottom: 4,
   },
-  locationTextRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  locationText: {
-    ...typography.bodyMedium,
-    color: colors.foreground,
-    flex: 1,
-    marginRight: 8,
+  refreshButton: {
+    marginLeft: 8,
+    padding: 2,
   },
   inputDivider: {
     height: 1,
@@ -301,6 +487,9 @@ const createStyles = (typography) => StyleSheet.create({
   },
   destinationContainer: {
     paddingVertical: 12,
+  },
+  stopContainer: {
+    paddingVertical: 10,
   },
   inputRow: {
     flexDirection: 'row',
@@ -315,6 +504,14 @@ const createStyles = (typography) => StyleSheet.create({
   },
   searchingIndicator: {
     marginLeft: 8,
+  },
+  addStopButton: {
+    marginLeft: 8,
+    padding: 2,
+  },
+  removeStopButton: {
+    marginLeft: 8,
+    padding: 2,
   },
   searchButton: {
     flexDirection: 'row',

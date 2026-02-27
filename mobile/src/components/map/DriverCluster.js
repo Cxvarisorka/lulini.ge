@@ -31,11 +31,11 @@ function clusterDrivers(drivers, zoomLevel) {
 
   // Don't cluster when zoomed in or few drivers
   if (zoomLevel > CLUSTER_ZOOM_THRESHOLD || drivers.length < MIN_DRIVERS_TO_CLUSTER) {
-    return drivers.map((d) => ({
+    return drivers.map((d, i) => ({
       // Coordinate-based key (5-decimal ~ 1m) prevents marker flicker when
-      // the driver array reorders between API fetches. Index-based keys cause
-      // React to unmount/remount markers when array order changes.
-      key: `d-${(d.lat * 100000 | 0)}_${(d.lng * 100000 | 0)}`,
+      // the driver array reorders between API fetches. Index suffix is a
+      // tiebreaker for drivers at the same location (same rounded coords).
+      key: `d-${(d.lat * 100000 | 0)}_${(d.lng * 100000 | 0)}_${i}`,
       lat: d.lat,
       lng: d.lng,
       isCluster: false,

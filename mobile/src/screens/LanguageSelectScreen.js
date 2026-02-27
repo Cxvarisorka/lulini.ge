@@ -15,8 +15,6 @@ import { colors, shadows, radius, useTypography } from '../theme/colors';
 // Country flag emoji helper
 const FLAGS = {
   GB: 'GB',
-  ES: 'ES',
-  RU: 'RU',
   GE: 'GE',
 };
 

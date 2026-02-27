@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef, useMemo } from 'react';
 import { io } from 'socket.io-client';
 import * as SecureStore from 'expo-secure-store';
 import * as Location from 'expo-location';
@@ -16,39 +16,47 @@ export const SocketProvider = ({ children }) => {
   const { user, isAuthenticated } = useAuth();
   const { onReconnect } = useNetwork();
 
-  // Stable user ID ref — prevents socket churn when user object reference
-  // changes (e.g., refreshUser() returns a new object with same _id).
-  const userIdRef = useRef(null);
   const userId = user?._id || user?.id;
 
+  // Keep a ref to the current socket so we can disconnect it reliably,
+  // even when the async connect hasn't finished before cleanup runs.
+  const socketRef = useRef(null);
+
   useEffect(() => {
-    let socketInstance = null;
+    // Guard: prevent stale async completions from mutating state after cleanup
+    let cancelled = false;
 
     const connectSocket = async () => {
       if (!isAuthenticated || !userId) {
-        if (socketInstance) {
-          socketInstance.disconnect();
+        // Disconnect any existing socket
+        if (socketRef.current) {
+          socketRef.current.disconnect();
+          socketRef.current = null;
+        }
+        if (!cancelled) {
           setSocket(null);
           setConnected(false);
         }
-        userIdRef.current = null;
         return;
       }
 
-      // Skip reconnection if userId hasn't actually changed
-      if (userIdRef.current === userId && socket?.connected) {
+      // If the same user already has a connected socket, skip
+      if (socketRef.current?.connected && socketRef.current._userId === userId) {
         return;
       }
-      userIdRef.current = userId;
+
+      // Disconnect previous socket before creating a new one
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
+      }
 
       try {
         const token = await SecureStore.getItemAsync('token');
+        // Bail out if effect was cleaned up while we were awaiting
+        if (cancelled || !token) return;
 
-        if (!token) {
-          return;
-        }
-
-        socketInstance = io(API_URL, {
+        const socketInstance = io(API_URL, {
           transports: ['websocket', 'polling'],
           auth: { token },
           reconnection: true,
@@ -57,18 +65,28 @@ export const SocketProvider = ({ children }) => {
           reconnectionDelayMax: 10000,
         });
 
+        // Tag with userId so we can detect stale sockets later
+        socketInstance._userId = userId;
+
         socketInstance.on('connect', () => {
-          setConnected(true);
+          if (!cancelled) setConnected(true);
         });
 
         socketInstance.on('disconnect', () => {
-          setConnected(false);
+          if (!cancelled) setConnected(false);
         });
 
         socketInstance.on('connect_error', (error) => {
           console.warn('[Socket] Connection error:', error.message);
         });
 
+        // If cleanup ran while we were awaiting, kill this socket immediately
+        if (cancelled) {
+          socketInstance.disconnect();
+          return;
+        }
+
+        socketRef.current = socketInstance;
         setSocket(socketInstance);
       } catch (error) {
         console.error('[Socket] Failed to set up socket:', error.message);
@@ -78,8 +96,10 @@ export const SocketProvider = ({ children }) => {
     connectSocket();
 
     return () => {
-      if (socketInstance) {
-        socketInstance.disconnect();
+      cancelled = true;
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
       }
     };
   }, [isAuthenticated, userId]);
@@ -88,9 +108,10 @@ export const SocketProvider = ({ children }) => {
   // and emit fresh passenger location so the server/driver has current coords
   useEffect(() => {
     const unsubscribe = onReconnect(async () => {
+      const s = socketRef.current;
       // Nudge socket reconnection if it hasn't auto-recovered yet
-      if (socket && !socket.connected) {
-        socket.connect();
+      if (s && !s.connected) {
+        s.connect();
       }
 
       // Emit fresh passenger location on reconnect
@@ -100,8 +121,8 @@ export const SocketProvider = ({ children }) => {
           const pos = await Location.getCurrentPositionAsync({
             accuracy: Location.Accuracy.Balanced,
           });
-          if (socket?.connected) {
-            socket.emit('user:locationUpdate', {
+          if (socketRef.current?.connected) {
+            socketRef.current.emit('user:locationUpdate', {
               latitude: pos.coords.latitude,
               longitude: pos.coords.longitude,
             });
@@ -113,10 +134,14 @@ export const SocketProvider = ({ children }) => {
     });
 
     return unsubscribe;
-  }, [socket, onReconnect]);
+  }, [onReconnect]);
+
+  // Memoize context value — consumers only re-render when socket or connected
+  // actually change, not on every SocketProvider render.
+  const value = useMemo(() => ({ socket, connected }), [socket, connected]);
 
   return (
-    <SocketContext.Provider value={{ socket, connected }}>
+    <SocketContext.Provider value={value}>
       {children}
     </SocketContext.Provider>
   );

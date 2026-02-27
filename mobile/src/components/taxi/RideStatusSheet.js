@@ -31,6 +31,7 @@ export default function RideStatusSheet({
   currentRide,
   estimatedPrice,
   estimatedDuration,
+  totalDistance,
   progress,
   driverETA,
   driverDistance,
@@ -101,7 +102,9 @@ export default function RideStatusSheet({
             </View>
             <View style={styles.driverInfoMain}>
               <Text style={styles.driverName} numberOfLines={1}>
-                {currentRide.driver.user?.firstName} {currentRide.driver.user?.lastName}
+                {[currentRide.driver.user?.firstName, currentRide.driver.user?.lastName].filter(Boolean).join(' ')
+                  || currentRide.driver.user?.fullName
+                  || t('taxi.driver')}
               </Text>
               <View style={styles.driverRatingRow}>
                 <Ionicons name="star" size={14} color="#FFA500" />
@@ -229,8 +232,12 @@ export default function RideStatusSheet({
         <View style={styles.rideDetailItem}>
           <Text style={styles.rideDetailLabel}>{t('taxi.estimatedFare')}</Text>
           <Text style={styles.rideDetailValue}>
-            ${estimatedPrice}{waitingFee > 0 ? ` (+$${waitingFee.toFixed(2)})` : ''}
+            {estimatedPrice}{waitingFee > 0 ? ` (+${waitingFee.toFixed(2)})` : ''} ₾
           </Text>
+        </View>
+        <View style={styles.rideDetailItem}>
+          <Text style={styles.rideDetailLabel}>{t('taxi.distance')}</Text>
+          <Text style={styles.rideDetailValue}>{totalDistance || '—'} {t('taxi.km')}</Text>
         </View>
         <View style={styles.rideDetailItem}>
           <Text style={styles.rideDetailLabel}>{t('taxi.duration')}</Text>

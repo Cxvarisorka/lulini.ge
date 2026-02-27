@@ -10,50 +10,34 @@ export default function PaymentMethodSelector({ selected, onSelect }) {
   return (
     <View style={styles.container}>
       <TouchableOpacity
-        style={[
-          styles.paymentOption,
-          selected === 'cash' && styles.paymentOptionSelected,
-        ]}
+        style={[styles.paymentOption, selected === 'cash' && styles.paymentOptionSelected]}
         onPress={() => onSelect('cash')}
       >
         <Ionicons
           name="cash-outline"
-          size={20}
+          size={18}
           color={selected === 'cash' ? colors.primary : colors.mutedForeground}
         />
         <Text
-          style={[
-            styles.paymentText,
-            selected === 'cash' && styles.paymentTextSelected,
-          ]}
+          style={[styles.paymentText, selected === 'cash' && styles.paymentTextSelected]}
           numberOfLines={1}
-          adjustsFontSizeToFit
-          minimumFontScale={0.8}
         >
           {t('taxi.cash')}
         </Text>
       </TouchableOpacity>
 
       <TouchableOpacity
-        style={[
-          styles.paymentOption,
-          selected === 'card' && styles.paymentOptionSelected,
-        ]}
+        style={[styles.paymentOption, selected === 'card' && styles.paymentOptionSelected]}
         onPress={() => onSelect('card')}
       >
         <Ionicons
           name="card-outline"
-          size={20}
+          size={18}
           color={selected === 'card' ? colors.primary : colors.mutedForeground}
         />
         <Text
-          style={[
-            styles.paymentText,
-            selected === 'card' && styles.paymentTextSelected,
-          ]}
+          style={[styles.paymentText, selected === 'card' && styles.paymentTextSelected]}
           numberOfLines={1}
-          adjustsFontSizeToFit
-          minimumFontScale={0.8}
         >
           {t('taxi.card')}
         </Text>
@@ -65,26 +49,24 @@ export default function PaymentMethodSelector({ selected, onSelect }) {
 const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
+    gap: 10,
   },
   paymentOption: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 12,
-    marginHorizontal: 4,
-    borderRadius: radius.lg,
-    backgroundColor: colors.background,
-    borderWidth: 2,
-    borderColor: colors.primary,
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   paymentOptionSelected: {
     borderColor: colors.primary,
-    backgroundColor: colors.background,
-    borderWidth: 3,
   },
   paymentText: {
-    marginLeft: 8,
     fontSize: 14,
     color: colors.mutedForeground,
   },

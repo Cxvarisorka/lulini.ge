@@ -236,7 +236,7 @@ const createStyles = (typography) => StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.muted,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 24,
@@ -274,7 +274,7 @@ const createStyles = (typography) => StyleSheet.create({
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.muted,
     borderRadius: radius.lg,
     paddingHorizontal: 16,
     borderWidth: 1,

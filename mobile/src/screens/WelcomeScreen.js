@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
+  Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
@@ -42,6 +43,10 @@ const typography = useTypography();
     }
   };
 
+  const handleEmailLogin = () => {
+    navigation.navigate('Login');
+  };
+
   const handlePhoneLogin = () => {
     navigation.navigate('PhoneAuth');
   };
@@ -53,10 +58,11 @@ const typography = useTypography();
       <View style={styles.content}>
         {/* Logo / Brand */}
         <View style={styles.brandContainer}>
-          <View style={styles.logoContainer}>
-            <Ionicons name="car-sport" size={48} color={colors.primary} />
-          </View>
-          <Text style={styles.brandName}>Lulini</Text>
+          <Image
+            source={require('../../assets/logo/png_files_app 512 × 512-26.png')}
+            style={styles.logoImage}
+            resizeMode="contain"
+          />
         </View>
 
         <View style={styles.header}>
@@ -107,14 +113,24 @@ const typography = useTypography();
             <View style={styles.divider} />
           </View>
 
-          {/* Phone Sign-In */}
+          {/* Email Sign-In */}
           <TouchableOpacity
             style={[styles.phoneButton, isLoading && styles.buttonDisabled]}
+            onPress={handleEmailLogin}
+            disabled={isLoading}
+          >
+            <Ionicons name="mail-outline" size={22} color={colors.primaryForeground} />
+            <Text style={styles.phoneButtonText}>{t('auth.continueWithEmail')}</Text>
+          </TouchableOpacity>
+
+          {/* Phone Sign-In */}
+          <TouchableOpacity
+            style={[styles.secondaryButton, isLoading && styles.buttonDisabled]}
             onPress={handlePhoneLogin}
             disabled={isLoading}
           >
-            <Ionicons name="call-outline" size={22} color={colors.primaryForeground} />
-            <Text style={styles.phoneButtonText}>{t('auth.continueWithPhone')}</Text>
+            <Ionicons name="call-outline" size={22} color={colors.foreground} />
+            <Text style={styles.secondaryButtonText}>{t('auth.continueWithPhone')}</Text>
           </TouchableOpacity>
         </View>
 
@@ -135,36 +151,25 @@ const createStyles = (typography) => StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     padding: 24,
+    paddingBottom: 48,
   },
   brandContainer: {
     alignItems: 'center',
-    marginBottom: 40,
+    marginBottom: -8,
   },
-  logoContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: colors.secondary,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  brandName: {
-    ...typography.h1,
-    fontSize: typography.h1.fontSize * 1.2,
-    fontWeight: '700',
-    color: colors.foreground,
+  logoImage: {
+    width: 400,
+    height: 190,
   },
   header: {
     alignItems: 'center',
-    marginBottom: 40,
+    marginBottom: 28,
   },
   title: {
-    ...typography.display,
-    fontSize: typography.display.fontSize * 1.4,
+    ...typography.h1,
     fontWeight: '700',
     color: colors.foreground,
-    marginBottom: 8,
+    marginBottom: 6,
     textAlign: 'center',
   },
   subtitle: {
@@ -228,6 +233,22 @@ const createStyles = (typography) => StyleSheet.create({
   phoneButtonText: {
     ...typography.h2,
     color: colors.primaryForeground,
+    marginLeft: 12,
+  },
+  secondaryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.background,
+    borderRadius: radius.lg,
+    padding: 16,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  secondaryButtonText: {
+    ...typography.h2,
+    color: colors.foreground,
     marginLeft: 12,
   },
   termsText: {

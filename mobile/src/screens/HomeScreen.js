@@ -19,7 +19,7 @@ import { useDrawer } from '../navigation/AppNavigator';
 import { colors, radius, spacing, useTypography } from '../theme/colors';
 
 // Animated Card Component
-const AnimatedCard = ({ children, style, delay = 0, onPress, activeOpacity = 0.85 }) => {
+const AnimatedCard = ({ children, style, delay = 0, onPress }) => {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
   const scaleAnim = useRef(new Animated.Value(1)).current;
@@ -45,16 +45,18 @@ const AnimatedCard = ({ children, style, delay = 0, onPress, activeOpacity = 0.8
 
   const handlePressIn = () => {
     Animated.spring(scaleAnim, {
-      toValue: 0.96,
+      toValue: 0.98,
       useNativeDriver: true,
+      friction: 8,
+      tension: 100,
     }).start();
   };
 
   const handlePressOut = () => {
     Animated.spring(scaleAnim, {
       toValue: 1,
-      friction: 3,
-      tension: 40,
+      friction: 8,
+      tension: 100,
       useNativeDriver: true,
     }).start();
   };
@@ -74,7 +76,7 @@ const AnimatedCard = ({ children, style, delay = 0, onPress, activeOpacity = 0.8
           onPress={onPress}
           onPressIn={handlePressIn}
           onPressOut={handlePressOut}
-          activeOpacity={activeOpacity}
+          activeOpacity={1}
         >
           {children}
         </TouchableOpacity>
@@ -172,7 +174,7 @@ export default function HomeScreen({ navigation }) {
           styles.scrollContent,
           {
             paddingTop: insets.top + spacing.md,
-            paddingBottom: insets.bottom + spacing.xl + 80,
+            paddingBottom: insets.bottom + spacing.xl,
           },
         ]}
         showsVerticalScrollIndicator={false}
@@ -430,11 +432,6 @@ const createStyles = (typography) => StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: spacing.sm,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.15,
-    shadowRadius: 2,
-    elevation: 2,
   },
   ctaTitle: {
     ...typography.h1,
@@ -455,11 +452,6 @@ const createStyles = (typography) => StyleSheet.create({
     paddingVertical: spacing.md,
     borderRadius: radius.lg,
     gap: spacing.sm,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 1,
   },
   ctaButtonText: {
     ...typography.button,

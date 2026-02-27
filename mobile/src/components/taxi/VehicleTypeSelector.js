@@ -11,39 +11,36 @@ const VEHICLE_TYPES = [
 ];
 
 export default function VehicleTypeSelector({ selectedVehicle, onSelect }) {
-const typography = useTypography();
+  const typography = useTypography();
   const styles = React.useMemo(() => createStyles(typography), [typography]);
-    const { t } = useTranslation();
+  const { t } = useTranslation();
 
   return (
     <View style={styles.container}>
-      {VEHICLE_TYPES.map((vehicle) => (
-        <TouchableOpacity
-          key={vehicle.id}
-          style={[
-            styles.vehicleCard,
-            selectedVehicle === vehicle.id && styles.vehicleCardSelected,
-          ]}
-          onPress={() => onSelect(vehicle.id)}
-        >
-          <View style={[
-            styles.vehicleIconContainer,
-            selectedVehicle === vehicle.id && styles.vehicleIconContainerSelected,
-          ]}>
+      {VEHICLE_TYPES.map((vehicle) => {
+        const isSelected = selectedVehicle === vehicle.id;
+        return (
+          <TouchableOpacity
+            key={vehicle.id}
+            style={[styles.vehicleCard, isSelected && styles.vehicleCardSelected]}
+            onPress={() => onSelect(vehicle.id)}
+          >
             <Ionicons
               name={vehicle.icon}
-              size={28}
-              color={selectedVehicle === vehicle.id ? colors.background : colors.primary}
+              size={22}
+              color={isSelected ? colors.primary : colors.mutedForeground}
             />
-          </View>
-          <Text style={[
-            styles.vehicleName,
-            selectedVehicle === vehicle.id && styles.vehicleNameSelected,
-          ]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
-            {t(`taxi.${vehicle.id}`)}
-          </Text>
-        </TouchableOpacity>
-      ))}
+            <Text
+              style={[styles.vehicleName, isSelected && styles.vehicleNameSelected]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.8}
+            >
+              {t(`taxi.${vehicle.id}`)}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
     </View>
   );
 }
@@ -53,38 +50,25 @@ export { VEHICLE_TYPES };
 const createStyles = (typography) => StyleSheet.create({
   container: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    gap: 10,
   },
   vehicleCard: {
     flex: 1,
+    flexDirection: 'row',
     alignItems: 'center',
-    padding: 12,
-    marginHorizontal: 4,
-    borderRadius: radius.lg,
-    backgroundColor: colors.background,
-    borderWidth: 2,
-    borderColor: colors.primary,
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   vehicleCardSelected: {
     borderColor: colors.primary,
-    backgroundColor: colors.background,
-    borderWidth: 3,
-  },
-  vehicleIconContainer: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: colors.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  vehicleIconContainerSelected: {
-    backgroundColor: colors.primary,
   },
   vehicleName: {
-    ...typography.caption,
-    fontWeight: '500',
+    ...typography.bodySmall,
     color: colors.mutedForeground,
   },
   vehicleNameSelected: {

@@ -117,13 +117,17 @@ const AnimatedCarMarker = memo(
       );
       lastUpdateTime.current = now;
 
-      try {
-        markerRef.current?.animateMarkerToCoordinate?.(
-          { latitude: lat, longitude: lng },
-          duration
-        );
-      } catch {
-        // Fallback: coordinate prop updates on next render via prevCoord
+      // animateMarkerToCoordinate is only available on Android (Google Maps).
+      // On iOS (Apple Maps) it throws a native bridge error, so skip it entirely.
+      if (Platform.OS === 'android') {
+        try {
+          markerRef.current?.animateMarkerToCoordinate?.(
+            { latitude: lat, longitude: lng },
+            duration
+          );
+        } catch {
+          // Fallback: coordinate prop updates on next render via prevCoord
+        }
       }
 
       // === HEADING / ROTATION ===
