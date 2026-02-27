@@ -74,6 +74,10 @@ export default {
           color: "#171717"
         }
       ],
+      ['@sentry/react-native/expo', {
+        organization: 'cryptalyst',
+        project: 'mobile-client',
+      }],
     ],
     extra: {
       googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY || "",

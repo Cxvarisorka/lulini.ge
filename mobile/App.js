@@ -6,6 +6,19 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { I18nextProvider } from 'react-i18next';
 import * as Notifications from 'expo-notifications';
 import * as Updates from 'expo-updates';
+import * as Sentry from '@sentry/react-native';
+
+// Initialize Sentry — wrapped in try-catch because the native module may not
+// be linked yet (stale prebuild, Expo Go, or first build after adding Sentry).
+try {
+  Sentry.init({
+    dsn: process.env.EXPO_PUBLIC_SENTRY_DSN || '',
+    enabled: !__DEV__ && !!process.env.EXPO_PUBLIC_SENTRY_DSN,
+    tracesSampleRate: 0,
+  });
+} catch (e) {
+  console.warn('[Sentry] Init failed (native module not available):', e.message);
+}
 
 // Ride events already handled by socket listeners in TaxiScreen (Alert.alert).
 // Suppress SERVER push notifications for these to avoid duplicate alerts.

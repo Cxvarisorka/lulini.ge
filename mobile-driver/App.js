@@ -7,15 +7,17 @@ import { I18nextProvider } from 'react-i18next';
 import * as Notifications from 'expo-notifications';
 import * as Sentry from '@sentry/react-native';
 
-// Initialize Sentry — the @sentry/react-native/expo config plugin compiles
-// native crash handlers into the iOS/Android binary. Without calling init(),
-// the native module is left uninitialised which causes iOS crashes from
-// unmanaged signal handlers.
-Sentry.init({
-  dsn: process.env.EXPO_PUBLIC_SENTRY_DSN || '',
-  enabled: !__DEV__ && !!process.env.EXPO_PUBLIC_SENTRY_DSN,
-  tracesSampleRate: 0,
-});
+// Initialize Sentry — wrapped in try-catch because the native module may not
+// be linked yet (stale prebuild, Expo Go, or first build after adding Sentry).
+try {
+  Sentry.init({
+    dsn: process.env.EXPO_PUBLIC_SENTRY_DSN || '',
+    enabled: !__DEV__ && !!process.env.EXPO_PUBLIC_SENTRY_DSN,
+    tracesSampleRate: 0,
+  });
+} catch (e) {
+  console.warn('[Sentry] Init failed (native module not available):', e.message);
+}
 
 // Register background location task (must happen at module load, outside React tree)
 import './src/services/backgroundLocation';
