@@ -1,12 +1,26 @@
 const rateLimit = require('express-rate-limit');
 
-// Global: 200 requests per 15 min per IP
+// Global: 1500 requests per 15 min per IP
+// Real-time apps (driver location every 5s + polling + API calls) need generous limits.
+// Specific stricter limits are applied per-route for sensitive endpoints.
 const globalLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 200,
+    max: 1500,
     standardHeaders: true,
     legacyHeaders: false,
+    // Skip rate limiting for high-frequency driver location updates
+    // (they have their own per-route limiter)
+    skip: (req) => req.path === '/api/drivers/location/batch' || req.path === '/api/drivers/location',
     message: { success: false, message: 'Too many requests, please try again later' }
+});
+
+// Driver location updates: 30 per minute per IP (one every 2s — generous for batch endpoint)
+const driverLocationLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { success: false, message: 'Too many location updates, please slow down' }
 });
 
 // Auth (login/register): 10 per 15 min per IP
@@ -50,5 +64,6 @@ module.exports = {
     authLimiter,
     otpSendLimiter,
     otpVerifyLimiter,
-    rideCreateLimiter
+    rideCreateLimiter,
+    driverLocationLimiter
 };

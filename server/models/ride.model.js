@@ -61,6 +61,14 @@ const rideSchema = new mongoose.Schema({
         type: locationSchema,
         required: [true, 'Dropoff location is required']
     },
+    stops: {
+        type: [locationSchema],
+        default: [],
+        validate: {
+            validator: function(v) { return v.length <= 2; },
+            message: 'Maximum 2 additional stops allowed'
+        }
+    },
     vehicleType: {
         type: String,
         enum: ['economy', 'comfort', 'business', 'van', 'minibus'],

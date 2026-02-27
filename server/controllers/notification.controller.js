@@ -7,7 +7,7 @@ const AppError = require('../utils/AppError');
 // @route   POST /api/notifications/register-token
 // @access  Private
 const registerToken = catchAsync(async (req, res, next) => {
-    const { token, platform, language } = req.body;
+    const { token, platform, language, app } = req.body;
 
     if (!token || !platform) {
         return next(new AppError('Token and platform are required', 400));
@@ -40,7 +40,7 @@ const registerToken = catchAsync(async (req, res, next) => {
 
     await User.updateOne(
         { _id: req.user.id },
-        { $push: { deviceTokens: { token, platform } } }
+        { $push: { deviceTokens: { token, platform, app: app || 'passenger' } } }
     );
 
     // Also remove this token from any other user (device changed owner)

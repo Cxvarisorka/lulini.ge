@@ -79,6 +79,30 @@ async function sendWithRetry(chunks, attempt = 0) {
 }
 
 /**
+ * Group messages by app (Expo project) and send each group separately.
+ * Expo API requires all tokens in a single request to belong to the same project.
+ * Strips the internal _app field before sending.
+ */
+async function sendGroupedByApp(messages) {
+    const groups = new Map();
+    for (const msg of messages) {
+        const app = msg._app || 'passenger';
+        if (!groups.has(app)) groups.set(app, []);
+        groups.get(app).push(msg);
+    }
+
+    const allInvalidTokens = [];
+    for (const [, groupMessages] of groups) {
+        // Strip internal _app field before sending to Expo
+        const cleaned = groupMessages.map(({ _app, ...rest }) => rest);
+        const chunks = expo.chunkPushNotifications(cleaned);
+        const invalidTokens = await sendWithRetry(chunks);
+        allInvalidTokens.push(...invalidTokens);
+    }
+    return allInvalidTokens;
+}
+
+/**
  * Send push notification to a single user
  * @param {string} userId - User's MongoDB _id
  * @param {string} titleKey - Message key for title (e.g. 'ride_accepted_title')
@@ -105,12 +129,13 @@ async function sendToUser(userId, titleKey, bodyKey, data = {}, params = {}) {
                 data: { ...data, type: titleKey.replace('_title', '') },
                 priority: 'high',
                 channelId: data.channelId || 'default',
+                _app: dt.app || 'passenger', // internal field for grouping
             }));
 
         if (messages.length === 0) return;
 
-        const chunks = expo.chunkPushNotifications(messages);
-        const invalidTokens = await sendWithRetry(chunks);
+        // Group by app to avoid mixing tokens from different Expo projects in one chunk
+        const invalidTokens = await sendGroupedByApp(messages);
 
         if (invalidTokens.length > 0) {
             await removeInvalidTokens(userId, invalidTokens);
@@ -157,14 +182,15 @@ async function sendToUsers(userIds, titleKey, bodyKey, data = {}, params = {}) {
                     data: { ...data, type: titleKey.replace('_title', '') },
                     priority: 'high',
                     channelId: data.channelId || 'default',
+                    _app: dt.app || 'passenger', // internal field for grouping
                 });
             }
         }
 
         if (allMessages.length === 0) return;
 
-        const chunks = expo.chunkPushNotifications(allMessages);
-        const invalidTokens = await sendWithRetry(chunks);
+        // Group by app to avoid mixing tokens from different Expo projects in one chunk
+        const invalidTokens = await sendGroupedByApp(allMessages);
 
         // Group invalid tokens by user for cleanup
         const userInvalidTokens = new Map();

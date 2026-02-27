@@ -85,6 +85,7 @@ const userSchema = new mongoose.Schema({
     deviceTokens: [{
         token: { type: String, required: true },
         platform: { type: String, enum: ['ios', 'android'], required: true },
+        app: { type: String, enum: ['passenger', 'driver'], default: 'passenger' },
         _id: false
     }],
     preferredLanguage: {

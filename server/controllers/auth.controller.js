@@ -147,6 +147,7 @@ const getMe = catchAsync(async (req, res, next) => {
                 phone: user.phone,
                 role: user.role,
                 avatar: user.avatar,
+                hasCompletedOnboarding: user.hasCompletedOnboarding,
                 createdAt: user.createdAt
             }
         }

@@ -18,6 +18,7 @@ const {
 } = require('../controllers/driver.controller');
 
 const { validateUpdateDriverLocation } = require('../middlewares/validators');
+const { driverLocationLimiter } = require('../middlewares/rateLimiter');
 
 const router = express.Router();
 
@@ -30,8 +31,8 @@ router.get('/nearby', getNearbyDrivers);
 // Driver routes (for logged in drivers)
 router.get('/profile', isDriver, getDriverProfile);
 router.patch('/status', isDriver, updateDriverStatus);
-router.patch('/location', isDriver, validateUpdateDriverLocation, updateDriverLocation);
-router.post('/location/batch', isDriver, batchUpdateDriverLocation);
+router.patch('/location', isDriver, driverLocationLimiter, validateUpdateDriverLocation, updateDriverLocation);
+router.post('/location/batch', isDriver, driverLocationLimiter, batchUpdateDriverLocation);
 router.get('/stats', isDriver, getDriverStats);
 router.get('/earnings', isDriver, getDriverEarnings);
 

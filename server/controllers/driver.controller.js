@@ -250,18 +250,21 @@ const updateDriverStatus = catchAsync(async (req, res, next) => {
     // Emit socket event and manage driver room membership
     const io = req.app.get('io');
     if (io) {
-        io.emit('driver:statusChanged', {
+        // Only notify admin — not every connected socket in the system
+        io.to('admin').emit('driver:statusChanged', {
             driverId: driver._id,
             status: status
         });
 
-        // When driver goes online, ensure their sockets are in the driver room
-        // This fixes the case where socket reconnected but room membership was lost
+        const userRoom = `user:${req.user.id}`;
+        const driverRoom = `driver:${req.user.id}`;
+
         if (status === 'online') {
-            const userRoom = `user:${req.user.id}`;
-            const driverRoom = `driver:${req.user.id}`;
-            io.in(userRoom).socketsJoin(driverRoom);
-            console.log(`Ensured driver ${req.user.email} sockets joined ${driverRoom}`);
+            // Ensure sockets join driver rooms when going online
+            io.in(userRoom).socketsJoin([driverRoom, 'drivers:all']);
+        } else if (status === 'offline') {
+            // Remove from broadcast room when going offline
+            io.in(userRoom).socketsLeave('drivers:all');
         }
     }
 
@@ -303,29 +306,24 @@ const updateDriverLocation = catchAsync(async (req, res, next) => {
         }
     }
 
-    driver.location = {
-        type: 'Point',
-        coordinates: [longitude, latitude]
-    };
-    await driver.save();
+    // Atomic update — skips Mongoose validation/middleware overhead
+    await Driver.updateOne(
+        { _id: driver._id },
+        { $set: { location: { type: 'Point', coordinates: [longitude, latitude] } } }
+    );
 
     // If driver has an active ride, broadcast location to the customer
-    const Ride = require('../models/ride.model');
     const activeRide = await Ride.findOne({
         driver: driver._id,
         status: { $in: ['accepted', 'driver_arrived'] }
-    });
+    }).select('_id user').lean();
 
     if (activeRide) {
         const io = req.app.get('io');
         if (io) {
-            // Emit location update to the customer waiting for this driver
             io.to(`user:${activeRide.user}`).emit('driver:locationUpdate', {
                 rideId: activeRide._id,
-                location: {
-                    latitude,
-                    longitude
-                }
+                location: { latitude, longitude }
             });
         }
     }
@@ -340,92 +338,50 @@ const updateDriverLocation = catchAsync(async (req, res, next) => {
 // @route   GET /api/drivers/stats
 // @access  Private/Driver
 const getDriverStats = catchAsync(async (req, res, next) => {
-    const driver = await Driver.findOne({ user: req.user.id });
+    const driver = await Driver.findOne({ user: req.user.id })
+        .select('_id totalEarnings totalTrips rating totalReviews status').lean();
     if (!driver) {
         return next(new AppError('Driver profile not found', 404));
     }
 
-    const Ride = require('../models/ride.model');
+    const now = new Date();
+    const today = new Date(now); today.setHours(0, 0, 0, 0);
+    const last24Hours = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const thisWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const thisMonth = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
-    // Get today's stats (midnight to now)
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    // Single aggregation replaces 5 separate find() queries
+    const [statsResult, pendingRides] = await Promise.all([
+        Ride.aggregate([
+            { $match: { driver: driver._id, status: 'completed', endTime: { $gte: thisMonth } } },
+            {
+                $group: {
+                    _id: null,
+                    todayEarnings: { $sum: { $cond: [{ $gte: ['$endTime', today] }, '$fare', 0] } },
+                    todayTrips: { $sum: { $cond: [{ $gte: ['$endTime', today] }, 1, 0] } },
+                    last24hEarnings: { $sum: { $cond: [{ $gte: ['$endTime', last24Hours] }, '$fare', 0] } },
+                    last24hTrips: { $sum: { $cond: [{ $gte: ['$endTime', last24Hours] }, 1, 0] } },
+                    weekEarnings: { $sum: { $cond: [{ $gte: ['$endTime', thisWeek] }, '$fare', 0] } },
+                    weekTrips: { $sum: { $cond: [{ $gte: ['$endTime', thisWeek] }, 1, 0] } },
+                    monthEarnings: { $sum: '$fare' },
+                    monthTrips: { $sum: 1 },
+                }
+            }
+        ]),
+        Ride.countDocuments({ driver: driver._id, status: { $in: ['accepted', 'in_progress'] } })
+    ]);
 
-    // Get last 24 hours stats
-    const last24Hours = new Date();
-    last24Hours.setHours(last24Hours.getHours() - 24);
-
-    // Get this week's stats
-    const thisWeek = new Date();
-    thisWeek.setDate(thisWeek.getDate() - 7);
-
-    // Get this month's stats
-    const thisMonth = new Date();
-    thisMonth.setMonth(thisMonth.getMonth() - 1);
-
-    // Today's rides
-    const todayRides = await Ride.find({
-        driver: driver._id,
-        status: 'completed',
-        endTime: { $gte: today }
-    });
-
-    // Last 24 hours rides
-    const last24HoursRides = await Ride.find({
-        driver: driver._id,
-        status: 'completed',
-        endTime: { $gte: last24Hours }
-    });
-
-    // This week's rides
-    const weekRides = await Ride.find({
-        driver: driver._id,
-        status: 'completed',
-        endTime: { $gte: thisWeek }
-    });
-
-    // This month's rides
-    const monthRides = await Ride.find({
-        driver: driver._id,
-        status: 'completed',
-        endTime: { $gte: thisMonth }
-    });
-
-    // Pending rides count
-    const pendingRides = await Ride.countDocuments({
-        driver: driver._id,
-        status: { $in: ['accepted', 'in_progress'] }
-    });
-
-    const todayEarnings = todayRides.reduce((sum, ride) => sum + ride.fare, 0);
-    const last24HoursEarnings = last24HoursRides.reduce((sum, ride) => sum + ride.fare, 0);
-    const weekEarnings = weekRides.reduce((sum, ride) => sum + ride.fare, 0);
-    const monthEarnings = monthRides.reduce((sum, ride) => sum + ride.fare, 0);
+    const s = statsResult[0] || {};
 
     res.json({
         success: true,
         data: {
             stats: {
-                today: {
-                    earnings: todayEarnings,
-                    trips: todayRides.length
-                },
-                last24Hours: {
-                    earnings: last24HoursEarnings,
-                    trips: last24HoursRides.length
-                },
-                week: {
-                    earnings: weekEarnings,
-                    trips: weekRides.length
-                },
-                month: {
-                    earnings: monthEarnings,
-                    trips: monthRides.length
-                },
-                total: {
-                    earnings: driver.totalEarnings,
-                    trips: driver.totalTrips
-                },
+                today: { earnings: s.todayEarnings || 0, trips: s.todayTrips || 0 },
+                last24Hours: { earnings: s.last24hEarnings || 0, trips: s.last24hTrips || 0 },
+                week: { earnings: s.weekEarnings || 0, trips: s.weekTrips || 0 },
+                month: { earnings: s.monthEarnings || 0, trips: s.monthTrips || 0 },
+                total: { earnings: driver.totalEarnings, trips: driver.totalTrips },
                 rating: driver.rating,
                 totalReviews: driver.totalReviews || 0,
                 pendingRides,
@@ -441,7 +397,7 @@ const getDriverStats = catchAsync(async (req, res, next) => {
 const getDriverEarnings = catchAsync(async (req, res, next) => {
     const { period = 'today' } = req.query;
 
-    const driver = await Driver.findOne({ user: req.user.id });
+    const driver = await Driver.findOne({ user: req.user.id }).select('_id').lean();
     if (!driver) {
         return next(new AppError('Driver profile not found', 404));
     }
@@ -455,22 +411,21 @@ const getDriverEarnings = catchAsync(async (req, res, next) => {
         startDate.setMonth(startDate.getMonth() - 1);
     }
 
-    const rides = await Ride.find({
-        driver: driver._id,
-        status: 'completed',
-        endTime: { $gte: startDate }
-    });
+    // Aggregate in DB instead of fetching all documents to JS
+    const result = await Ride.aggregate([
+        { $match: { driver: driver._id, status: 'completed', endTime: { $gte: startDate } } },
+        { $group: { _id: null, total: { $sum: '$fare' }, trips: { $sum: 1 } } }
+    ]);
 
-    const total = rides.reduce((sum, ride) => sum + ride.fare, 0);
-    const average = rides.length > 0 ? total / rides.length : 0;
+    const s = result[0] || { total: 0, trips: 0 };
 
     res.json({
         success: true,
         data: {
             earnings: {
-                total,
-                trips: rides.length,
-                average
+                total: s.total,
+                trips: s.trips,
+                average: s.trips > 0 ? s.total / s.trips : 0
             }
         }
     });
@@ -532,95 +487,91 @@ const getDriverReviews = catchAsync(async (req, res, next) => {
 // @route   GET /api/drivers/admin/statistics
 // @access  Private/Admin
 const getAllDriverStatistics = catchAsync(async (req, res, next) => {
-    console.log('===== GET ALL DRIVER STATISTICS =====');
-
     const drivers = await Driver.find({ isActive: true })
         .populate('user', 'firstName lastName email')
-        .sort({ createdAt: -1 });
-
-    console.log(`Found ${drivers.length} active drivers`);
+        .sort({ createdAt: -1 })
+        .lean();
 
     if (drivers.length === 0) {
-        return res.json({
-            success: true,
-            count: 0,
-            data: { statistics: [] }
-        });
+        return res.json({ success: true, count: 0, data: { statistics: [] } });
     }
 
+    const driverIds = drivers.map(d => d._id);
     const now = new Date();
-    const last24Hours = new Date(now - 24 * 60 * 60 * 1000);
-    const last7Days = new Date(now - 7 * 24 * 60 * 60 * 1000);
-    const last30Days = new Date(now - 30 * 24 * 60 * 60 * 1000);
+    const last24Hours = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const last7Days = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const last30Days = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
-    const driverStats = await Promise.all(drivers.map(async (driver) => {
-        if (!driver.user) {
-            console.log(`Warning: Driver ${driver._id} has no user associated`);
-            return null;
-        }
-
-        // Get all rides for this driver
-        const allRides = await Ride.find({ driver: driver._id });
-
-        // Completed rides
-        const completedRides = allRides.filter(r => r.status === 'completed');
-
-        // Cancelled rides (cancelled by driver)
-        const cancelledByDriver = allRides.filter(r =>
-            r.status === 'cancelled' && r.cancelledBy === 'driver'
-        );
-
-        // Calculate earnings for different periods
-        const last24HoursRides = completedRides.filter(r =>
-            r.endTime && new Date(r.endTime) >= last24Hours
-        );
-        const last7DaysRides = completedRides.filter(r =>
-            r.endTime && new Date(r.endTime) >= last7Days
-        );
-        const last30DaysRides = completedRides.filter(r =>
-            r.endTime && new Date(r.endTime) >= last30Days
-        );
-
-        const earnings24h = last24HoursRides.reduce((sum, r) => sum + (r.fare || 0), 0);
-        const earnings7d = last7DaysRides.reduce((sum, r) => sum + (r.fare || 0), 0);
-        const earnings30d = last30DaysRides.reduce((sum, r) => sum + (r.fare || 0), 0);
-
-        return {
-            driverId: driver._id,
-            name: `${driver.user.firstName} ${driver.user.lastName}`,
-            email: driver.user.email,
-            phone: driver.phone,
-            vehicle: driver.vehicle,
-            status: driver.status,
-            rating: driver.rating || 0,
-            totalReviews: driver.totalReviews || 0,
-            statistics: {
-                totalTrips: completedRides.length,
-                cancelledTrips: cancelledByDriver.length,
-                totalEarnings: driver.totalEarnings || 0,
-                earnings: {
-                    last24Hours: earnings24h,
-                    last7Days: earnings7d,
-                    last30Days: earnings30d
+    // Single aggregation for ALL drivers — replaces N separate queries
+    const rideStats = await Ride.aggregate([
+        { $match: { driver: { $in: driverIds } } },
+        {
+            $group: {
+                _id: '$driver',
+                totalTrips: { $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] } },
+                cancelledTrips: {
+                    $sum: { $cond: [{ $and: [{ $eq: ['$status', 'cancelled'] }, { $eq: ['$cancelledBy', 'driver'] }] }, 1, 0] }
                 },
-                trips: {
-                    last24Hours: last24HoursRides.length,
-                    last7Days: last7DaysRides.length,
-                    last30Days: last30DaysRides.length
-                }
+                earnings24h: {
+                    $sum: { $cond: [{ $and: [{ $eq: ['$status', 'completed'] }, { $gte: ['$endTime', last24Hours] }] }, '$fare', 0] }
+                },
+                trips24h: {
+                    $sum: { $cond: [{ $and: [{ $eq: ['$status', 'completed'] }, { $gte: ['$endTime', last24Hours] }] }, 1, 0] }
+                },
+                earnings7d: {
+                    $sum: { $cond: [{ $and: [{ $eq: ['$status', 'completed'] }, { $gte: ['$endTime', last7Days] }] }, '$fare', 0] }
+                },
+                trips7d: {
+                    $sum: { $cond: [{ $and: [{ $eq: ['$status', 'completed'] }, { $gte: ['$endTime', last7Days] }] }, 1, 0] }
+                },
+                earnings30d: {
+                    $sum: { $cond: [{ $and: [{ $eq: ['$status', 'completed'] }, { $gte: ['$endTime', last30Days] }] }, '$fare', 0] }
+                },
+                trips30d: {
+                    $sum: { $cond: [{ $and: [{ $eq: ['$status', 'completed'] }, { $gte: ['$endTime', last30Days] }] }, 1, 0] }
+                },
             }
-        };
-    }));
+        }
+    ]);
 
-    // Filter out null entries (drivers without users)
-    const validStats = driverStats.filter(stat => stat !== null);
+    // Index by driver ID for O(1) lookup
+    const statsMap = new Map(rideStats.map(s => [s._id.toString(), s]));
 
-    console.log(`Returning statistics for ${validStats.length} drivers`);
+    const statistics = drivers
+        .filter(d => d.user)
+        .map(driver => {
+            const s = statsMap.get(driver._id.toString()) || {};
+            return {
+                driverId: driver._id,
+                name: `${driver.user.firstName} ${driver.user.lastName}`,
+                email: driver.user.email,
+                phone: driver.phone,
+                vehicle: driver.vehicle,
+                status: driver.status,
+                rating: driver.rating || 0,
+                totalReviews: driver.totalReviews || 0,
+                statistics: {
+                    totalTrips: s.totalTrips || 0,
+                    cancelledTrips: s.cancelledTrips || 0,
+                    totalEarnings: driver.totalEarnings || 0,
+                    earnings: {
+                        last24Hours: s.earnings24h || 0,
+                        last7Days: s.earnings7d || 0,
+                        last30Days: s.earnings30d || 0,
+                    },
+                    trips: {
+                        last24Hours: s.trips24h || 0,
+                        last7Days: s.trips7d || 0,
+                        last30Days: s.trips30d || 0,
+                    }
+                }
+            };
+        });
 
     res.json({
         success: true,
-        count: validStats.length,
-        data: { statistics: validStats }
+        count: statistics.length,
+        data: { statistics }
     });
 });
 
@@ -734,18 +685,17 @@ const batchUpdateDriverLocation = catchAsync(async (req, res, next) => {
         return res.json({ success: true, message: 'No valid locations in batch' });
     }
 
-    // Update driver with the latest valid position
-    driver.location = {
-        type: 'Point',
-        coordinates: [accepted.longitude, accepted.latitude],
-    };
-    await driver.save();
+    // Atomic update — skip Mongoose middleware for hot-path location writes
+    await Driver.updateOne(
+        { _id: driver._id },
+        { $set: { location: { type: 'Point', coordinates: [accepted.longitude, accepted.latitude] } } }
+    );
 
     // Broadcast to passenger if driver has an active ride
     const activeRide = await Ride.findOne({
         driver: driver._id,
         status: { $in: ['accepted', 'driver_arrived'] },
-    });
+    }).select('_id user').lean();
 
     if (activeRide) {
         const io = req.app.get('io');
