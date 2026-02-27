@@ -114,6 +114,9 @@ userSchema.methods.comparePassword = async function(candidatePassword) {
 // Compound index for OAuth login lookups (Google/Apple/Phone provider + providerId)
 userSchema.index({ provider: 1, providerId: 1 });
 
+// Index for device token lookups (registerToken cross-user cleanup)
+userSchema.index({ 'deviceTokens.token': 1 });
+
 const User = mongoose.model('User', userSchema);
 
 module.exports = User;
