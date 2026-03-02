@@ -1,4 +1,4 @@
-import React, { createContext, useState, useContext, useEffect } from 'react';
+import React, { createContext, useState, useContext, useEffect, useCallback, useMemo } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import { useTranslation } from 'react-i18next';
 import '../i18n';
@@ -35,7 +35,7 @@ export const LanguageProvider = ({ children }) => {
     }
   };
 
-  const changeLanguage = async (languageCode) => {
+  const changeLanguage = useCallback(async (languageCode) => {
     try {
       await SecureStore.setItemAsync('language', languageCode);
       await i18n.changeLanguage(languageCode);
@@ -43,22 +43,24 @@ export const LanguageProvider = ({ children }) => {
     } catch (error) {
       // Error changing language
     }
-  };
+  }, [i18n]);
 
-  const getCurrentLanguageInfo = () => {
+  // H6: Wrap in useCallback so consumers with dependency arrays get stable reference
+  const getCurrentLanguageInfo = useCallback(() => {
     return LANGUAGES.find(l => l.code === currentLanguage) || LANGUAGES[0];
-  };
+  }, [currentLanguage]);
+
+  // H6: Memoize context value
+  const value = useMemo(() => ({
+    currentLanguage,
+    changeLanguage,
+    languages: LANGUAGES,
+    getCurrentLanguageInfo,
+    loading,
+  }), [currentLanguage, changeLanguage, getCurrentLanguageInfo, loading]);
 
   return (
-    <LanguageContext.Provider
-      value={{
-        currentLanguage,
-        changeLanguage,
-        languages: LANGUAGES,
-        getCurrentLanguageInfo,
-        loading,
-      }}
-    >
+    <LanguageContext.Provider value={value}>
       {children}
     </LanguageContext.Provider>
   );

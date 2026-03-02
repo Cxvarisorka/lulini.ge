@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import NetInfo from '@react-native-community/netinfo';
 
 const NetworkContext = createContext();
@@ -44,25 +44,25 @@ export const NetworkProvider = ({ children }) => {
     return () => unsubscribe();
   }, []);
 
-  // Register a callback that fires when connectivity is restored.
-  // Returns an unsubscribe function.
-  const onReconnect = (callback) => {
+  // H5: Wrap onReconnect in useCallback (uses only refs, stable identity)
+  const onReconnect = useCallback((callback) => {
     onReconnectCallbacksRef.current.push(callback);
     return () => {
       onReconnectCallbacksRef.current =
         onReconnectCallbacksRef.current.filter((cb) => cb !== callback);
     };
-  };
+  }, []);
+
+  // H5: Memoize context value
+  const value = useMemo(() => ({
+    isConnected,
+    isInternetReachable,
+    isInternetReachableRef,
+    onReconnect,
+  }), [isConnected, isInternetReachable, onReconnect]);
 
   return (
-    <NetworkContext.Provider
-      value={{
-        isConnected,
-        isInternetReachable,
-        isInternetReachableRef,
-        onReconnect,
-      }}
-    >
+    <NetworkContext.Provider value={value}>
       {children}
     </NetworkContext.Provider>
   );

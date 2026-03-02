@@ -1,13 +1,14 @@
-import React, { createContext, useState, useContext, useEffect } from 'react';
+import React, { createContext, useState, useContext, useEffect, useCallback, useMemo } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
-import { authAPI } from '../services/api';
+import { authAPI, setOnUnauthorized } from '../services/api';
 import { GOOGLE_CONFIG } from '../config/google.config';
 import { registerForPushNotifications, unregisterPushToken } from '../services/pushNotifications';
+import { clearAllCaches } from '../services/googleMaps';
 import i18n from '../i18n';
 
 // Complete any pending auth session
@@ -42,7 +43,7 @@ export const AuthProvider = ({ children }) => {
     }
   }, [response]);
 
-  const handleGoogleToken = async (idToken) => {
+  const handleGoogleToken = useCallback(async (idToken) => {
     try {
       setLoading(true);
       // Send the ID token to backend for verification
@@ -65,11 +66,30 @@ export const AuthProvider = ({ children }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  // Check for existing token on app load
+  // Check for existing token on app load (M3: cancellation flag)
   useEffect(() => {
+    let isCancelled = false;
+
+    const checkAuthStatus = async () => {
+      try {
+        const token = await SecureStore.getItemAsync('token');
+        if (token) {
+          const response = await authAPI.getMe();
+          if (response.data.success && !isCancelled) {
+            setUser(response.data.data.user);
+          }
+        }
+      } catch (err) {
+        await SecureStore.deleteItemAsync('token');
+      } finally {
+        if (!isCancelled) setLoading(false);
+      }
+    };
+
     checkAuthStatus();
+    return () => { isCancelled = true; };
   }, []);
 
   // Register push token when user authenticates
@@ -79,30 +99,13 @@ export const AuthProvider = ({ children }) => {
     }
   }, [user]);
 
-  const checkAuthStatus = async () => {
-    try {
-      const token = await SecureStore.getItemAsync('token');
-      if (token) {
-        const response = await authAPI.getMe();
-        if (response.data.success) {
-          setUser(response.data.data.user);
-        }
-      }
-    } catch (err) {
-      await SecureStore.deleteItemAsync('token');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const login = async (email, password) => {
+  const login = useCallback(async (email, password) => {
     try {
       setError(null);
       setLoading(true);
       const response = await authAPI.login(email, password);
 
       if (response.data.success) {
-        // Get token from response body (updated server sends it)
         const token = response.data.token;
 
         if (token) {
@@ -120,16 +123,15 @@ export const AuthProvider = ({ children }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const register = async (userData) => {
+  const register = useCallback(async (userData) => {
     try {
       setError(null);
       setLoading(true);
       const response = await authAPI.register(userData);
 
       if (response.data.success) {
-        // Get token from response body
         const token = response.data.token;
 
         if (token) {
@@ -147,9 +149,9 @@ export const AuthProvider = ({ children }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const loginWithGoogle = async () => {
+  const loginWithGoogle = useCallback(async () => {
     try {
       setError(null);
       setLoading(true);
@@ -160,8 +162,6 @@ export const AuthProvider = ({ children }) => {
         return { success: false, error: 'Google Sign-In is not ready' };
       }
 
-      // This will trigger the Google OAuth flow
-      // The result will be handled by the useEffect watching 'response'
       const result = await promptAsync();
 
       if (result.type === 'cancel' || result.type === 'dismiss') {
@@ -169,7 +169,6 @@ export const AuthProvider = ({ children }) => {
         return { success: false, error: 'Google login was cancelled' };
       }
 
-      // Success case is handled by the useEffect
       return { success: true };
     } catch (err) {
       const message = err.message || 'Google login failed';
@@ -177,10 +176,10 @@ export const AuthProvider = ({ children }) => {
       setLoading(false);
       return { success: false, error: message };
     }
-  };
+  }, [request, promptAsync]);
 
   // Apple Sign-In
-  const loginWithApple = async () => {
+  const loginWithApple = useCallback(async () => {
     try {
       setError(null);
       setLoading(true);
@@ -238,10 +237,10 @@ export const AuthProvider = ({ children }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   // Phone OTP - Send OTP
-  const sendPhoneOtp = async (phone) => {
+  const sendPhoneOtp = useCallback(async (phone) => {
     try {
       setError(null);
 
@@ -257,17 +256,16 @@ export const AuthProvider = ({ children }) => {
       setError(message);
       return { success: false, error: message };
     }
-  };
+  }, []);
 
   // Phone OTP - Verify OTP
-  const verifyPhoneOtp = async (phone, code, firstName = null, lastName = null) => {
+  const verifyPhoneOtp = useCallback(async (phone, code, firstName = null, lastName = null) => {
     try {
       setError(null);
 
       const response = await authAPI.verifyPhoneOtp(phone, code, firstName, lastName);
 
       if (response.data.success) {
-        // Check if this requires registration (new user without fullName)
         if (response.data.requiresRegistration) {
           return {
             success: true,
@@ -276,7 +274,6 @@ export const AuthProvider = ({ children }) => {
           };
         }
 
-        // User is authenticated
         const token = response.data.token;
         if (token) {
           await SecureStore.setItemAsync('token', token);
@@ -292,22 +289,20 @@ export const AuthProvider = ({ children }) => {
       setError(message);
       return { success: false, error: message };
     }
-  };
+  }, []);
 
-  // Complete onboarding
-  const completeOnboarding = async () => {
+  // Complete onboarding (L1: use functional update to avoid stale closure)
+  const completeOnboarding = useCallback(async () => {
     try {
       await authAPI.completeOnboarding();
       setIsNewUser(false);
-      if (user) {
-        setUser({ ...user, hasCompletedOnboarding: true });
-      }
+      setUser(prev => prev ? { ...prev, hasCompletedOnboarding: true } : prev);
     } catch (err) {
       // Complete onboarding failed
     }
-  };
+  }, []);
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     try {
       await unregisterPushToken();
     } catch (err) {
@@ -320,11 +315,21 @@ export const AuthProvider = ({ children }) => {
     } finally {
       await SecureStore.deleteItemAsync('token');
       await AsyncStorage.removeItem('@rides_cache').catch(() => {});
+      // L12: Clear map caches on logout
+      clearAllCaches();
       setUser(null);
     }
-  };
+  }, []);
 
-  const refreshUser = async () => {
+  // H1: Register 401 logout handler so stale tokens force UI logout
+  useEffect(() => {
+    setOnUnauthorized(() => {
+      setUser(null);
+    });
+    return () => setOnUnauthorized(null);
+  }, []);
+
+  const refreshUser = useCallback(async () => {
     try {
       const response = await authAPI.getMe();
       if (response.data.success) {
@@ -333,29 +338,31 @@ export const AuthProvider = ({ children }) => {
     } catch (err) {
       // Refresh user failed
     }
-  };
+  }, []);
+
+  const value = useMemo(() => ({
+    user,
+    loading,
+    error,
+    isNewUser,
+    pendingPhoneVerification,
+    login,
+    register,
+    loginWithGoogle,
+    loginWithApple,
+    sendPhoneOtp,
+    verifyPhoneOtp,
+    completeOnboarding,
+    logout,
+    refreshUser,
+    isAuthenticated: !!user,
+    googleAuthReady: !!request,
+  }), [user, loading, error, isNewUser, pendingPhoneVerification, request,
+    login, register, loginWithGoogle, loginWithApple, sendPhoneOtp,
+    verifyPhoneOtp, completeOnboarding, logout, refreshUser]);
 
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        loading,
-        error,
-        isNewUser,
-        pendingPhoneVerification,
-        login,
-        register,
-        loginWithGoogle,
-        loginWithApple,
-        sendPhoneOtp,
-        verifyPhoneOtp,
-        completeOnboarding,
-        logout,
-        refreshUser,
-        isAuthenticated: !!user,
-        googleAuthReady: !!request,
-      }}
-    >
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );
