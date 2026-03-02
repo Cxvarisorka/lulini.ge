@@ -22,7 +22,7 @@ import { authAPI } from '../services/api';
 import { colors, shadows, radius, useTypography } from '../theme/colors';
 
 export default function ProfileScreen({ navigation }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { user, logout, refreshUser } = useAuth();
   const { getCurrentLanguageInfo } = useLanguage();
   const typography = useTypography();
@@ -79,9 +79,10 @@ export default function ProfileScreen({ navigation }) {
     return `${user.firstName?.[0] || ''}${user.lastName?.[0] || ''}`.toUpperCase();
   };
 
+  // M8: Use i18n.language instead of hardcoded en-US
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A';
-    return new Date(dateString).toLocaleDateString('en-US', {
+    return new Date(dateString).toLocaleDateString(i18n.language, {
       year: 'numeric',
       month: 'long',
       day: 'numeric',

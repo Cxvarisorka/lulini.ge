@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
+  TouchableOpacity,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,6 +17,8 @@ const typography = useTypography();
     const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { question, answer } = route.params;
+  // M12: Track feedback state
+  const [feedback, setFeedback] = useState(null);
 
   return (
     <View style={styles.container}>
@@ -41,18 +44,26 @@ const typography = useTypography();
           <Text style={styles.answerText}>{answer}</Text>
         </View>
 
-        {/* Helpful Section */}
+        {/* Helpful Section — M12: Changed View to TouchableOpacity */}
         <View style={styles.helpfulSection}>
           <Text style={styles.helpfulTitle}>{t('support.wasHelpful')}</Text>
           <View style={styles.helpfulButtons}>
-            <View style={styles.helpfulButton}>
-              <Ionicons name="thumbs-up-outline" size={24} color={colors.success} />
+            <TouchableOpacity
+              style={[styles.helpfulButton, feedback === 'yes' && { opacity: 0.5 }]}
+              onPress={() => setFeedback('yes')}
+              disabled={feedback !== null}
+            >
+              <Ionicons name={feedback === 'yes' ? 'thumbs-up' : 'thumbs-up-outline'} size={24} color={colors.success} />
               <Text style={styles.helpfulButtonText}>{t('common.yes')}</Text>
-            </View>
-            <View style={styles.helpfulButton}>
-              <Ionicons name="thumbs-down-outline" size={24} color={colors.destructive} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.helpfulButton, feedback === 'no' && { opacity: 0.5 }]}
+              onPress={() => setFeedback('no')}
+              disabled={feedback !== null}
+            >
+              <Ionicons name={feedback === 'no' ? 'thumbs-down' : 'thumbs-down-outline'} size={24} color={colors.destructive} />
               <Text style={styles.helpfulButtonText}>{t('common.no')}</Text>
-            </View>
+            </TouchableOpacity>
           </View>
         </View>
 

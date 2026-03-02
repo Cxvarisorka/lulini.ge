@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { authAPI } from '../services/api';
 import { colors, radius, shadows, useTypography } from '../theme/colors';
+import { COUNTRY_CODE } from '../config/phone.config';
 
 const OTP_LENGTH = 6;
 const RESEND_COOLDOWN = 60;
@@ -33,8 +34,6 @@ const typography = useTypography();
     const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { user, refreshUser } = useAuth();
-
-  const COUNTRY_CODE = '+995';
   const [step, setStep] = useState(STEPS.PHONE_INPUT);
   const [localPhone, setLocalPhone] = useState('');
   const [otp, setOtp] = useState(['', '', '', '', '', '']);

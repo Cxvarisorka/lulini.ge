@@ -10,6 +10,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
+import Constants from 'expo-constants';
 import { colors, shadows, radius, spacing, useTypography } from '../theme/colors';
 
 export default function SettingsScreen({ navigation }) {
@@ -218,7 +219,7 @@ const typography = useTypography();
         {/* App Info */}
         <View style={styles.appInfo}>
           <Text style={styles.appName}>Lulini</Text>
-          <Text style={styles.appVersion}>Version 1.0.0</Text>
+          <Text style={styles.appVersion}>Version {Constants.expoConfig?.version || '1.0.0'}</Text>
         </View>
       </ScrollView>
     </View>

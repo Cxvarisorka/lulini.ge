@@ -300,11 +300,12 @@ function CustomDrawerOverlay({ isOpen, onClose, navigation }) {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const [visible, setVisible] = useState(false);
 
+  // M9: Stop stale animations in cleanup to prevent visual glitches
   React.useEffect(() => {
     if (isOpen) {
       setVisible(true);
     }
-    Animated.parallel([
+    const anim = Animated.parallel([
       Animated.timing(slideAnim, {
         toValue: isOpen ? 0 : -DRAWER_WIDTH,
         duration: isOpen ? 250 : 200,
@@ -315,11 +316,13 @@ function CustomDrawerOverlay({ isOpen, onClose, navigation }) {
         duration: isOpen ? 250 : 200,
         useNativeDriver: true,
       }),
-    ]).start(() => {
+    ]);
+    anim.start(() => {
       if (!isOpen) {
         setVisible(false);
       }
     });
+    return () => anim.stop();
   }, [isOpen]);
 
   return (

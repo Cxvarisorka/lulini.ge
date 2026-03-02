@@ -23,9 +23,6 @@ export default {
       },
       infoPlist: {
         NSLocationWhenInUseUsageDescription: "We need your location to show your position on the map and find nearby drivers.",
-        NSLocationAlwaysUsageDescription: "We need your location to provide ride services.",
-        NSLocationAlwaysAndWhenInUseUsageDescription: "We need your location to provide ride services and find nearby drivers.",
-        UIBackgroundModes: ["location"],
         ITSAppUsesNonExemptEncryption: false
       }
     },
@@ -61,7 +58,7 @@ export default {
       [
         "expo-location",
         {
-          locationAlwaysAndWhenInUsePermission: "Allow Lulini to use your location to find nearby drivers and show your position on the map."
+          locationWhenInUsePermission: "Allow Lulini to use your location to find nearby drivers and show your position on the map."
         }
       ],
       "expo-web-browser",

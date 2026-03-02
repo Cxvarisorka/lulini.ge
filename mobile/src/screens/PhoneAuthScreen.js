@@ -17,13 +17,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../context/AuthContext';
 import { colors, radius, useTypography } from '../theme/colors';
+import { COUNTRY_CODE } from '../config/phone.config';
 
 export default function PhoneAuthScreen({ navigation }) {
 const typography = useTypography();
   const styles = React.useMemo(() => createStyles(typography), [typography]);
     const { t } = useTranslation();
   const insets = useSafeAreaInsets();
-  const COUNTRY_CODE = '+995';
   const [localPhone, setLocalPhone] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const { sendPhoneOtp } = useAuth();

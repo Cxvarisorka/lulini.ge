@@ -6,6 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
   Linking,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -138,7 +139,7 @@ const typography = useTypography();
           <Text style={styles.sectionTitle}>{t('support.reportIssue')}</Text>
           <TouchableOpacity
             style={styles.reportCard}
-            onPress={() => navigation.navigate('ReportIssue')}
+            onPress={() => Alert.alert(t('support.reportIssue'), t('support.reportDescription'))}
           >
             <View style={styles.reportContent}>
               <Ionicons name="warning" size={28} color={colors.warning} />

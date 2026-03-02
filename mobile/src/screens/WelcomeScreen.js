@@ -15,6 +15,11 @@ import { useTranslation } from 'react-i18next';
 import { useAuth } from '../context/AuthContext';
 import { colors, radius, useTypography } from '../theme/colors';
 
+const CANCELLED_ERRORS = {
+  google: 'Google login was cancelled',
+  apple: 'Apple login was cancelled',
+};
+
 export default function WelcomeScreen({ navigation }) {
 const typography = useTypography();
   const styles = React.useMemo(() => createStyles(typography), [typography]);
@@ -28,7 +33,7 @@ const typography = useTypography();
     const result = await loginWithGoogle();
     setIsGoogleLoading(false);
 
-    if (!result.success && result.error !== 'Google login was cancelled') {
+    if (!result.success && result.error !== CANCELLED_ERRORS.google) {
       Alert.alert(t('errors.error'), result.error);
     }
   };
@@ -38,7 +43,7 @@ const typography = useTypography();
     const result = await loginWithApple();
     setIsAppleLoading(false);
 
-    if (!result.success && result.error !== 'Apple login was cancelled') {
+    if (!result.success && result.error !== CANCELLED_ERRORS.apple) {
       Alert.alert(t('errors.error'), result.error);
     }
   };

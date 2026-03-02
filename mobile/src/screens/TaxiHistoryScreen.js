@@ -11,10 +11,10 @@ import {
   Modal,
   ScrollView,
   Animated,
-  Dimensions,
   TouchableWithoutFeedback,
   TextInput,
   Platform,
+  useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
@@ -26,7 +26,6 @@ import { taxiAPI } from '../services/api';
 
 const CACHE_KEY = '@rides_cache';
 const PAGE_SIZE = 20;
-const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 const STATUS_COLORS = {
   pending: colors.status.pending,
@@ -65,9 +64,11 @@ function formatShortDate(date) {
 }
 
 export default function TaxiHistoryScreen({ navigation }) {
+  // L2: Use hook instead of module-level Dimensions.get
+  const { height: SCREEN_HEIGHT } = useWindowDimensions();
   const typography = useTypography();
-  const styles = React.useMemo(() => createStyles(typography), [typography]);
-  const { t } = useTranslation();
+  const styles = React.useMemo(() => createStyles(typography, SCREEN_HEIGHT), [typography, SCREEN_HEIGHT]);
+  const { t, i18n } = useTranslation();
   const [rides, setRides] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -201,7 +202,7 @@ export default function TaxiHistoryScreen({ navigation }) {
           const cached = JSON.parse(raw);
           if (cached.rides?.length) setRides(cached.rides);
         }
-      } catch {}
+      } catch (e) { console.warn('[TaxiHistory] Cache load error:', e.message); }
       if (mounted) setLoading(false);
       try {
         const response = await taxiAPI.getMyRides({ page: 1, limit: PAGE_SIZE });
@@ -214,7 +215,7 @@ export default function TaxiHistoryScreen({ navigation }) {
             rides: serverRides, total: response.data.total, timestamp: Date.now(),
           })).catch(() => {});
         }
-      } catch {}
+      } catch (e) { console.warn('[TaxiHistory] Fetch error:', e.message); }
     });
     return () => { mounted = false; task.cancel(); };
   }, []);
@@ -239,7 +240,7 @@ export default function TaxiHistoryScreen({ navigation }) {
           return merged;
         });
       }
-    } catch {}
+    } catch (e) { console.warn('[TaxiHistory] Pagination error:', e.message); }
     setLoadingMore(false);
   }, [loadingMore]);
 
@@ -256,14 +257,14 @@ export default function TaxiHistoryScreen({ navigation }) {
           rides: serverRides, total: response.data.total, timestamp: Date.now(),
         })).catch(() => {});
       }
-    } catch {}
+    } catch (e) { console.warn('[TaxiHistory] Refresh error:', e.message); }
     setRefreshing(false);
   }, []);
 
   // --- Helpers ---
   const formatDate = (dateString) => {
     const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
+    return date.toLocaleDateString(i18n.language, {
       month: 'short', day: 'numeric', year: 'numeric',
       hour: '2-digit', minute: '2-digit',
     });
@@ -326,8 +327,8 @@ export default function TaxiHistoryScreen({ navigation }) {
     </View>
   );
 
-  // --- Ride item ---
-  const renderRideItem = ({ item }) => (
+  // M6: Wrap renderRideItem in useCallback for FlatList optimization
+  const renderRideItem = useCallback(({ item }) => (
     <TouchableOpacity
       style={styles.rideCard}
       onPress={() => navigation.navigate('RideDetail', { ride: item })}
@@ -440,7 +441,7 @@ export default function TaxiHistoryScreen({ navigation }) {
         <Ionicons name="chevron-forward" size={16} color={colors.primary} />
       </View>
     </TouchableOpacity>
-  );
+  ), [navigation, t, styles]);
 
   const renderEmptyList = () => {
     if (hasActiveFilters) {
@@ -658,7 +659,7 @@ export default function TaxiHistoryScreen({ navigation }) {
   );
 }
 
-const createStyles = (typography) => StyleSheet.create({
+const createStyles = (typography, SCREEN_HEIGHT = 800) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,

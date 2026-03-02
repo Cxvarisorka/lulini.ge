@@ -71,11 +71,14 @@ const typography = useTypography();
         keyExtractor={(item) => item.code}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
-        ItemSeparatorComponent={() => <View style={styles.separator} />}
+        ItemSeparatorComponent={ItemSeparator}
       />
     </View>
   );
 }
+
+// L9: Extracted ItemSeparatorComponent to named component
+const ItemSeparator = () => <View style={{ height: 12 }} />;
 
 // Helper function to get flag emoji from country code
 function getFlagEmoji(countryCode) {

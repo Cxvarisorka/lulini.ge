@@ -11,6 +11,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
+import Constants from 'expo-constants';
 import { colors, shadows, radius, spacing, useTypography } from '../theme/colors';
 
 export default function AboutScreen({ navigation }) {
@@ -19,9 +20,10 @@ const typography = useTypography();
     const { t } = useTranslation();
   const insets = useSafeAreaInsets();
 
+  // L7: Use app config version instead of hardcoded
   const appInfo = {
-    version: '1.0.0',
-    buildNumber: '100',
+    version: Constants.expoConfig?.version || '1.0.0',
+    buildNumber: Constants.expoConfig?.extra?.buildNumber || Constants.expoConfig?.ios?.buildNumber || Constants.expoConfig?.android?.versionCode?.toString() || '100',
   };
 
   const links = [
@@ -65,8 +67,13 @@ const typography = useTypography();
     },
   ];
 
-  const handleLinkPress = (url) => {
-    Linking.openURL(url);
+  // L4: Wrap in try/catch for error handling
+  const handleLinkPress = async (url) => {
+    try {
+      await Linking.openURL(url);
+    } catch (err) {
+      console.warn('[About] Failed to open URL:', err.message);
+    }
   };
 
   return (

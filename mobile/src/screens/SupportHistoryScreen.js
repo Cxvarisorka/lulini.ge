@@ -6,6 +6,7 @@ import {
   FlatList,
   TouchableOpacity,
   RefreshControl,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -97,7 +98,7 @@ const typography = useTypography();
   const renderTicket = ({ item }) => (
     <TouchableOpacity
       style={styles.ticketCard}
-      onPress={() => navigation.navigate('TicketDetail', { ticketId: item.id })}
+      onPress={() => Alert.alert(item.subject, `${t('support.status.label')}: ${getStatusLabel(item.status)}`)}
     >
       <View style={styles.ticketHeader}>
         <View style={styles.ticketIcon}>

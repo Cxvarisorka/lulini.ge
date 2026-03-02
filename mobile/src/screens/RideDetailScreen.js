@@ -18,17 +18,27 @@ const STATUS_COLORS = {
   pending: colors.status.pending,
   accepted: colors.info,
   arrived: colors.info,
+  driver_arrived: colors.info,
   in_progress: colors.status.active,
   inProgress: colors.status.active,
   completed: colors.status.completed,
   cancelled: colors.status.cancelled,
 };
 
+// M7: Use same key map as TaxiHistoryScreen for consistent status translations
+const STATUS_KEY_MAP = {
+  in_progress: 'inProgress',
+  driver_arrived: 'arrived',
+};
+function statusTranslationKey(status) {
+  return STATUS_KEY_MAP[status] || status;
+}
+
 export default function RideDetailScreen({ route }) {
   const { ride } = route.params;
   const typography = useTypography();
   const styles = React.useMemo(() => createStyles(typography), [typography]);
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const mapRef = useRef(null);
   const [polylineCoords, setPolylineCoords] = useState([]);
   const [loadingRoute, setLoadingRoute] = useState(true);
@@ -85,7 +95,7 @@ export default function RideDetailScreen({ route }) {
   const formatDate = (dateString) => {
     if (!dateString) return '—';
     const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
+    return date.toLocaleDateString(i18n.language, {
       month: 'short',
       day: 'numeric',
       year: 'numeric',
@@ -198,7 +208,7 @@ export default function RideDetailScreen({ route }) {
         <View style={[styles.statusBadgeLarge, { backgroundColor: getStatusColor(ride.status) + '15' }]}>
           <View style={[styles.statusDotLarge, { backgroundColor: getStatusColor(ride.status) }]} />
           <Text style={[styles.statusTextLarge, { color: getStatusColor(ride.status) }]}>
-            {t(`taxi.status.${ride.status}`)}
+            {t(`taxi.status.${statusTranslationKey(ride.status)}`)}
           </Text>
         </View>
         <Text style={styles.rideDate}>{formatDate(ride.createdAt)}</Text>

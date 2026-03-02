@@ -43,9 +43,10 @@ export default function OtpVerificationScreen({ navigation, route }) {
     }
   }, [resendTimer]);
 
-  // Auto-focus the hidden input on mount
+  // L3: Auto-focus with proper cleanup
   useEffect(() => {
-    setTimeout(() => inputRef.current?.focus(), 300);
+    const timer = setTimeout(() => inputRef.current?.focus(), 300);
+    return () => clearTimeout(timer);
   }, []);
 
   const handleOtpChange = (text) => {

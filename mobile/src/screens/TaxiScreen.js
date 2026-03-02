@@ -19,7 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import { useNetwork } from '../context/NetworkContext';
-import { taxiAPI } from '../services/api';
+import { taxiAPI, settingsAPI } from '../services/api';
 import { persistRideState, loadRideState, clearRideState } from '../services/rideStorage';
 import {
   showRideNotification,
@@ -75,7 +75,7 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
-// Fetch OSRM route between coordinates with optional waypoints, returns [{latitude, longitude}]
+// L14: Fetch OSRM route with AbortController timeout
 const fetchRouteOSRM = async (from, to, waypoints = []) => {
   try {
     // Build coordinate string: from;wp1;wp2;...;to
@@ -85,7 +85,10 @@ const fetchRouteOSRM = async (from, to, waypoints = []) => {
       `${to.longitude},${to.latitude}`,
     ].join(';');
     const url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`;
-    const res = await fetch(url);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeoutId);
     const data = await res.json();
     if (data.code === 'Ok' && data.routes?.[0]) {
       return data.routes[0].geometry.coordinates.map(([lng, lat]) => ({
@@ -166,6 +169,9 @@ export default function TaxiScreen({ navigation }) {
   const currentRideRef = useRef(null);
   const tRef = useRef(t);
 
+  // M10: Prevent concurrent reconciliation calls
+  const isReconcilingRef = useRef(false);
+
   // Tracks last accepted driver location for distance-based throttling in socket handler.
   // Only updated when the position passes the 5m threshold, preventing re-renders from GPS noise.
   const driverLocationRef = useRef(null);
@@ -189,6 +195,9 @@ export default function TaxiScreen({ navigation }) {
 
   // Track bottom sheet snap index for fullscreen mode
   const [sheetSnapIndex, setSheetSnapIndex] = useState(1);
+
+  // Dynamic pricing from server (defaults match hardcoded fallbacks)
+  const [pricingConfig, setPricingConfig] = useState({ basePrice: 5, kmPrice: 1.5 });
 
   // Map zoom level for driver clustering
   const [mapZoomLevel, setMapZoomLevel] = useState(15);
@@ -222,6 +231,15 @@ export default function TaxiScreen({ navigation }) {
   // Initialize location on mount + cleanup all timers/refs on unmount
   useEffect(() => {
     requestLocationPermission();
+
+    // Fetch dynamic pricing config from server
+    settingsAPI.getPricing()
+      .then(res => {
+        if (res.data?.data) {
+          setPricingConfig({ basePrice: res.data.data.basePrice, kmPrice: res.data.data.kmPrice });
+        }
+      })
+      .catch(() => {}); // Use defaults on failure
 
     return () => {
       // Prevent leaked timers when TaxiScreen unmounts
@@ -405,6 +423,10 @@ export default function TaxiScreen({ navigation }) {
   //   Phase 2: Reconcile with server (authoritative source of truth)
   useEffect(() => {
     const restoreAndReconcile = async () => {
+      // M10: Prevent concurrent reconciliation
+      if (isReconcilingRef.current) return;
+      isReconcilingRef.current = true;
+
       // Phase 1 — instant local restore
       const savedState = await loadRideState();
       if (savedState) {
@@ -483,6 +505,8 @@ export default function TaxiScreen({ navigation }) {
       } catch (error) {
         // Offline: rely on local state already restored in Phase 1
         console.warn('[TaxiScreen] Offline — using cached ride state');
+      } finally {
+        isReconcilingRef.current = false;
       }
     };
 
@@ -902,6 +926,9 @@ export default function TaxiScreen({ navigation }) {
   // Reconcile ride state when connectivity is restored
   useEffect(() => {
     const unsubscribe = onReconnect(async () => {
+      // M10: Skip if another reconciliation is in progress
+      if (isReconcilingRef.current) return;
+      isReconcilingRef.current = true;
       try {
         const response = await taxiAPI.getMyRides();
         const rides = response.data?.data?.rides || [];
@@ -942,6 +969,8 @@ export default function TaxiScreen({ navigation }) {
         }
       } catch (error) {
         console.warn('[TaxiScreen] Reconnect reconciliation failed:', error.message);
+      } finally {
+        isReconcilingRef.current = false;
       }
     });
     return unsubscribe;
@@ -1072,9 +1101,9 @@ export default function TaxiScreen({ navigation }) {
 
   const calculatePrice = useCallback((distance, vehicleId) => {
     const vehicleType = VEHICLE_TYPES.find(v => v.id === vehicleId);
-    const basePrice = 5 + (distance * 1.5);
+    const basePrice = pricingConfig.basePrice + (distance * pricingConfig.kmPrice);
     return (basePrice * vehicleType.priceMultiplier).toFixed(2);
-  }, []);
+  }, [pricingConfig]);
 
   // Fetch directions and update map with route polyline
   const fetchDirectionsAndUpdate = useCallback(async (destCoords) => {
@@ -1198,29 +1227,18 @@ export default function TaxiScreen({ navigation }) {
     setBookingStep(BOOKING_STEPS.RIDE_OPTIONS);
   }, [fetchDirectionsAndUpdate]);
 
+  // H3: No random coordinates — only update text; require Places selection for coords
   const handleDestinationChange = useCallback(async (text) => {
     setDestination(text);
 
-    if (text.length > 3 && location) {
-      // Generate approximate coordinates when no Places API coordinates
-      const randomOffset = () => (Math.random() - 0.5) * 0.05;
-      const destCoords = {
-        latitude: location.latitude + randomOffset() + 0.02,
-        longitude: location.longitude + randomOffset() + 0.02,
-      };
-      setDestinationCoords(destCoords);
-
-      await fetchDirectionsAndUpdate(destCoords);
-
-      // Auto-transition to ride options when destination is selected
-      setBookingStep(BOOKING_STEPS.RIDE_OPTIONS);
-    } else {
+    if (text.length <= 3 || !location) {
       setDestinationCoords(null);
       setEstimatedPrice(null);
       setEstimatedDuration(null);
       setRoutePolyline(null);
     }
-  }, [location, fetchDirectionsAndUpdate]);
+    // Coordinates are only set via handleDestinationSelectWithCoords (Places autocomplete)
+  }, [location]);
 
   const handleDestinationSelect = useCallback((address, coords) => {
     if (coords) {
@@ -1230,10 +1248,14 @@ export default function TaxiScreen({ navigation }) {
     }
   }, [handleDestinationSelectWithCoords, handleDestinationChange]);
 
+  // H2: Use stored route distance (totalDistance) instead of Haversine straight-line
   const handleVehicleSelect = useCallback((vehicleId) => {
     setSelectedVehicle(vehicleId);
 
-    if (location && destinationCoords) {
+    if (totalDistance) {
+      setEstimatedPrice(calculatePrice(totalDistance, vehicleId));
+    } else if (location && destinationCoords) {
+      // Fallback to Haversine only if no route distance available yet
       const distance = calculateDistance(
         location.latitude,
         location.longitude,
@@ -1242,7 +1264,7 @@ export default function TaxiScreen({ navigation }) {
       );
       setEstimatedPrice(calculatePrice(distance, vehicleId));
     }
-  }, [location, destinationCoords, calculatePrice]);
+  }, [totalDistance, location, destinationCoords, calculatePrice]);
 
   const clearRideTimeout = () => {
     if (timeoutTimerRef.current) {

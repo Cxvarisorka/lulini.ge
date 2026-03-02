@@ -99,9 +99,9 @@ export default function HomeScreen({ navigation }) {
   // Create dynamic styles based on typography
   const styles = React.useMemo(() => createStyles(typography), [typography]);
 
+  // M4: Stop animation on unmount to avoid memory leak
   useEffect(() => {
-    // Floating animation for car image
-    Animated.loop(
+    const anim = Animated.loop(
       Animated.sequence([
         Animated.timing(carFloatAnim, {
           toValue: 1,
@@ -116,7 +116,9 @@ export default function HomeScreen({ navigation }) {
           useNativeDriver: true,
         }),
       ])
-    ).start();
+    );
+    anim.start();
+    return () => anim.stop();
   }, []);
 
   const carTranslateY = carFloatAnim.interpolate({
