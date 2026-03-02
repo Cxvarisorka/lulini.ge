@@ -129,6 +129,14 @@ const rideSchema = new mongoose.Schema({
         type: Number,
         default: 0
     },
+    commission: {
+        type: Number,
+        default: 0
+    },
+    commissionPercent: {
+        type: Number,
+        default: 0
+    },
     cancelledBy: {
         type: String,
         enum: ['user', 'driver', 'admin'],

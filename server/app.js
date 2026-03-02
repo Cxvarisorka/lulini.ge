@@ -64,6 +64,7 @@ const driverRouter = require('./routers/driver.router');
 const rideRouter = require('./routers/ride.router');
 const mapsRouter = require('./routers/maps.router');
 const notificationRouter = require('./routers/notification.router');
+const settingsRouter = require('./routers/settings.router');
 
 const app = express();
 const server = http.createServer(app);
@@ -391,6 +392,7 @@ app.use('/api/drivers', driverRouter);
 app.use('/api/rides', rideRouter);
 app.use('/api/maps', mapsRouter);
 app.use('/api/notifications', notificationRouter);
+app.use('/api/settings', settingsRouter);
 
 // Health check
 app.get('/health', (req, res) => {

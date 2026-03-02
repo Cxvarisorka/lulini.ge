@@ -1,6 +1,7 @@
 const Ride = require('../models/ride.model');
 const Driver = require('../models/driver.model');
 const User = require('../models/user.model');
+const Settings = require('../models/settings.model');
 const AppError = require('../utils/AppError');
 const catchAsync = require('../utils/catchAsync');
 const pushService = require('../services/pushNotification.service');
@@ -105,6 +106,8 @@ const createRide = catchAsync(async (req, res, next) => {
 
     // ── Server-side quote validation ──
     // Prevent fare manipulation: recalculate distance and validate price range
+    const pricingConfig = await Settings.getPricing();
+
     if (quote && quote.totalPrice != null) {
         const price = parseFloat(quote.totalPrice);
         if (isNaN(price) || price < 0) {
@@ -123,9 +126,9 @@ const createRide = catchAsync(async (req, res, next) => {
             // Road distance is typically 1.2-1.8x straight-line; use 2.5x as generous upper bound
             const maxRoadDist = straightLineDist * 2.5;
 
-            // Base fare range: 3 GEL base + 1-3 GEL/km depending on vehicle type
-            const minFare = 3;
-            const maxFare = 5 + (maxRoadDist * 4); // generous upper bound per km
+            // Use dynamic pricing config for validation bounds
+            const minFare = Math.max(pricingConfig.basePrice * 0.5, 1);
+            const maxFare = pricingConfig.basePrice + (maxRoadDist * pricingConfig.kmPrice * 4);
 
             if (price < minFare) {
                 return next(new AppError('Quote price is below minimum fare', 400));
@@ -518,6 +521,11 @@ const completeRide = catchAsync(async (req, res, next) => {
 
     const finalFare = fare || existingRide.quote?.totalPrice || 0;
 
+    // Calculate platform commission
+    const pricing = await Settings.getPricing();
+    const commissionPercent = pricing.commissionPercent;
+    const commission = Math.round(finalFare * (commissionPercent / 100) * 100) / 100;
+
     // Atomic update: only transitions in_progress → completed
     const ride = await Ride.findOneAndUpdate(
         {
@@ -530,6 +538,8 @@ const completeRide = catchAsync(async (req, res, next) => {
                 status: 'completed',
                 endTime: new Date(),
                 fare: finalFare,
+                commission,
+                commissionPercent,
                 paymentStatus: 'completed',
             },
         },
