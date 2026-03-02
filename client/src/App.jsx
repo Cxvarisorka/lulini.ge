@@ -14,6 +14,7 @@ import { AdminLayout } from './components/admin/AdminLayout';
 import { AdminDashboard } from './pages/admin/AdminDashboard';
 import { AdminRides } from './pages/admin/AdminRides';
 import AdminDrivers from './pages/admin/AdminDrivers';
+import { AdminPricing } from './pages/admin/AdminPricing';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { TawkTo } from './components/TawkTo';
 import './i18n';
@@ -47,6 +48,7 @@ function AppContent() {
               <Route index element={<AdminDashboard />} />
               <Route path="rides" element={<AdminRides />} />
               <Route path="drivers" element={<AdminDrivers />} />
+              <Route path="pricing" element={<AdminPricing />} />
             </Route>
           </Routes>
         </BrowserRouter>

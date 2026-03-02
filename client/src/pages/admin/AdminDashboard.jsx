@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { Navigation, Users } from 'lucide-react';
+import { Navigation, Users, DollarSign } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 
@@ -15,7 +15,7 @@ export function AdminDashboard() {
       </div>
 
       {/* Quick Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -43,6 +43,20 @@ export function AdminDashboard() {
             </Link>
           </CardContent>
         </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Pricing
+            </CardTitle>
+            <DollarSign className="h-5 w-5 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <Link to="/admin/pricing">
+              <Button variant="outline" size="sm">Manage Pricing</Button>
+            </Link>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Quick Actions */}
@@ -62,6 +76,12 @@ export function AdminDashboard() {
               <Button variant="outline">
                 <Users className="mr-2 h-4 w-4" />
                 Manage Drivers
+              </Button>
+            </Link>
+            <Link to="/admin/pricing">
+              <Button variant="outline">
+                <DollarSign className="mr-2 h-4 w-4" />
+                Pricing
               </Button>
             </Link>
             <Link to="/">

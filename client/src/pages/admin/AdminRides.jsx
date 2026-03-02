@@ -455,6 +455,24 @@ export function AdminRides() {
                             </p>
                           </div>
                         </div>
+                        {ride.commission > 0 && (
+                          <>
+                            <div className="flex items-center gap-2">
+                              <DollarSign className="h-4 w-4 text-green-600" />
+                              <div>
+                                <p className="text-muted-foreground">Commission ({ride.commissionPercent}%)</p>
+                                <p className="font-medium text-green-600">{ride.commission?.toFixed(2)} GEL</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <DollarSign className="h-4 w-4 text-muted-foreground" />
+                              <div>
+                                <p className="text-muted-foreground">Driver Payout</p>
+                                <p className="font-medium">{((ride.fare || 0) - (ride.commission || 0)).toFixed(2)} GEL</p>
+                              </div>
+                            </div>
+                          </>
+                        )}
                       </div>
 
                       {/* Notes */}
