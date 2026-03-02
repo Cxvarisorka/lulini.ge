@@ -15,8 +15,8 @@ import { Ionicons } from '@expo/vector-icons';
 const DestinationMarker = memo(({ coordinate }) => (
   <Marker
     coordinate={coordinate}
-    anchor={{ x: 0.5, y: 0.5 }}
-    tracksViewChanges={true}
+    anchor={{ x: 0.5, y: 1 }}
+    tracksViewChanges={false}
     zIndex={10}
   >
     <View style={styles.container}>
@@ -36,7 +36,7 @@ const styles = StyleSheet.create({
     width: 66,
     height: 66,
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'flex-end',
     ...Platform.select({
       android: { backgroundColor: 'rgba(255,255,255,0.01)' },
       ios: {},

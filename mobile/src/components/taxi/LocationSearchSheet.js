@@ -35,6 +35,7 @@ export default function LocationSearchSheet({
   const [stopQueries, setStopQueries] = useState({});
   const scrollViewRef = useRef(null);
   const inputRef = useRef(null);
+  const searchIdRef = useRef(0);
 
   // Sync pickup address from GPS when not manually edited
   useEffect(() => {
@@ -51,22 +52,31 @@ export default function LocationSearchSheet({
   };
   const activeQuery = getActiveQuery();
 
-  // Debounce search for active input
+  // Debounce search for active input (L13: request ID prevents out-of-order results)
   useEffect(() => {
     if (activeQuery.length < 3) {
       setSuggestions([]);
       return;
     }
 
+    const currentSearchId = ++searchIdRef.current;
+
     const timer = setTimeout(async () => {
       setIsSearching(true);
       try {
         const results = await searchPlaces(activeQuery, userLocation);
-        setSuggestions(results);
+        // Only update if this is still the latest search
+        if (currentSearchId === searchIdRef.current) {
+          setSuggestions(results);
+        }
       } catch (error) {
-        setSuggestions([]);
+        if (currentSearchId === searchIdRef.current) {
+          setSuggestions([]);
+        }
       } finally {
-        setIsSearching(false);
+        if (currentSearchId === searchIdRef.current) {
+          setIsSearching(false);
+        }
       }
     }, 500);
 
