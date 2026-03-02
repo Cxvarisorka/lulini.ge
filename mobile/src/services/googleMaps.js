@@ -1,9 +1,8 @@
 import Constants from 'expo-constants';
-import * as SecureStore from 'expo-secure-store';
+import api from './api';
 
 const GOOGLE_MAPS_API_KEY = Constants.expoConfig?.extra?.googleMapsApiKey || '';
 const MAPBOX_ACCESS_TOKEN = Constants.expoConfig?.extra?.mapboxAccessToken || '';
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://api.gotours.ge/api';
 
 /**
  * Maps Services for React Native (Expo Go compatible)
@@ -36,16 +35,6 @@ function cacheSet(cache, key, value) {
   cache.set(key, value);
 }
 
-/**
- * Get auth token for server API calls
- */
-async function getAuthToken() {
-  try {
-    return await SecureStore.getItemAsync('token');
-  } catch {
-    return null;
-  }
-}
 
 // Kutaisi region configuration - optimized for Georgia
 const KUTAISI_CONFIG = {
@@ -110,6 +99,11 @@ export async function searchPlacesNominatim(query, location = null) {
       },
     });
 
+    if (!response.ok) {
+      console.warn('[googleMaps] Nominatim search failed:', response.status);
+      return [];
+    }
+
     const data = await response.json();
 
     if (!data || data.length === 0) {
@@ -158,6 +152,7 @@ export async function searchPlacesNominatim(query, location = null) {
       };
     });
   } catch (error) {
+    console.warn('[googleMaps] Nominatim search error:', error.message);
     return [];
   }
 }
@@ -195,6 +190,11 @@ export async function reverseGeocodeNominatim(latitude, longitude) {
       },
     });
 
+    if (!response.ok) {
+      console.warn('[googleMaps] Nominatim reverse geocode failed:', response.status);
+      return null;
+    }
+
     const data = await response.json();
 
     if (data.error) {
@@ -219,6 +219,7 @@ export async function reverseGeocodeNominatim(latitude, longitude) {
       placeType: data.type,
     };
   } catch (error) {
+    console.warn('[googleMaps] Nominatim reverse geocode error:', error.message);
     return null;
   }
 }
@@ -245,21 +246,16 @@ export async function getDirections(origin, destination) {
   }
 
   try {
-    const token = await getAuthToken();
-    if (!token) {
-      // No auth token — skip server proxy, go straight to OSRM
-      return getDirectionsOSRM(origin, destination);
-    }
-
-    const url = `${API_URL}/maps/directions?` +
-      `originLat=${origin.latitude}&originLng=${origin.longitude}` +
-      `&destLat=${destination.latitude}&destLng=${destination.longitude}`;
-
-    const response = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}` },
+    const response = await api.get('/maps/directions', {
+      params: {
+        originLat: origin.latitude,
+        originLng: origin.longitude,
+        destLat: destination.latitude,
+        destLng: destination.longitude,
+      },
     });
 
-    const data = await response.json();
+    const data = response.data;
 
     if (!data.success) {
       // Server proxy failed — fallback to OSRM
@@ -281,7 +277,7 @@ export async function getDirections(origin, destination) {
     cacheSet(directionsCache, cacheKey, result);
     return result;
   } catch (error) {
-    // Network error — fallback to OSRM
+    // Network/auth error — fallback to OSRM
     return getDirectionsOSRM(origin, destination);
   }
 }
@@ -310,6 +306,12 @@ export async function getDirectionsOSRM(origin, destination) {
     const url = `https://router.project-osrm.org/route/v1/driving/${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}?overview=full&geometries=geojson`;
 
     const response = await fetch(url);
+
+    if (!response.ok) {
+      console.warn('[googleMaps] OSRM directions failed:', response.status);
+      return null;
+    }
+
     const data = await response.json();
 
     if (data.code !== 'Ok' || !data.routes || data.routes.length === 0) {
@@ -334,6 +336,7 @@ export async function getDirectionsOSRM(origin, destination) {
     cacheSet(directionsCache, cacheKey, result);
     return result;
   } catch (error) {
+    console.warn('[googleMaps] OSRM directions error:', error.message);
     return null;
   }
 }
@@ -412,6 +415,12 @@ export async function searchPlacesMapbox(query, location = null) {
     const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodedQuery}.json?${params.toString()}`;
 
     const response = await fetch(url);
+
+    if (!response.ok) {
+      console.warn('[googleMaps] Mapbox search failed:', response.status);
+      return [];
+    }
+
     const data = await response.json();
 
     if (!data.features || data.features.length === 0) {
@@ -467,6 +476,7 @@ export async function searchPlacesMapbox(query, location = null) {
       };
     });
   } catch (error) {
+    console.warn('[googleMaps] Mapbox search error:', error.message);
     return [];
   }
 }
@@ -506,6 +516,12 @@ export async function searchPlacesGoogle(query, location = null) {
 
     const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?${params.toString()}`;
     const response = await fetch(geocodeUrl);
+
+    if (!response.ok) {
+      console.warn('[googleMaps] Google geocode failed:', response.status);
+      return searchPlacesAutocomplete(query, location);
+    }
+
     const data = await response.json();
 
     if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') {
@@ -568,6 +584,7 @@ export async function searchPlacesGoogle(query, location = null) {
       };
     });
   } catch (error) {
+    console.warn('[googleMaps] Google geocode error:', error.message);
     return [];
   }
 }
@@ -596,6 +613,12 @@ async function searchPlacesAutocomplete(query, location = null) {
 
     const url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?${params.toString()}`;
     const response = await fetch(url);
+
+    if (!response.ok) {
+      console.warn('[googleMaps] Places autocomplete failed:', response.status);
+      return [];
+    }
+
     const data = await response.json();
 
     if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') {
@@ -610,6 +633,7 @@ async function searchPlacesAutocomplete(query, location = null) {
       coordinates: null, // Need getPlaceDetails for coordinates
     }));
   } catch (error) {
+    console.warn('[googleMaps] Places autocomplete error:', error.message);
     return [];
   }
 }
@@ -639,6 +663,12 @@ export async function getPlaceDetails(placeId, existingCoords = null) {
     const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=geometry,formatted_address,name&key=${GOOGLE_MAPS_API_KEY}`;
 
     const response = await fetch(url);
+
+    if (!response.ok) {
+      console.warn('[googleMaps] Place details failed:', response.status);
+      return null;
+    }
+
     const data = await response.json();
 
     if (data.status !== 'OK') {
@@ -655,6 +685,7 @@ export async function getPlaceDetails(placeId, existingCoords = null) {
       },
     };
   } catch (error) {
+    console.warn('[googleMaps] Place details error:', error.message);
     return null;
   }
 }
@@ -706,6 +737,12 @@ async function reverseGeocodeMapbox(latitude, longitude) {
     const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${longitude},${latitude}.json?${params.toString()}`;
 
     const response = await fetch(url);
+
+    if (!response.ok) {
+      console.warn('[googleMaps] Mapbox reverse geocode failed:', response.status);
+      return null;
+    }
+
     const data = await response.json();
 
     if (!data.features || data.features.length === 0) {
@@ -741,6 +778,7 @@ async function reverseGeocodeMapbox(latitude, longitude) {
       placeType: feature.place_type?.[0],
     };
   } catch (error) {
+    console.warn('[googleMaps] Mapbox reverse geocode error:', error.message);
     return null;
   }
 }
@@ -753,6 +791,12 @@ async function reverseGeocodeGoogle(latitude, longitude) {
     const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${GOOGLE_MAPS_API_KEY}&language=ka`;
 
     const response = await fetch(url);
+
+    if (!response.ok) {
+      console.warn('[googleMaps] Google reverse geocode failed:', response.status);
+      return null;
+    }
+
     const data = await response.json();
 
     if (data.status !== 'OK' || !data.results[0]) {
@@ -788,6 +832,7 @@ async function reverseGeocodeGoogle(latitude, longitude) {
       coordinates: { latitude, longitude },
     };
   } catch (error) {
+    console.warn('[googleMaps] Google reverse geocode error:', error.message);
     return null;
   }
 }

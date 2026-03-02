@@ -2,10 +2,7 @@ import * as Notifications from 'expo-notifications';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
-import { authAPI } from './api';
-import axios from 'axios';
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://api.gotours.ge/api';
+import api from './api';
 
 /**
  * Register for push notifications and send token to server
@@ -41,32 +38,22 @@ export async function registerForPushNotifications(language = 'ka') {
         const storedToken = await SecureStore.getItemAsync('pushToken');
         if (storedToken === pushToken) {
             // Token hasn't changed, but still update language preference
-            const token = await SecureStore.getItemAsync('token');
-            if (token) {
-                try {
-                    await axios.post(
-                        `${API_URL}/notifications/register-token`,
-                        { token: pushToken, platform: Platform.OS, language, app: 'passenger' },
-                        { headers: { Authorization: `Bearer ${token}` }, timeout: 5000 }
-                    );
-                } catch (err) {
-                    console.warn('[Push] Failed to update language:', err.message);
-                }
+            try {
+                await api.post('/notifications/register-token', {
+                    token: pushToken, platform: Platform.OS, language, app: 'passenger',
+                });
+            } catch (err) {
+                console.warn('[Push] Failed to update language:', err.message);
             }
             return pushToken;
         }
 
         // Send token to server
-        const authToken = await SecureStore.getItemAsync('token');
-        if (authToken) {
-            await axios.post(
-                `${API_URL}/notifications/register-token`,
-                { token: pushToken, platform: Platform.OS, language, app: 'passenger' },
-                { headers: { Authorization: `Bearer ${authToken}` }, timeout: 5000 }
-            );
-            await SecureStore.setItemAsync('pushToken', pushToken);
-            console.log('[Push] Token registered:', pushToken.substring(0, 30) + '...');
-        }
+        await api.post('/notifications/register-token', {
+            token: pushToken, platform: Platform.OS, language, app: 'passenger',
+        });
+        await SecureStore.setItemAsync('pushToken', pushToken);
+        console.log('[Push] Token registered:', pushToken.substring(0, 30) + '...');
 
         return pushToken;
     } catch (err) {
@@ -83,14 +70,7 @@ export async function unregisterPushToken() {
         const pushToken = await SecureStore.getItemAsync('pushToken');
         if (!pushToken) return;
 
-        const authToken = await SecureStore.getItemAsync('token');
-        if (authToken) {
-            await axios.post(
-                `${API_URL}/notifications/unregister-token`,
-                { token: pushToken },
-                { headers: { Authorization: `Bearer ${authToken}` }, timeout: 5000 }
-            );
-        }
+        await api.post('/notifications/unregister-token', { token: pushToken });
 
         await SecureStore.deleteItemAsync('pushToken');
         console.log('[Push] Token unregistered');

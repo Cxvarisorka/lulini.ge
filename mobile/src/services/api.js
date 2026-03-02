@@ -5,6 +5,10 @@ import { getIsInternetReachable } from '../context/NetworkContext';
 // API URL Configuration
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://api.gotours.ge/api';
 
+// H1: Global 401 logout callback — set by AuthContext to trigger logout on token invalidation
+let _onUnauthorized = null;
+export const setOnUnauthorized = (callback) => { _onUnauthorized = callback; };
+
 const api = axios.create({
   baseURL: API_URL,
   timeout: 10000,
@@ -62,6 +66,8 @@ api.interceptors.response.use(
     if (error.response?.status >= 400 && error.response?.status < 500) {
       if (error.response.status === 401) {
         await SecureStore.deleteItemAsync('token');
+        // H1: Trigger global logout so UI reflects token invalidation
+        if (_onUnauthorized) _onUnauthorized();
       }
       return Promise.reject(error);
     }
@@ -148,6 +154,12 @@ export const taxiAPI = {
 
   getNearbyDrivers: (lat, lng, vehicleType) =>
     api.get('/drivers/nearby', { params: { lat, lng, vehicleType } }),
+};
+
+// Settings API
+export const settingsAPI = {
+  getPricing: () =>
+    api.get('/settings/pricing'),
 };
 
 export { API_URL };
