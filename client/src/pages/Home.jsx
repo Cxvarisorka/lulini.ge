@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { Header } from '../components/Header';
@@ -7,14 +7,73 @@ import { useScrollAnimation } from '../hooks/useScrollAnimation';
 import {
   Car, Shield, Clock, Award, Phone, CheckCircle,
   ArrowRight, Smartphone, Zap, Heart, ChevronDown, ChevronUp,
-  DollarSign, Headphones, Navigation
+  DollarSign, Headphones, Navigation, Users, Mail, Loader2, Rocket
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
+import { apiRequest } from '../services/api';
 
 export function Home() {
   const { t } = useTranslation();
   const [openFaq, setOpenFaq] = useState(null);
+  const [waitlistEmail, setWaitlistEmail] = useState('');
+  const [waitlistName, setWaitlistName] = useState('');
+  const WAITLIST_BASE = 243;
+  const [waitlistCount, setWaitlistCount] = useState(WAITLIST_BASE);
+  const alreadyJoined = localStorage.getItem('waitlist_joined') === 'true';
+  const [waitlistStatus, setWaitlistStatus] = useState(alreadyJoined ? 'success' : 'idle'); // idle | loading | success | error
+  const [waitlistError, setWaitlistError] = useState('');
   const scrollRef = useScrollAnimation();
+
+  // Countdown to April 1, 2026
+  const LAUNCH_DATE = new Date('2026-04-01T00:00:00');
+  const [countdown, setCountdown] = useState(() => {
+    const diff = LAUNCH_DATE - new Date();
+    if (diff <= 0) return null;
+    return {
+      days: Math.floor(diff / (1000 * 60 * 60 * 24)),
+      hours: Math.floor((diff / (1000 * 60 * 60)) % 24),
+      minutes: Math.floor((diff / (1000 * 60)) % 60),
+      seconds: Math.floor((diff / 1000) % 60),
+    };
+  });
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const diff = LAUNCH_DATE - new Date();
+      if (diff <= 0) { setCountdown(null); clearInterval(timer); return; }
+      setCountdown({
+        days: Math.floor(diff / (1000 * 60 * 60 * 24)),
+        hours: Math.floor((diff / (1000 * 60 * 60)) % 24),
+        minutes: Math.floor((diff / (1000 * 60)) % 60),
+        seconds: Math.floor((diff / 1000) % 60),
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    apiRequest('/waitlist/count').then(data => setWaitlistCount(WAITLIST_BASE + data.count)).catch(() => {});
+  }, []);
+
+  const handleWaitlistSubmit = async (e) => {
+    e.preventDefault();
+    setWaitlistStatus('loading');
+    setWaitlistError('');
+    try {
+      const data = await apiRequest('/waitlist', {
+        method: 'POST',
+        body: JSON.stringify({ email: waitlistEmail, name: waitlistName }),
+      });
+      setWaitlistCount(WAITLIST_BASE + data.count);
+      setWaitlistStatus('success');
+      setWaitlistEmail('');
+      setWaitlistName('');
+      localStorage.setItem('waitlist_joined', 'true');
+    } catch (err) {
+      setWaitlistError(err.message);
+      setWaitlistStatus('error');
+    }
+  };
 
   const toggleFaq = (index) => {
     setOpenFaq(openFaq === index ? null : index);
@@ -209,6 +268,114 @@ export function Home() {
           </div>
         </div>
       </section>
+
+      {/* ===== WAITING LIST SECTION ===== */}
+      <section className="py-20 bg-purple-gradient-dark text-white relative overflow-hidden" id="waitlist">
+        <div className="absolute inset-0 opacity-20 bg-no-repeat bg-cover bg-center" style={{ backgroundImage: "url('/pattern03.png')" }} />
+        <div className="absolute inset-0 opacity-10">
+          <div className="absolute top-10 left-[20%] w-80 h-80 bg-purple-400 rounded-full blur-[120px]" />
+          <div className="absolute bottom-10 right-[15%] w-64 h-64 bg-purple-300 rounded-full blur-[100px]" />
+        </div>
+        <div className="container mx-auto px-4 relative z-10">
+          <div className="max-w-2xl mx-auto text-center">
+            <div className="anim-ready anim-scale anim-duration-500 w-16 h-16 bg-white/10 backdrop-blur-sm rounded-2xl flex items-center justify-center mx-auto mb-6 border border-white/20">
+              <Users className="w-8 h-8 text-white" />
+            </div>
+            <h2 className="anim-ready anim-fade-up anim-duration-500 anim-delay-1 text-3xl md:text-4xl font-bold mb-4">
+              {t('home.waitlist.title')}
+            </h2>
+            <p className="anim-ready anim-fade-up anim-duration-500 anim-delay-2 text-white/70 text-lg mb-3">
+              {t('home.waitlist.subtitle')}
+            </p>
+
+            {/* Counter + Success */}
+            <div className="anim-ready anim-fade-up anim-duration-500 anim-delay-2 flex flex-col items-center gap-3 mb-8">
+              <div className="inline-flex items-center gap-2.5 bg-white/10 backdrop-blur-sm border border-white/20 rounded-full px-6 py-2.5">
+                <Users className="w-5 h-5 text-purple-300" />
+                <span className="text-white font-bold text-lg">{waitlistCount}</span>
+                <span className="text-white/80 text-sm">{t('home.waitlist.count')}</span>
+              </div>
+              {waitlistStatus === 'success' && (
+                <div className="animate-scale-in inline-flex items-center gap-2 bg-green-500/15 border border-green-400/30 rounded-full px-5 py-2">
+                  <CheckCircle className="w-4 h-4 text-green-400 shrink-0" />
+                  <span className="text-sm text-green-300">{t('home.waitlist.successTitle')}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Form */}
+            {waitlistStatus !== 'success' && (
+              <form onSubmit={handleWaitlistSubmit} className="anim-ready anim-fade-up anim-duration-500 anim-delay-3 space-y-3 max-w-md mx-auto">
+                <input
+                  type="text"
+                  value={waitlistName}
+                  onChange={(e) => setWaitlistName(e.target.value)}
+                  placeholder={t('home.waitlist.namePlaceholder')}
+                  className="w-full px-4 py-3 rounded-xl bg-white/10 backdrop-blur-sm border border-white/20 text-white placeholder-white/50 focus:outline-none focus:border-white/40 transition-colors"
+                />
+                <input
+                  type="email"
+                  value={waitlistEmail}
+                  onChange={(e) => setWaitlistEmail(e.target.value)}
+                  placeholder={t('home.waitlist.emailPlaceholder')}
+                  required
+                  className="w-full px-4 py-3 rounded-xl bg-white/10 backdrop-blur-sm border border-white/20 text-white placeholder-white/50 focus:outline-none focus:border-white/40 transition-colors"
+                />
+                {waitlistStatus === 'error' && (
+                  <p className="text-red-300 text-sm">{waitlistError}</p>
+                )}
+                <Button
+                  type="submit"
+                  disabled={waitlistStatus === 'loading'}
+                  className="w-full py-3 bg-white text-purple-700 hover:bg-white/90 font-semibold rounded-xl gap-2"
+                >
+                  {waitlistStatus === 'loading' ? (
+                    <><Loader2 className="w-4 h-4 animate-spin" /> {t('home.waitlist.joining')}</>
+                  ) : (
+                    <><Mail className="w-4 h-4" /> {t('home.waitlist.joinButton')}</>
+                  )}
+                </Button>
+              </form>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* ===== COUNTDOWN SECTION ===== */}
+      {countdown && (
+        <section className="py-16 bg-white border-b border-border">
+          <div className="container mx-auto px-4">
+            <div className="max-w-2xl mx-auto text-center">
+              <div className="anim-ready anim-scale anim-duration-500 w-14 h-14 bg-primary/10 rounded-2xl flex items-center justify-center mx-auto mb-5">
+                <Rocket className="w-7 h-7 text-primary" />
+              </div>
+              <h2 className="anim-ready anim-fade-up anim-duration-500 anim-delay-1 text-2xl md:text-3xl font-bold mb-2">
+                {t('home.countdown.title')}
+              </h2>
+              <p className="anim-ready anim-fade-up anim-duration-500 anim-delay-2 text-muted-foreground mb-8">
+                {t('home.countdown.subtitle')}
+              </p>
+              <div className="anim-ready anim-fade-up anim-duration-500 anim-delay-3 flex justify-center gap-3 sm:gap-5">
+                {[
+                  { value: countdown.days, label: t('home.waitlist.days') },
+                  { value: countdown.hours, label: t('home.waitlist.hours') },
+                  { value: countdown.minutes, label: t('home.waitlist.minutes') },
+                  { value: countdown.seconds, label: t('home.waitlist.seconds') },
+                ].map((item, i) => (
+                  <div key={i} className="flex flex-col items-center">
+                    <div className="w-18 h-18 sm:w-22 sm:h-22 bg-purple-gradient-subtle border border-border rounded-2xl flex items-center justify-center p-4 sm:p-5">
+                      <span className="text-3xl sm:text-4xl font-bold text-primary tabular-nums">
+                        {String(item.value).padStart(2, '0')}
+                      </span>
+                    </div>
+                    <span className="text-muted-foreground text-xs sm:text-sm mt-2 uppercase tracking-wider font-medium">{item.label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* ===== FAQ SECTION ===== */}
       <section className="py-20 bg-purple-mesh" id="faq">

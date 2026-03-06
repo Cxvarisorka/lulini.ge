@@ -211,6 +211,26 @@
         }
       }
     },
+    "waitlist": {
+      "title": "Join Our Waiting List",
+      "subtitle": "Be the first to know when Lulini launches in your area. Sign up and we'll notify you!",
+      "count": "people already waiting",
+      "namePlaceholder": "Your name",
+      "emailPlaceholder": "Your email address",
+      "joinButton": "Join Waiting List",
+      "joining": "Joining...",
+      "successTitle": "You're on the waiting list!",
+      "successMessage": "We'll notify you as soon as Lulini is available. Thank you for your interest!",
+      "launchLabel": "Launching on April 1",
+      "days": "Days",
+      "hours": "Hours",
+      "minutes": "Min",
+      "seconds": "Sec"
+    },
+    "countdown": {
+      "title": "Launching April 1",
+      "subtitle": "We'll meet you soon. Get ready for a new way to ride."
+    },
     "download": {
       "title": "Download the Lulini App",
       "subtitle": "Get the app and start riding today. Available for iOS and Android."

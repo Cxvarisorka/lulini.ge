@@ -128,8 +128,8 @@ export function Header() {
               )}
             </div>
 
-            {/* User Profile / Sign In */}
-            {isLoggedIn ? (
+            {/* User Profile (shown only when logged in) */}
+            {isLoggedIn && (
               <div className="relative hidden lg:block">
                 <Button
                   variant="ghost"
@@ -177,12 +177,6 @@ export function Header() {
                   </>
                 )}
               </div>
-            ) : (
-              <Link to="/signin">
-                <Button variant="ghost" className="hidden lg:flex">
-                  {t('header.nav.signIn')}
-                </Button>
-              </Link>
             )}
 
             {/* Mobile Menu Button */}
@@ -270,35 +264,27 @@ export function Header() {
             {/* Divider */}
             <div className="my-2 border-t border-border" />
 
-            <div className="px-4 pt-2 space-y-3">
-              {isLoggedIn ? (
-                <>
-                  <Link to="/profile" className="block" onClick={() => setIsMenuOpen(false)}>
-                    <Button variant="outline" className="w-full flex items-center justify-center gap-2 py-2.5 text-foreground border-border hover:bg-accent">
-                      <User className="h-4 w-4" />
-                      My Profile
-                    </Button>
-                  </Link>
-                  <Button
-                    variant="outline"
-                    className="w-full flex items-center justify-center gap-2 py-2.5 text-red-600 border-red-200 hover:bg-red-50"
-                    onClick={() => {
-                      logout();
-                      setIsMenuOpen(false);
-                    }}
-                  >
-                    <LogOut className="h-4 w-4" />
-                    Sign Out
-                  </Button>
-                </>
-              ) : (
-                <Link to="/signin" className="block" onClick={() => setIsMenuOpen(false)}>
-                  <Button variant="outline" className="w-full py-2.5 text-foreground border-border hover:bg-accent">
-                    {t('header.nav.signIn')}
+            {isLoggedIn && (
+              <div className="px-4 pt-2 space-y-3">
+                <Link to="/profile" className="block" onClick={() => setIsMenuOpen(false)}>
+                  <Button variant="outline" className="w-full flex items-center justify-center gap-2 py-2.5 text-foreground border-border hover:bg-accent">
+                    <User className="h-4 w-4" />
+                    My Profile
                   </Button>
                 </Link>
-              )}
-            </div>
+                <Button
+                  variant="outline"
+                  className="w-full flex items-center justify-center gap-2 py-2.5 text-red-600 border-red-200 hover:bg-red-50"
+                  onClick={() => {
+                    logout();
+                    setIsMenuOpen(false);
+                  }}
+                >
+                  <LogOut className="h-4 w-4" />
+                  Sign Out
+                </Button>
+              </div>
+            )}
           </nav>
         </div>
       </div>
