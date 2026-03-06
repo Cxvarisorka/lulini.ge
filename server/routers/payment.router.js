@@ -1,0 +1,41 @@
+const express = require('express');
+const router = express.Router();
+const {
+    registerCard,
+    verifyCardRegistration,
+    getSavedCards,
+    deleteCard,
+    setDefaultCard,
+    preChargeRide,
+    verifyRidePayment,
+    linkPaymentToRide,
+    handleCallback,
+    getPaymentStatus,
+    handleRedirectSuccess,
+    handleRedirectFail
+} = require('../controllers/payment.controller');
+const { protect } = require('../middlewares/auth.middleware');
+
+// Card management (authenticated)
+router.post('/cards/register', protect, registerCard);
+router.post('/cards/verify/:orderId', protect, verifyCardRegistration);
+router.get('/cards', protect, getSavedCards);
+router.delete('/cards/:cardId', protect, deleteCard);
+router.patch('/cards/:cardId/default', protect, setDefaultCard);
+
+// Pre-ride payment (authenticated) — charge card before requesting drivers
+router.post('/ride/pre-charge', protect, preChargeRide);
+router.post('/ride/verify/:orderId', protect, verifyRidePayment);
+router.patch('/:paymentId/link-ride', protect, linkPaymentToRide);
+
+// Payment status (authenticated)
+router.get('/:paymentId/status', protect, getPaymentStatus);
+
+// BOG callback (public - called by BOG server)
+router.post('/callback', handleCallback);
+
+// Redirect handlers (public - user returns from BOG)
+router.get('/redirect/success', handleRedirectSuccess);
+router.get('/redirect/fail', handleRedirectFail);
+
+module.exports = router;
