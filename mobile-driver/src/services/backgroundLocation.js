@@ -2,6 +2,7 @@ import * as TaskManager from 'expo-task-manager';
 import * as Location from 'expo-location';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
+import { haversineKm } from '../utils/distance';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -13,7 +14,8 @@ const BATCH_FLUSH_INTERVAL_MS = 30000; // 30s max hold time
 
 // Speed limits (km/h) — anything above is rejected as implausible
 const MAX_SPEED_KMH = 200;
-const MIN_ACCURACY_METERS = 100; // reject readings with >100m accuracy circle
+// [L10 FIX] Relaxed from 100m to 150m — urban canyon effect causes 50-100m error
+const MIN_ACCURACY_METERS = 150;
 
 // Retry queue
 const RETRY_QUEUE_KEY = 'bg_location_retry_queue';
@@ -21,7 +23,7 @@ const MAX_RETRY_QUEUE_SIZE = 200;
 const RETRY_FLUSH_INTERVAL_MS = 60000; // attempt flush every 60s
 
 // API
-const getApiUrl = () => process.env.EXPO_PUBLIC_API_URL || 'https://api.gotours.ge/api';
+const getApiUrl = () => process.env.EXPO_PUBLIC_API_URL || '';
 
 // ─── In-memory state (persists across background invocations within same process) ─
 
@@ -29,20 +31,6 @@ let locationBatch = [];
 let lastFlushedAt = Date.now();
 let lastValidLocation = null; // { latitude, longitude, timestamp }
 let retryFlushTimer = null;
-
-// ─── Haversine ───────────────────────────────────────────────────────────────
-
-function haversineKm(lat1, lon1, lat2, lon2) {
-  const R = 6371;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
 
 // ─── Spoofing detection (client-side heuristics) ─────────────────────────────
 
@@ -173,13 +161,14 @@ async function flushBatch() {
     const token = await SecureStore.getItemAsync('token');
     if (!token) return;
 
-    // Try retry queue first
-    await flushRetryQueue(token);
-
+    // Send current batch first (fresh data has priority over stale retries)
     const success = await sendBatchToServer(batch, token);
     if (!success) {
       await enqueueForRetry(batch);
     }
+
+    // Then drain retry queue
+    await flushRetryQueue(token);
   } catch (e) {
     await enqueueForRetry(batch);
   }
@@ -271,15 +260,16 @@ export async function startBackgroundLocationUpdates(hasActiveRide = false) {
     activityType: Location.ActivityType.AutomotiveNavigation,
   });
 
-  // Start periodic retry flush
-  if (!retryFlushTimer) {
-    retryFlushTimer = setInterval(async () => {
-      try {
-        const token = await SecureStore.getItemAsync('token');
-        if (token) await flushRetryQueue(token);
-      } catch (_) {}
-    }, RETRY_FLUSH_INTERVAL_MS);
+  // [C6 FIX] Always clear existing timer before creating new one to prevent duplicates
+  if (retryFlushTimer) {
+    clearInterval(retryFlushTimer);
   }
+  retryFlushTimer = setInterval(async () => {
+    try {
+      const token = await SecureStore.getItemAsync('token');
+      if (token) await flushRetryQueue(token);
+    } catch (_) {}
+  }, RETRY_FLUSH_INTERVAL_MS);
 }
 
 export async function stopBackgroundLocationUpdates() {

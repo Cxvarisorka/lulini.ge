@@ -11,6 +11,8 @@ import {
   ActivityIndicator,
   ScrollView,
   TextInput,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
@@ -81,6 +83,14 @@ export default function RidesScreen({ navigation }) {
     loadRides();
   }, [loadRides]);
 
+  // Refresh rides when screen regains focus (e.g. after completing a ride)
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      loadRides();
+    });
+    return unsubscribe;
+  }, [navigation, loadRides]);
+
   const onRefresh = async () => {
     setRefreshing(true);
     await loadRides(true);
@@ -142,7 +152,8 @@ export default function RidesScreen({ navigation }) {
     clearRideRequest();
   };
 
-  const renderRideItem = ({ item }) => (
+  // [L2 FIX] Memoize renderItem for FlatList
+  const renderRideItem = useCallback(({ item }) => (
     <TouchableOpacity
       style={styles.rideCard}
       onPress={() => navigation.navigate('RideDetail', { rideId: item._id })}
@@ -155,7 +166,7 @@ export default function RidesScreen({ navigation }) {
             {t(`rides.${item.status}`)}
           </Text>
         </View>
-        <Text style={styles.fareText}>${item.quote?.totalPrice?.toFixed(2)}</Text>
+        <Text style={styles.fareText}>{item.quote?.totalPrice?.toFixed(2)} ₾</Text>
       </View>
 
       <View style={styles.locationContainer}>
@@ -170,7 +181,7 @@ export default function RidesScreen({ navigation }) {
           <React.Fragment key={`stop-${index}`}>
             <View style={styles.locationLine} />
             <View style={styles.locationRow}>
-              <View style={[styles.locationDot, { backgroundColor: '#f97316' }]} />
+              <View style={[styles.locationDot, { backgroundColor: colors.stop }]} />
               <Text style={styles.locationText} numberOfLines={1}>
                 {stop.address}
               </Text>
@@ -196,7 +207,7 @@ export default function RidesScreen({ navigation }) {
         <Ionicons name="chevron-forward" size={18} color={colors.mutedForeground} />
       </View>
     </TouchableOpacity>
-  );
+  ), [styles, navigation, t]);
 
   const applyAdvancedFilters = useCallback((rides) => {
     let filtered = [...rides];
@@ -250,10 +261,11 @@ export default function RidesScreen({ navigation }) {
     return filtered;
   }, [minPrice, maxPrice, dateRange, sortBy]);
 
-  const getRidesToDisplay = () => {
+  // [H4 FIX] Memoize filtered rides instead of recomputing on every render
+  const ridesToDisplay = useMemo(() => {
     const baseRides = selectedFilter === 'active' ? activeRides : allRides;
     return applyAdvancedFilters(baseRides);
-  };
+  }, [selectedFilter, activeRides, allRides, applyAdvancedFilters]);
 
   const clearFilters = () => {
     setMinPrice('');
@@ -268,8 +280,6 @@ export default function RidesScreen({ navigation }) {
     { key: 'completed', label: t('rides.completedTab'), icon: 'checkmark-circle' },
     { key: 'cancelled', label: t('rides.cancelledTab'), icon: 'close-circle' },
   ];
-
-  const ridesToDisplay = getRidesToDisplay();
 
   return (
     <View style={styles.container}>
@@ -384,6 +394,7 @@ export default function RidesScreen({ navigation }) {
       >
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { paddingBottom: insets.bottom + spacing['3xl'] }]}>
+            <View style={styles.dragHandle} />
             <View style={styles.modalHeader}>
               <View style={styles.modalIconBadge}>
                 <Ionicons name="car" size={28} color={colors.primaryForeground} />
@@ -406,7 +417,7 @@ export default function RidesScreen({ navigation }) {
                     <React.Fragment key={`stop-${index}`}>
                       <View style={styles.modalLocationLine} />
                       <View style={styles.modalLocationRow}>
-                        <View style={[styles.locationDot, { backgroundColor: '#f97316' }]} />
+                        <View style={[styles.locationDot, { backgroundColor: colors.stop }]} />
                         <View style={styles.locationTextContainer}>
                           <Text style={styles.locationLabel} numberOfLines={1}>{t('rides.stop')} {index + 1}</Text>
                           <Text style={styles.locationAddress} numberOfLines={2}>{stop.address}</Text>
@@ -437,7 +448,7 @@ export default function RidesScreen({ navigation }) {
                   </View>
                   <View style={styles.detailItem}>
                     <Text style={styles.detailLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{t('rides.fare')}</Text>
-                    <Text style={styles.fareValue} numberOfLines={1}>${newRideRequest.quote?.totalPrice}</Text>
+                    <Text style={styles.fareValue} numberOfLines={1}>{newRideRequest.quote?.totalPrice} ₾</Text>
                   </View>
                 </View>
 
@@ -479,8 +490,12 @@ export default function RidesScreen({ navigation }) {
         transparent={true}
         onRequestClose={() => setShowFiltersModal(false)}
       >
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
           <View style={styles.filtersModalContent}>
+            <View style={styles.dragHandle} />
             <View style={styles.filtersModalHeader}>
               <Text style={styles.filtersModalTitle} numberOfLines={1}>{t('rides.filters')}</Text>
               <TouchableOpacity
@@ -502,13 +517,14 @@ export default function RidesScreen({ navigation }) {
                       style={styles.priceInput}
                       value={minPrice}
                       onChangeText={setMinPrice}
-                      placeholder="$0"
+                      placeholder="0 ₾"
                       placeholderTextColor={colors.mutedForeground}
                       keyboardType="numeric"
+                      accessibilityLabel={t('rides.minPrice')}
                     />
                   </View>
                   <View style={styles.priceSeparator}>
-                    <Text style={styles.priceSeparatorText}>-</Text>
+                    <Text style={styles.priceSeparatorText}>—</Text>
                   </View>
                   <View style={styles.priceInputContainer}>
                     <Text style={styles.priceInputLabel} numberOfLines={1}>{t('rides.maxPrice')}</Text>
@@ -516,9 +532,10 @@ export default function RidesScreen({ navigation }) {
                       style={styles.priceInput}
                       value={maxPrice}
                       onChangeText={setMaxPrice}
-                      placeholder="$999"
+                      placeholder="999 ₾"
                       placeholderTextColor={colors.mutedForeground}
                       keyboardType="numeric"
+                      accessibilityLabel={t('rides.maxPrice')}
                     />
                   </View>
                 </View>
@@ -603,7 +620,7 @@ export default function RidesScreen({ navigation }) {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
@@ -823,6 +840,15 @@ const createStyles = (typography) => StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'flex-end',
   },
+  dragHandle: {
+    width: 36,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: colors.border,
+    alignSelf: 'center',
+    marginTop: spacing.sm,
+    marginBottom: spacing.sm,
+  },
   modalContent: {
     backgroundColor: colors.background,
     borderTopLeftRadius: radius['2xl'],
@@ -966,8 +992,8 @@ const createStyles = (typography) => StyleSheet.create({
     color: colors.foreground,
   },
   closeButton: {
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
     borderRadius: radius.full,
     backgroundColor: colors.muted,
     justifyContent: 'center',
@@ -1046,6 +1072,7 @@ const createStyles = (typography) => StyleSheet.create({
   },
   clearFiltersButton: {
     flex: 1,
+    minHeight: 48,
     paddingVertical: spacing.md,
     borderRadius: radius.lg,
     backgroundColor: colors.muted,
@@ -1058,6 +1085,7 @@ const createStyles = (typography) => StyleSheet.create({
   },
   applyFiltersButton: {
     flex: 1,
+    minHeight: 48,
     paddingVertical: spacing.md,
     borderRadius: radius.lg,
     backgroundColor: colors.primary,

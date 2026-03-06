@@ -11,6 +11,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import appConfig from '../../app.config';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { useMap } from '../context/MapContext';
@@ -64,14 +65,17 @@ export default function SettingsScreen({ navigation }) {
         {
           icon: 'help-circle-outline',
           label: t('settings.helpCenter'),
+          onPress: () => Alert.alert(t('common.comingSoon') || 'Coming Soon', t('common.featureComingSoon') || 'This feature is coming soon.'),
         },
         {
           icon: 'document-text-outline',
           label: t('settings.termsOfService'),
+          onPress: () => Alert.alert(t('common.comingSoon') || 'Coming Soon', t('common.featureComingSoon') || 'This feature is coming soon.'),
         },
         {
           icon: 'shield-checkmark-outline',
           label: t('settings.privacyPolicy'),
+          onPress: () => Alert.alert(t('common.comingSoon') || 'Coming Soon', t('common.featureComingSoon') || 'This feature is coming soon.'),
         },
       ],
     },
@@ -81,7 +85,7 @@ export default function SettingsScreen({ navigation }) {
         {
           icon: 'information-circle-outline',
           label: t('settings.version'),
-          value: '1.0.0',
+          value: appConfig.expo?.version || '1.0.0',
         },
       ],
     },
@@ -90,7 +94,12 @@ export default function SettingsScreen({ navigation }) {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+        <TouchableOpacity
+          onPress={() => navigation.goBack()}
+          style={styles.backButton}
+          accessibilityRole="button"
+          accessibilityLabel={t('common.back') || 'Go back'}
+        >
           <Ionicons name="arrow-back" size={24} color={colors.foreground} />
         </TouchableOpacity>
         <Text style={styles.title}>{t('settings.title')}</Text>
@@ -135,7 +144,12 @@ export default function SettingsScreen({ navigation }) {
         ))}
 
         {/* Logout Button */}
-        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+        <TouchableOpacity
+          style={styles.logoutButton}
+          onPress={handleLogout}
+          accessibilityRole="button"
+          accessibilityLabel={t('settings.logout')}
+        >
           <Ionicons name="log-out-outline" size={24} color={colors.destructive} />
           <Text style={styles.logoutButtonText}>{t('settings.logout')}</Text>
         </TouchableOpacity>
@@ -158,8 +172,8 @@ const createStyles = (typography) => StyleSheet.create({
     borderBottomColor: colors.border,
   },
   backButton: {
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
     justifyContent: 'center',
   },
   title: {

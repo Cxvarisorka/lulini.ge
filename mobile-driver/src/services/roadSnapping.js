@@ -17,7 +17,7 @@
 
 import * as SecureStore from 'expo-secure-store';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://api.gotours.ge/api';
+const API_URL = process.env.EXPO_PUBLIC_API_URL || '';
 
 // Batch size — Google Roads allows up to 100, but we batch smaller for lower latency
 const BATCH_SIZE = 10;

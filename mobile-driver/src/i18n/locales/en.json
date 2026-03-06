@@ -14,7 +14,13 @@
     "close": "Close",
     "accept": "Accept",
     "decline": "Decline",
-    "unknown": "Unknown"
+    "unknown": "Unknown",
+    "tryAgain": "Try Again",
+    "ok": "OK"
+  },
+  "connection": {
+    "connected": "Connected",
+    "reconnecting": "Reconnecting..."
   },
   "auth": {
     "login": "Login",
@@ -262,6 +268,7 @@
     "noInternet": "No internet connection",
     "locationError": "Unable to get your location",
     "permissionDenied": "Permission denied",
-    "enableLocation": "Enable Location"
+    "enableLocation": "Enable Location",
+    "unexpectedError": "The app encountered an unexpected error.\nPlease try again."
   }
 }

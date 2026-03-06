@@ -2,11 +2,15 @@ import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Animated } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useTranslation } from 'react-i18next';
 import { useSocket } from '../context/SocketContext';
+import { colors, useTypography } from '../theme/colors';
 
 const ConnectionStatusBar = () => {
   const { isConnected } = useSocket();
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
+  const typography = useTypography();
   const slideAnim = useRef(new Animated.Value(-60)).current;
   const [visible, setVisible] = useState(false);
   const wasConnectedRef = useRef(true);
@@ -50,16 +54,18 @@ const ConnectionStatusBar = () => {
         <Ionicons
           name={isConnected ? 'checkmark-circle' : 'cloud-offline'}
           size={16}
-          color="#fff"
+          color={colors.primaryForeground}
         />
-        <Text style={styles.text}>
-          {isConnected ? 'Connected' : 'Reconnecting...'}
+        <Text style={[styles.text, { ...typography.caption }]}>
+          {isConnected ? t('connection.connected') : t('connection.reconnecting')}
         </Text>
       </View>
     </Animated.View>
   );
 };
 
+// [M2 FIX] Use theme colors instead of hardcoded values
+// [M3 FIX] Typography applied inline via useTypography() hook
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
@@ -77,14 +83,13 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   barDisconnected: {
-    backgroundColor: '#dc2626',
+    backgroundColor: colors.destructive,
   },
   barConnected: {
-    backgroundColor: '#16a34a',
+    backgroundColor: colors.success,
   },
   text: {
-    color: '#fff',
-    fontSize: 13,
+    color: colors.primaryForeground,
     fontWeight: '600',
   },
 });

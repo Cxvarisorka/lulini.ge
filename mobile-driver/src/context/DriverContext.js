@@ -1,4 +1,4 @@
-import React, { createContext, useState, useContext, useEffect, useCallback, useRef } from 'react';
+import React, { createContext, useState, useContext, useEffect, useCallback, useRef, useMemo } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { driverAPI, rideAPI } from '../services/api';
 import { useAuth } from './AuthContext';
@@ -23,7 +23,7 @@ export const useDriver = () => {
 
 export const DriverProvider = ({ children }) => {
   const { isAuthenticated } = useAuth();
-  const { startTracking, stopTracking, isTracking } = useLocation();
+  const { startTracking, stopTracking, isTracking, permissionsReady } = useLocation();
   const { socket, setDriverOnlineStatus } = useSocket();
 
   const [isOnline, setIsOnline] = useState(false);
@@ -36,13 +36,10 @@ export const DriverProvider = ({ children }) => {
   });
   const [loading, setLoading] = useState(false);
 
-  // Rides cache (in-memory)
-  const ridesCache = useRef({
-    allRides: [],
-    timestamp: null,
-    isValid: false,
-  });
+  // [H1 FIX] Single source of truth for rides — state-based only
   const [cachedRides, setCachedRides] = useState([]);
+  const ridesCacheTimestamp = useRef(null);
+  const ridesCacheValid = useRef(false);
 
   // Earnings cache (in-memory, keyed by period)
   const earningsCache = useRef({});  // { today: { data, timestamp }, week: { ... }, month: { ... } }
@@ -60,7 +57,7 @@ export const DriverProvider = ({ children }) => {
 
   // Invalidate rides cache
   const invalidateCache = useCallback(() => {
-    ridesCache.current.isValid = false;
+    ridesCacheValid.current = false;
     paginationMeta.current = { page: 0, pages: 1, hasMore: true };
     setHasMoreRides(true);
     AsyncStorage.removeItem(STORAGE_KEY).catch(() => {});
@@ -74,12 +71,8 @@ export const DriverProvider = ({ children }) => {
 
   // Check if cache is valid
   const isCacheValid = useCallback(() => {
-    const { timestamp, isValid } = ridesCache.current;
-    if (!isValid || !timestamp) return false;
-
-    const now = Date.now();
-    const isExpired = now - timestamp > CACHE_EXPIRATION_MS;
-    return !isExpired;
+    if (!ridesCacheValid.current || !ridesCacheTimestamp.current) return false;
+    return Date.now() - ridesCacheTimestamp.current < CACHE_EXPIRATION_MS;
   }, []);
 
   // Load earnings with caching (per period)
@@ -120,7 +113,13 @@ export const DriverProvider = ({ children }) => {
     return { earnings: { total: 0, trips: 0, average: 0 }, fromCache: false };
   }, []);
 
-  // Listen for real-time updates from socket
+  // [H2 FIX] Use refs for callbacks to keep socket listener registration stable
+  const invalidateCacheRef = useRef(invalidateCache);
+  invalidateCacheRef.current = invalidateCache;
+  const invalidateEarningsCacheRef = useRef(invalidateEarningsCache);
+  invalidateEarningsCacheRef.current = invalidateEarningsCache;
+
+  // Listen for real-time updates from socket — only re-register when socket changes
   useEffect(() => {
     if (!socket) return;
 
@@ -132,13 +131,11 @@ export const DriverProvider = ({ children }) => {
           earnings: data.updatedStats.totalEarnings,
         });
       }
-      // Remove from active rides if present
       if (data.rideId) {
         removeActiveRide(data.rideId);
       }
-      // Invalidate caches when ride is completed
-      invalidateCache();
-      invalidateEarningsCache();
+      invalidateCacheRef.current();
+      invalidateEarningsCacheRef.current();
     };
 
     // Handle ride review event - update rating
@@ -150,23 +147,20 @@ export const DriverProvider = ({ children }) => {
       }
     };
 
-    // Handle new ride request - invalidate cache
     const handleNewRide = () => {
-      invalidateCache();
+      invalidateCacheRef.current();
     };
 
-    // Handle ride cancelled - remove from active rides and invalidate cache
     const handleRideCancelled = (ride) => {
       const rideId = ride?._id || ride?.rideId;
       if (rideId) {
         removeActiveRide(rideId);
       }
-      invalidateCache();
+      invalidateCacheRef.current();
     };
 
-    // Handle ride updated - invalidate cache
     const handleRideUpdated = () => {
-      invalidateCache();
+      invalidateCacheRef.current();
     };
 
     socket.on('ride:completed', handleRideCompleted);
@@ -182,7 +176,18 @@ export const DriverProvider = ({ children }) => {
       socket.off('ride:cancelled', handleRideCancelled);
       socket.off('ride:updated', handleRideUpdated);
     };
-  }, [socket, invalidateCache, invalidateEarningsCache]);
+  }, [socket]); // [H2 FIX] Only depend on socket, use refs for callbacks
+
+  // Track whether we need to start tracking after permissions are ready
+  const pendingTrackingRef = useRef(false);
+
+  // When permissionsReady becomes true, start tracking if it was deferred
+  useEffect(() => {
+    if (permissionsReady && pendingTrackingRef.current && !isTracking) {
+      pendingTrackingRef.current = false;
+      startTracking();
+    }
+  }, [permissionsReady]);
 
   const loadDriverStats = async () => {
     try {
@@ -198,7 +203,11 @@ export const DriverProvider = ({ children }) => {
 
         // If driver is online on server, restart location tracking
         if (driverOnline && !isTracking) {
-          startTracking();
+          if (permissionsReady) {
+            startTracking();
+          } else {
+            pendingTrackingRef.current = true;
+          }
         }
       }
     } catch (error) {
@@ -206,25 +215,26 @@ export const DriverProvider = ({ children }) => {
     }
   };
 
+  // [H1 FIX] Use cachedRidesRef to read current rides inside callbacks without stale closure
+  const cachedRidesRef = useRef([]);
+  cachedRidesRef.current = cachedRides;
+
   // Load rides page 1 with caching support
   const loadAllRides = useCallback(async (forceRefresh = false) => {
     // Return in-memory cached data if valid and not forcing refresh
     if (!forceRefresh && isCacheValid()) {
-      return { rides: ridesCache.current.allRides, fromCache: true };
+      return { rides: cachedRidesRef.current, fromCache: true };
     }
 
     // Try AsyncStorage cache on first load (not force refresh)
-    if (!forceRefresh && !ridesCache.current.isValid) {
+    if (!forceRefresh && !ridesCacheValid.current) {
       try {
         const raw = await AsyncStorage.getItem(STORAGE_KEY);
         if (raw) {
           const cached = JSON.parse(raw);
           if (cached.rides?.length && Date.now() - cached.timestamp < CACHE_EXPIRATION_MS) {
-            ridesCache.current = {
-              allRides: cached.rides,
-              timestamp: cached.timestamp,
-              isValid: true,
-            };
+            ridesCacheTimestamp.current = cached.timestamp;
+            ridesCacheValid.current = true;
             setCachedRides(cached.rides);
             paginationMeta.current = {
               page: cached.page || 1,
@@ -251,12 +261,9 @@ export const DriverProvider = ({ children }) => {
         const serverPage = response.data.page;
         const serverPages = response.data.pages;
 
-        // Update in-memory cache
-        ridesCache.current = {
-          allRides,
-          timestamp: Date.now(),
-          isValid: true,
-        };
+        // Update cache
+        ridesCacheTimestamp.current = Date.now();
+        ridesCacheValid.current = true;
         setCachedRides(allRides);
 
         // Update pagination
@@ -283,8 +290,8 @@ export const DriverProvider = ({ children }) => {
       return { rides: [], fromCache: false };
     } catch (error) {
       // Return cached data on error if available
-      if (ridesCache.current.allRides.length > 0) {
-        return { rides: ridesCache.current.allRides, fromCache: true };
+      if (cachedRidesRef.current.length > 0) {
+        return { rides: cachedRidesRef.current, fromCache: true };
       }
       throw error;
     }
@@ -307,21 +314,22 @@ export const DriverProvider = ({ children }) => {
         setHasMoreRides(serverPage < serverPages);
 
         // Merge with existing rides (deduplicate)
-        const existingIds = new Set(ridesCache.current.allRides.map(r => r._id));
-        const unique = newRides.filter(r => !existingIds.has(r._id));
-        const merged = [...ridesCache.current.allRides, ...unique];
+        setCachedRides(prev => {
+          const existingIds = new Set(prev.map(r => r._id));
+          const unique = newRides.filter(r => !existingIds.has(r._id));
+          const merged = [...prev, ...unique];
 
-        ridesCache.current.allRides = merged;
-        setCachedRides(merged);
+          // Persist merged rides (up to 60)
+          AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({
+            rides: merged.slice(0, 60),
+            page: serverPage,
+            pages: serverPages,
+            total: response.data.total,
+            timestamp: Date.now(),
+          })).catch(() => {});
 
-        // Persist merged rides (up to 60)
-        AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({
-          rides: merged.slice(0, 60),
-          page: serverPage,
-          pages: serverPages,
-          total: response.data.total,
-          timestamp: Date.now(),
-        })).catch(() => {});
+          return merged;
+        });
 
         return { rides: newRides, hasMore: serverPage < serverPages };
       }
@@ -404,29 +412,29 @@ export const DriverProvider = ({ children }) => {
     }
   };
 
-  const addActiveRide = (ride) => {
+  const addActiveRide = useCallback((ride) => {
     setActiveRides((prev) => [...prev, ride]);
-  };
+  }, []);
 
-  const removeActiveRide = (rideId) => {
+  const removeActiveRide = useCallback((rideId) => {
     setActiveRides((prev) => prev.filter((ride) => ride._id !== rideId));
-  };
+  }, []);
 
-  const updateActiveRide = (rideId, updates) => {
+  const updateActiveRide = useCallback((rideId, updates) => {
     setActiveRides((prev) =>
       prev.map((ride) => (ride._id === rideId ? { ...ride, ...updates } : ride))
     );
-  };
+  }, []);
 
-  const refreshStats = async () => {
+  const refreshStats = useCallback(async () => {
     await loadDriverStats();
-  };
+  }, []);
 
-  const updateStats = (newStats) => {
+  const updateStats = useCallback((newStats) => {
     setStats((prev) => ({ ...prev, ...newStats }));
-  };
+  }, []);
 
-  const value = {
+  const value = useMemo(() => ({
     isOnline,
     activeRides,
     cachedRides,
@@ -446,7 +454,9 @@ export const DriverProvider = ({ children }) => {
     invalidateCache,
     loadEarnings,
     invalidateEarningsCache,
-  };
+  }), [isOnline, activeRides, cachedRides, stats, loading, hasMoreRides,
+    addActiveRide, removeActiveRide, updateActiveRide, refreshStats, updateStats,
+    loadActiveRides, loadAllRides, loadMoreRides, invalidateCache, loadEarnings, invalidateEarningsCache]);
 
   return <DriverContext.Provider value={value}>{children}</DriverContext.Provider>;
 };

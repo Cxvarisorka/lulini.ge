@@ -1,4 +1,4 @@
-import React, { createContext, useState, useContext, useEffect, useRef, useCallback } from 'react';
+import React, { createContext, useState, useContext, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Platform, AppState } from 'react-native';
 import { io } from 'socket.io-client';
 import * as SecureStore from 'expo-secure-store';
@@ -16,7 +16,7 @@ export const useSocket = () => {
   return context;
 };
 
-const SOCKET_URL = process.env.EXPO_PUBLIC_SOCKET_URL || 'https://api.gotours.ge';
+const SOCKET_URL = process.env.EXPO_PUBLIC_SOCKET_URL || '';
 // Poll less aggressively when socket is healthy, more when degraded
 const POLL_INTERVAL_HEALTHY_MS = 60000; // 60s when WebSocket is connected
 const POLL_INTERVAL_DEGRADED_MS = 10000; // 10s when socket is disconnected
@@ -90,7 +90,7 @@ export const SocketProvider = ({ children }) => {
         } else {
           // Socket thinks it's connected - rejoin room and fetch any missed rides
           socketRef.current.emit('driver:rejoin');
-          if (isDriverOnline) {
+          if (isDriverOnlineRef.current) {
             debouncedFetchPendingRides();
           }
         }
@@ -98,20 +98,23 @@ export const SocketProvider = ({ children }) => {
     });
 
     return () => subscription.remove();
-  }, [isDriverOnline]);
+  }, []);
+
+  // Ref-based fetch so the debounce callback never goes stale
+  const fetchPendingRidesRef = useRef(null);
+  fetchPendingRidesRef.current = fetchPendingRides;
 
   // Debounced version of fetchPendingRides — prevents burst calls on reconnect
-  // Must be declared before useEffects that reference it in dependency arrays
   const debouncedFetchPendingRides = useCallback(() => {
     if (fetchDebounceRef.current) clearTimeout(fetchDebounceRef.current);
     fetchDebounceRef.current = setTimeout(() => {
-      fetchPendingRides();
+      fetchPendingRidesRef.current();
     }, FETCH_DEBOUNCE_MS);
   }, []);
 
   // When driver online status is confirmed (e.g., from loadDriverStats sync),
   // ensure socket room membership and fetch any pending rides.
-  // This fixes Android where the initial socket room join can be unreliable.
+  // [C1 FIX] Use socketRef.current instead of undefined socketInstance
   useEffect(() => {
     isDriverOnlineRef.current = isDriverOnline;
     if (isDriverOnline && socketRef.current?.connected) {
@@ -131,7 +134,7 @@ export const SocketProvider = ({ children }) => {
       }
 
       pollIntervalRef.current = setInterval(() => {
-        fetchPendingRides();
+        fetchPendingRidesRef.current();
       }, interval);
 
       // Also fetch immediately when going online
@@ -171,9 +174,17 @@ export const SocketProvider = ({ children }) => {
         console.log(`[Socket] Connecting to ${SOCKET_URL}`);
       }
 
+      // [C2 FIX] Don't fall back to stale closure token
       const socketInstance = io(SOCKET_URL, {
-        auth: {
-          token,
+        auth: async (cb) => {
+          // Use a function so reconnections always get a fresh token
+          const freshToken = await SecureStore.getItemAsync('token');
+          if (!freshToken) {
+            console.warn('[Socket] No fresh token available for auth, disconnecting');
+            socketRef.current?.disconnect();
+            return;
+          }
+          cb({ token: freshToken });
         },
         transports: ['websocket', 'polling'],
         reconnection: true,
@@ -199,9 +210,6 @@ export const SocketProvider = ({ children }) => {
         socketInstance.emit('driver:rejoin');
         rejoinTimer = setTimeout(() => {
           if (__DEV__) console.warn('[Socket] driver:rejoin ACK timeout (no reconnect — will retry on next event)');
-          // Don't force reconnect — the server race condition is fixed.
-          // If we still don't get an ACK, socket.io's built-in reconnection
-          // and the next AppState/poll cycle will retry.
         }, 5000);
 
         // Remove any stale listeners before adding a new one
@@ -245,6 +253,9 @@ export const SocketProvider = ({ children }) => {
 
       // Listen for new ride requests
       socketInstance.on('ride:request', (rideData) => {
+
+        
+
         setNewRideRequest((current) => {
           // Avoid showing duplicate if we already have this ride (from polling)
           if (current && current._id === rideData._id) return current;
@@ -329,7 +340,8 @@ export const SocketProvider = ({ children }) => {
     }
   };
 
-  const fetchPendingRides = async () => {
+  // [C5 FIX] Use ref for fetchPendingRides so context value stays stable
+  async function fetchPendingRides() {
     try {
       const response = await rideAPI.getAvailableRides();
 
@@ -345,7 +357,7 @@ export const SocketProvider = ({ children }) => {
     } catch (error) {
       console.warn('[Socket] Failed to fetch pending rides:', error.message);
     }
-  };
+  }
 
   const showRideNotification = async (rideData) => {
     // Skip if we already notified for this ride
@@ -372,31 +384,37 @@ export const SocketProvider = ({ children }) => {
     }
   };
 
-  const emitEvent = (event, data) => {
-    if (socketRef.current && isConnected) {
+  const emitEvent = useCallback((event, data) => {
+    if (socketRef.current?.connected) {
       socketRef.current.emit(event, data);
     }
-  };
+  }, []);
 
-  const clearRideRequest = () => {
+  const clearRideRequest = useCallback(() => {
     setNewRideRequest(null);
     notifiedRideIdsRef.current.clear();
-  };
+  }, []);
 
   // Called by DriverContext when driver goes online/offline
   const setDriverOnlineStatus = useCallback((online) => {
     setIsDriverOnline(online);
   }, []);
 
-  const value = {
+  // [C5 FIX] Stable ref-based wrapper for fetchPendingRides to avoid context churn
+  const stableFetchPendingRides = useCallback(() => {
+    fetchPendingRidesRef.current();
+  }, []);
+
+  // [C5 FIX] Only depend on values that actually change for consumers
+  const value = useMemo(() => ({
     socket,
     isConnected,
     newRideRequest,
     emitEvent,
     clearRideRequest,
-    fetchPendingRides,
+    fetchPendingRides: stableFetchPendingRides,
     setDriverOnlineStatus,
-  };
+  }), [socket, isConnected, newRideRequest, emitEvent, clearRideRequest, stableFetchPendingRides, setDriverOnlineStatus]);
 
   return <SocketContext.Provider value={value}>{children}</SocketContext.Provider>;
 };

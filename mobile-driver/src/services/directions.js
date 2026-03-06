@@ -3,9 +3,20 @@
  * Provides turn-by-turn routing with step-by-step maneuver data
  */
 
-// Cache for route results
+// Cache for route results (bounded LRU)
 const routeCache = new Map();
 const CACHE_TTL = 300000; // 5 minutes
+const MAX_CACHE_ENTRIES = 50;
+
+// [H5 FIX] Periodic TTL cleanup to prevent memory leaks over long sessions
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of routeCache) {
+    if (now - entry.timestamp > CACHE_TTL) {
+      routeCache.delete(key);
+    }
+  }
+}, CACHE_TTL);
 
 /**
  * Fetch OSRM route with full step-by-step maneuver data
@@ -59,6 +70,11 @@ export async function getNavigationRoute(origin, destination) {
       steps,
     };
 
+    // LRU eviction when cache exceeds max
+    if (routeCache.size >= MAX_CACHE_ENTRIES) {
+      const oldestKey = routeCache.keys().next().value;
+      routeCache.delete(oldestKey);
+    }
     routeCache.set(cacheKey, { data: result, timestamp: Date.now() });
     return result;
   } catch (error) {
@@ -93,23 +109,6 @@ export function formatDuration(seconds) {
   return `${hours}h ${remainingMins}m`;
 }
 
-/**
- * Calculate distance between two points using Haversine formula
- * @returns distance in meters
- */
-export function haversineDistance(lat1, lon1, lat2, lon2) {
-  const R = 6371000;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) *
-      Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-}
 
 /**
  * Get Ionicons name for a maneuver type/modifier

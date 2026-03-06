@@ -1,6 +1,8 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import i18next from 'i18next';
+import { colors, staticTypography, radius, spacing } from '../theme/colors';
 
 class ErrorBoundary extends React.Component {
   state = { hasError: false, error: null };
@@ -27,16 +29,16 @@ class ErrorBoundary extends React.Component {
     if (this.state.hasError) {
       return (
         <View style={styles.container}>
-          <Ionicons name="warning-outline" size={64} color="#dc2626" />
-          <Text style={styles.title}>Something went wrong</Text>
+          <Ionicons name="warning-outline" size={64} color={colors.destructive} />
+          <Text style={styles.title}>{i18next.t('errors.somethingWentWrong')}</Text>
           <Text style={styles.message}>
-            The app encountered an unexpected error.{'\n'}Please try again.
+            {i18next.t('errors.unexpectedError')}
           </Text>
           {__DEV__ && this.state.error && (
             <Text style={styles.errorDetail}>{this.state.error.message}</Text>
           )}
           <TouchableOpacity style={styles.button} onPress={this.handleReset}>
-            <Text style={styles.buttonText}>Try Again</Text>
+            <Text style={styles.buttonText}>{i18next.t('common.tryAgain')}</Text>
           </TouchableOpacity>
         </View>
       );
@@ -46,47 +48,48 @@ class ErrorBoundary extends React.Component {
   }
 }
 
+// [M2 FIX] Use theme colors instead of hardcoded values
+// [M3 FIX] Use staticTypography (class component can't use hooks)
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#fff',
-    padding: 32,
+    backgroundColor: colors.background,
+    padding: spacing['3xl'],
   },
   title: {
-    fontSize: 22,
+    ...staticTypography.h1,
     fontWeight: '700',
-    color: '#1a1a1a',
-    marginTop: 20,
-    marginBottom: 8,
+    color: colors.foreground,
+    marginTop: spacing.xl,
+    marginBottom: spacing.sm,
   },
   message: {
-    fontSize: 15,
-    color: '#6b7280',
+    ...staticTypography.body,
+    color: colors.mutedForeground,
     textAlign: 'center',
     lineHeight: 22,
-    marginBottom: 12,
+    marginBottom: spacing.md,
   },
   errorDetail: {
-    fontSize: 12,
-    color: '#9ca3af',
+    ...staticTypography.captionSmall,
+    color: colors.text.muted,
     textAlign: 'center',
     fontFamily: 'monospace',
-    marginBottom: 24,
-    paddingHorizontal: 16,
+    marginBottom: spacing['2xl'],
+    paddingHorizontal: spacing.lg,
   },
   button: {
-    backgroundColor: '#7c3aed',
-    paddingHorizontal: 32,
+    backgroundColor: colors.accent,
+    paddingHorizontal: spacing['3xl'],
     paddingVertical: 14,
-    borderRadius: 12,
-    marginTop: 12,
+    borderRadius: radius.lg,
+    marginTop: spacing.md,
   },
   buttonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
+    ...staticTypography.button,
+    color: colors.primaryForeground,
   },
 });
 

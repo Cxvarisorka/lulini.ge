@@ -4,7 +4,7 @@ import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import axios from 'axios';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://api.gotours.ge/api';
+const API_URL = process.env.EXPO_PUBLIC_API_URL || '';
 
 /**
  * Register for push notifications and send token to server
@@ -58,13 +58,18 @@ export async function registerForPushNotifications(language = 'ka') {
         // Send token to server
         const authToken = await SecureStore.getItemAsync('token');
         if (authToken) {
-            await axios.post(
+            // [M4 FIX] Validate server response before storing token locally
+            const response = await axios.post(
                 `${API_URL}/notifications/register-token`,
                 { token: pushToken, platform: Platform.OS, language, app: 'driver' },
                 { headers: { Authorization: `Bearer ${authToken}` }, timeout: 5000 }
             );
-            await SecureStore.setItemAsync('pushToken', pushToken);
-            console.log('[Push] Token registered:', pushToken.substring(0, 30) + '...');
+            if (response.data?.success !== false) {
+                await SecureStore.setItemAsync('pushToken', pushToken);
+                if (__DEV__) console.log('[Push] Token registered:', pushToken.substring(0, 30) + '...');
+            } else {
+                console.warn('[Push] Server rejected token registration:', response.data?.message);
+            }
         }
 
         return pushToken;
@@ -92,7 +97,7 @@ export async function unregisterPushToken() {
         }
 
         await SecureStore.deleteItemAsync('pushToken');
-        console.log('[Push] Token unregistered');
+        if (__DEV__) console.log('[Push] Token unregistered');
     } catch (err) {
         console.warn('[Push] Unregister failed:', err.message);
         // Still clear local token even if server call fails

@@ -20,7 +20,7 @@ export default function SplashScreen({ onFinish }) {
         duration: 400,
         useNativeDriver: true,
       }).start(() => onFinish());
-    }, 2500);
+    }, 1500);
 
     return () => clearTimeout(timer);
   }, []);

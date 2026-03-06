@@ -1,8 +1,10 @@
-import React, { createContext, useState, useContext, useEffect } from 'react';
+import React, { createContext, useState, useContext, useEffect, useCallback, useMemo } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { authAPI } from '../services/api';
+import { authEvents } from '../services/authEvents';
 import { registerForPushNotifications, unregisterPushToken } from '../services/pushNotifications';
+import { clearRetryQueue } from '../services/backgroundLocation';
 import i18n from '../i18n';
 
 const AuthContext = createContext();
@@ -31,6 +33,14 @@ export const AuthProvider = ({ children }) => {
     }
   }, [user, isAuthenticated]);
 
+  // Listen for force-logout events from 401 interceptor
+  useEffect(() => {
+    const unsubscribe = authEvents.on('force-logout', () => {
+      logout();
+    });
+    return unsubscribe;
+  }, []);
+
   const checkAuthStatus = async () => {
     try {
       const storedUser = await SecureStore.getItemAsync('user');
@@ -54,20 +64,18 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const login = async (email, password) => {
+  const login = useCallback(async (email, password) => {
     try {
       const response = await authAPI.login({ email, password });
 
       if (response.data.success) {
         const userData = response.data.data.user;
-        const token = response.data.token; // Token is at root level of response
+        const token = response.data.token;
 
-        // Verify user is a driver
         if (userData.role !== 'driver') {
           throw new Error('Not authorized as driver');
         }
 
-        // Store token and user data
         await SecureStore.setItemAsync('token', token);
         await SecureStore.setItemAsync('user', JSON.stringify(userData));
 
@@ -84,9 +92,9 @@ export const AuthProvider = ({ children }) => {
         : error.response?.data?.message || 'Invalid credentials';
       return { success: false, message };
     }
-  };
+  }, []);
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     try {
       await unregisterPushToken();
     } catch (error) {
@@ -100,29 +108,33 @@ export const AuthProvider = ({ children }) => {
       await SecureStore.deleteItemAsync('token');
       await SecureStore.deleteItemAsync('user');
       await AsyncStorage.removeItem('@driver_rides_cache').catch(() => {});
+      // [M10 FIX] Clear location retry queue to prevent sending stale data on next login
+      await clearRetryQueue().catch(() => {});
       setUser(null);
       setIsAuthenticated(false);
     }
-  };
+  }, []);
 
-  const updateUser = async (updatedData) => {
+  const updateUser = useCallback(async (updatedData) => {
     try {
-      const updatedUser = { ...user, ...updatedData };
-      await SecureStore.setItemAsync('user', JSON.stringify(updatedUser));
-      setUser(updatedUser);
+      setUser((prev) => {
+        const updated = { ...prev, ...updatedData };
+        SecureStore.setItemAsync('user', JSON.stringify(updated)).catch(() => {});
+        return updated;
+      });
     } catch (error) {
       // Failed to update user data
     }
-  };
+  }, []);
 
-  const value = {
+  const value = useMemo(() => ({
     user,
     loading,
     isAuthenticated,
     login,
     logout,
     updateUser,
-  };
+  }), [user, loading, isAuthenticated, login, logout, updateUser]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

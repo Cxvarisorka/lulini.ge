@@ -42,6 +42,7 @@ export const colors = {
   warning: '#d97706', // amber
   info: '#6d28d9', // dark purple for info
   gold: '#FFD700', // gold for ratings
+  stop: '#f97316', // orange for stops
 
   // Driver-specific colors
   online: '#16a34a', // green - driver is online

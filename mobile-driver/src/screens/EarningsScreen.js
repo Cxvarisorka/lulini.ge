@@ -62,7 +62,7 @@ export default function EarningsScreen() {
     {
       id: 'average',
       icon: 'trending-up',
-      value: `$${earnings.average?.toFixed(2) || '0.00'}`,
+      value: `${earnings.average?.toFixed(2) || '0.00'} ₾`,
       label: t('earnings.averagePerTrip'),
       color: colors.info,
     },
@@ -127,7 +127,7 @@ export default function EarningsScreen() {
                   <Ionicons name="wallet" size={24} color={colors.primaryForeground} />
                 </View>
                 <Text style={styles.totalLabel} numberOfLines={1}>{t('earnings.total')}</Text>
-                <Text style={styles.totalAmount} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>${earnings.total?.toFixed(2) || '0.00'}</Text>
+                <Text style={styles.totalAmount} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{earnings.total?.toFixed(2) || '0.00'} ₾</Text>
                 <Text style={styles.periodLabel} numberOfLines={1}>
                   {selectedPeriod === 'today'
                     ? t('earnings.today')
@@ -150,42 +150,6 @@ export default function EarningsScreen() {
               </View>
             </>
           )}
-        </View>
-
-        {/* Quick Stats */}
-        <View style={styles.quickStatsSection}>
-          <Text style={styles.sectionTitle} numberOfLines={1}>{t('earnings.summary') || 'SUMMARY'}</Text>
-          <View style={styles.quickStatsCard}>
-            <View style={styles.quickStatRow}>
-              <View style={styles.quickStatLeft}>
-                <View style={[styles.quickStatDot, { backgroundColor: colors.success }]} />
-                <Text style={styles.quickStatLabel} numberOfLines={1}>{t('earnings.completedTrips') || 'Completed Trips'}</Text>
-              </View>
-              <Text style={styles.quickStatValue} numberOfLines={1}>{earnings.trips || 0}</Text>
-            </View>
-
-            <View style={styles.quickStatDivider} />
-
-            <View style={styles.quickStatRow}>
-              <View style={styles.quickStatLeft}>
-                <View style={[styles.quickStatDot, { backgroundColor: colors.info }]} />
-                <Text style={styles.quickStatLabel} numberOfLines={1}>{t('earnings.averagePerTrip')}</Text>
-              </View>
-              <Text style={styles.quickStatValue} numberOfLines={1}>${earnings.average?.toFixed(2) || '0.00'}</Text>
-            </View>
-
-            <View style={styles.quickStatDivider} />
-
-            <View style={styles.quickStatRow}>
-              <View style={styles.quickStatLeft}>
-                <View style={[styles.quickStatDot, { backgroundColor: colors.warning }]} />
-                <Text style={styles.quickStatLabel} numberOfLines={1}>{t('earnings.totalEarnings') || 'Total Earnings'}</Text>
-              </View>
-              <Text style={[styles.quickStatValue, styles.quickStatValueHighlight]} numberOfLines={1}>
-                ${earnings.total?.toFixed(2) || '0.00'}
-              </Text>
-            </View>
-          </View>
         </View>
 
         {/* Earnings History */}

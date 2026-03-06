@@ -43,7 +43,7 @@ export default function ProfileScreen({ navigation }) {
     {
       id: 'earnings',
       icon: 'cash',
-      value: `$${stats.earnings?.toFixed(2) || '0.00'}`,
+      value: `${stats.earnings?.toFixed(2) || '0.00'} ₾`,
       label: t('home.earnings'),
       color: colors.success,
     },
@@ -204,7 +204,12 @@ export default function ProfileScreen({ navigation }) {
         </View>
 
         {/* Logout Button */}
-        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+        <TouchableOpacity
+          style={styles.logoutButton}
+          onPress={handleLogout}
+          accessibilityRole="button"
+          accessibilityLabel={t('profile.logout') || 'Logout'}
+        >
           <Ionicons name="log-out-outline" size={22} color={colors.destructive} />
           <Text style={styles.logoutText} numberOfLines={1}>{t('profile.logout') || 'Logout'}</Text>
         </TouchableOpacity>

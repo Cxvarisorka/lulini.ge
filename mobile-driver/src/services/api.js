@@ -1,7 +1,8 @@
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
+import { authEvents } from './authEvents';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://api.gotours.ge/api';
+const API_URL = process.env.EXPO_PUBLIC_API_URL || '';
 
 const api = axios.create({
   baseURL: API_URL,
@@ -21,7 +22,8 @@ api.interceptors.request.use(
         config.headers.Authorization = `Bearer ${token}`;
       }
     } catch (error) {
-      // Failed to get token from secure store
+      console.warn('[API] Failed to get token from secure store:', error.message);
+      return Promise.reject(new Error('Failed to retrieve authentication token'));
     }
     return config;
   },
@@ -35,9 +37,10 @@ api.interceptors.response.use(
   (response) => response,
   async (error) => {
     if (error.response?.status === 401) {
-      // Token expired or invalid
+      // Token expired or invalid — clear storage and notify AuthContext
       await SecureStore.deleteItemAsync('token');
       await SecureStore.deleteItemAsync('user');
+      authEvents.emit('force-logout');
     }
     return Promise.reject(error);
   }

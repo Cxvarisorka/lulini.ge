@@ -1,6 +1,6 @@
 import * as SecureStore from 'expo-secure-store';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://api.gotours.ge/api';
+const API_URL = process.env.EXPO_PUBLIC_API_URL || '';
 
 // LRU-style cache with max size and TTL
 const MAX_CACHE_ENTRIES = 50;
@@ -14,6 +14,16 @@ function cacheSet(cache, key, value) {
   }
   cache.set(key, value);
 }
+
+// [H5 FIX] Periodic TTL cleanup to prevent memory growth
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of directionsCache) {
+    if (now - entry._ts > DIRECTIONS_CACHE_TTL) {
+      directionsCache.delete(key);
+    }
+  }
+}, DIRECTIONS_CACHE_TTL);
 
 async function getAuthToken() {
   try {

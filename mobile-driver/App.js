@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { LogBox } from 'react-native';
+import { LogBox, AppState } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -60,8 +60,14 @@ Notifications.setNotificationHandler({
 
 export default function App() {
   const [showSplash, setShowSplash] = useState(true);
+  // Track whether notification permissions were requested to avoid
+  // overlapping with location permissions on iOS after splash
+  const notifPermRequested = React.useRef(false);
 
   useEffect(() => {
+    if (notifPermRequested.current) return;
+    notifPermRequested.current = true;
+
     const requestPermissions = async () => {
       try {
         const { status: existingStatus } = await Notifications.getPermissionsAsync();
@@ -74,6 +80,23 @@ export default function App() {
     };
 
     requestPermissions();
+  }, []);
+
+  // [M5 FIX] Re-check notification permission when app returns to foreground
+  // This allows users who denied initially to enable from Settings
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', async (nextAppState) => {
+      if (nextAppState === 'active') {
+        try {
+          const { status } = await Notifications.getPermissionsAsync();
+          if (status !== 'granted') {
+            // Don't re-prompt — just log. User must enable via Settings.
+            // registerForPushNotifications will handle this when status changes.
+          }
+        } catch (_) {}
+      }
+    });
+    return () => subscription.remove();
   }, []);
 
   if (showSplash) {

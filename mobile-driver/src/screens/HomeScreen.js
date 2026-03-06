@@ -1,20 +1,24 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
+  Pressable,
   Dimensions,
   ActivityIndicator,
   Alert,
   Modal,
   ScrollView,
+  Platform,
 } from 'react-native';
-import { WebView } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import MapView from '../components/map/MapViewWrapper';
+import Marker from '../components/map/MarkerWrapper';
+import { markerImages } from '../components/map/markerImages';
 import { useDriver } from '../context/DriverContext';
 import { useLocation } from '../context/LocationContext';
 import { useSocket } from '../context/SocketContext';
@@ -22,12 +26,13 @@ import { useAuth } from '../context/AuthContext';
 import { rideAPI } from '../services/api';
 import { colors, shadows, radius, spacing, useTypography } from '../theme/colors';
 
-const { height } = Dimensions.get('window');
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 export default function HomeScreen({ navigation }) {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
-  const webViewRef = useRef(null);
+  const mapRef = useRef(null);
+  const hasFitted = useRef(false);
   const typography = useTypography();
   const styles = useMemo(() => createStyles(typography), [typography]);
 
@@ -47,57 +52,55 @@ export default function HomeScreen({ navigation }) {
     }
   }, [newRideRequest]);
 
+  // Fit map to ride markers when active ride changes
+  const activeRide = activeRides?.[0];
   useEffect(() => {
-    if (location && webViewRef.current) {
-      webViewRef.current.injectJavaScript(`
-        updateDriverLocation(${location.latitude}, ${location.longitude});
-        true;
-      `);
-    }
-  }, [location]);
-
-  // Show active ride locations on map (pickup, stops, dropoff)
-  useEffect(() => {
-    if (!webViewRef.current) return;
-    const ride = activeRides?.[0];
-    if (!ride) {
-      webViewRef.current.injectJavaScript('showRideLocations([]); true;');
+    if (!activeRide || !mapRef.current) {
+      hasFitted.current = false;
       return;
     }
-    const locations = [];
-    if (ride.pickup?.lat && ride.pickup?.lng) {
-      locations.push({ lat: ride.pickup.lat, lng: ride.pickup.lng, color: '#22c55e', label: t('rides.pickup') });
-    }
-    if (ride.stops?.length > 0) {
-      ride.stops.forEach((stop, i) => {
-        if (stop.lat && stop.lng) {
-          locations.push({ lat: stop.lat, lng: stop.lng, color: '#f97316', label: `${t('rides.stop')} ${i + 1}` });
-        }
+    if (hasFitted.current) return;
+    const coords = [];
+    if (location) coords.push({ latitude: location.latitude, longitude: location.longitude });
+    if (activeRide.pickup?.lat) coords.push({ latitude: activeRide.pickup.lat, longitude: activeRide.pickup.lng });
+    if (activeRide.dropoff?.lat) coords.push({ latitude: activeRide.dropoff.lat, longitude: activeRide.dropoff.lng });
+    activeRide.stops?.forEach(s => {
+      if (s.lat) coords.push({ latitude: s.lat, longitude: s.lng });
+    });
+    if (coords.length >= 2) {
+      hasFitted.current = true;
+      mapRef.current.fitToCoordinates(coords, {
+        edgePadding: { top: 80, right: 40, bottom: 40, left: 40 },
+        animated: true,
       });
     }
-    if (ride.dropoff?.lat && ride.dropoff?.lng) {
-      locations.push({ lat: ride.dropoff.lat, lng: ride.dropoff.lng, color: '#ef4444', label: t('rides.dropoff') });
-    }
-    webViewRef.current.injectJavaScript(`showRideLocations(${JSON.stringify(locations)}); true;`);
-  }, [activeRides, t]);
+  }, [activeRide, location]);
 
+  // [H6 FIX] Prevent double-tap race condition with toggling ref
+  const togglingRef = useRef(false);
   const handleToggleOnline = async () => {
-    if (isOnline) {
-      const result = await goOffline();
-      if (!result.success) {
-        Alert.alert(t('common.error'), result.message);
-      }
-    } else {
-      const result = await goOnline();
-      if (!result.success) {
-        Alert.alert(t('common.error'), result.message || t('errors.locationError'));
+    if (togglingRef.current) return;
+    togglingRef.current = true;
+    try {
+      if (isOnline) {
+        const result = await goOffline();
+        if (!result.success) {
+          Alert.alert(t('common.error'), result.message);
+        }
       } else {
-        if (fetchPendingRides) {
-          setTimeout(() => {
-            fetchPendingRides();
-          }, 500);
+        const result = await goOnline();
+        if (!result.success) {
+          Alert.alert(t('common.error'), result.message || t('errors.locationError'));
+        } else {
+          if (fetchPendingRides) {
+            setTimeout(() => {
+              fetchPendingRides();
+            }, 500);
+          }
         }
       }
+    } finally {
+      togglingRef.current = false;
     }
   };
 
@@ -131,91 +134,34 @@ export default function HomeScreen({ navigation }) {
     clearRideRequest();
   };
 
-  const getMapHTML = () => {
-    const lat = location?.latitude || 42.2679;
-    const lng = location?.longitude || 42.6946;
+  // Fallback region (Georgia center) used only as initialRegion
+  const initialMapRegion = useRef({
+    latitude: 42.2679,
+    longitude: 43.3569,
+    latitudeDelta: 3,
+    longitudeDelta: 3,
+  }).current;
 
-    return `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-        <style>
-          body { margin: 0; padding: 0; }
-          #map { width: 100%; height: 100vh; }
-          .driver-marker {
-            background: #5b21b6;
-            border: 3px solid white;
-            border-radius: 50%;
-            width: 24px;
-            height: 24px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-          }
-        </style>
-      </head>
-      <body>
-        <div id="map"></div>
-        <script>
-          var map = L.map('map', {
-            zoomControl: false,
-            attributionControl: false
-          }).setView([${lat}, ${lng}], 15);
+  // Animate to driver's actual location once GPS resolves
+  const hasAnimatedToLocation = useRef(false);
+  useEffect(() => {
+    if (location && mapRef.current && !hasAnimatedToLocation.current) {
+      hasAnimatedToLocation.current = true;
+      mapRef.current.animateToRegion({
+        latitude: location.latitude,
+        longitude: location.longitude,
+        latitudeDelta: 0.01,
+        longitudeDelta: 0.01,
+      }, 600);
+    }
+  }, [location]);
 
-          L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            maxZoom: 19,
-          }).addTo(map);
-
-          var driverIcon = L.divIcon({
-            className: 'driver-marker',
-            iconSize: [24, 24],
-            iconAnchor: [12, 12]
-          });
-
-          var driverMarker = L.marker([${lat}, ${lng}], {icon: driverIcon}).addTo(map);
-
-          function updateDriverLocation(lat, lng) {
-            driverMarker.setLatLng([lat, lng]);
-            map.setView([lat, lng], map.getZoom());
-          }
-
-          var rideMarkers = [];
-          function showRideLocations(locations) {
-            // Clear existing ride markers
-            rideMarkers.forEach(function(m) { map.removeLayer(m); });
-            rideMarkers = [];
-            if (!locations || locations.length === 0) return;
-
-            var bounds = [driverMarker.getLatLng()];
-            locations.forEach(function(loc) {
-              var icon = L.divIcon({
-                className: '',
-                html: '<div style="background:' + loc.color + ';border:2px solid white;border-radius:50%;width:16px;height:16px;box-shadow:0 2px 6px rgba(0,0,0,0.3);"></div>',
-                iconSize: [16, 16],
-                iconAnchor: [8, 8]
-              });
-              var marker = L.marker([loc.lat, loc.lng], {icon: icon}).addTo(map);
-              if (loc.label) marker.bindTooltip(loc.label, {permanent: false, direction: 'top'});
-              rideMarkers.push(marker);
-              bounds.push([loc.lat, loc.lng]);
-            });
-
-            if (bounds.length >= 2) {
-              map.fitBounds(bounds, {padding: [30, 30]});
-            }
-          }
-        </script>
-      </body>
-      </html>
-    `;
-  };
-
-  const quickStats = [
+  // [L1 FIX] Memoize stats array to avoid recreation on every render
+  const quickStats = useMemo(() => [
     {
       id: 'earnings',
       icon: 'cash',
-      value: `$${stats.last24Hours?.earnings?.toFixed(2) || '0.00'}`,
+      value: `${stats.last24Hours?.earnings?.toFixed(2) || '0.00'} ₾`,
       label: t('home.last24Hours'),
       color: colors.success,
     },
@@ -229,22 +175,61 @@ export default function HomeScreen({ navigation }) {
     {
       id: 'total',
       icon: 'wallet',
-      value: `$${stats.total?.earnings?.toFixed(2) || '0.00'}`,
+      value: `${stats.total?.earnings?.toFixed(2) || '0.00'} ₾`,
       label: t('home.totalEarnings'),
       color: colors.info,
     },
-  ];
+  ], [stats.last24Hours?.earnings, stats.last24Hours?.trips, stats.total?.earnings, t]);
 
   return (
     <View style={styles.container}>
       {/* Map */}
       <View style={styles.mapContainer}>
-        <WebView
-          ref={webViewRef}
-          source={{ html: getMapHTML() }}
+        <MapView
+          ref={mapRef}
           style={styles.map}
-          scrollEnabled={false}
-        />
+          initialRegion={initialMapRegion}
+          showsUserLocation={false}
+          showsMyLocationButton={false}
+          showsCompass={false}
+          toolbarEnabled={false}
+        >
+          {/* Driver location marker */}
+          {location && (
+            <Marker
+              coordinate={{ latitude: location.latitude, longitude: location.longitude }}
+              image={markerImages.pickup}
+              tracksViewChanges={false}
+              anchor={{ x: 0.5, y: 0.5 }}
+            />
+          )}
+          {/* Active ride markers */}
+          {activeRide?.pickup?.lat && (
+            <Marker
+              coordinate={{ latitude: activeRide.pickup.lat, longitude: activeRide.pickup.lng }}
+              image={markerImages.pickup}
+              tracksViewChanges={false}
+              anchor={{ x: 0.5, y: 1 }}
+            />
+          )}
+          {activeRide?.stops?.map((stop, i) => stop.lat && (
+            <Marker
+              key={`stop-${i}`}
+              coordinate={{ latitude: stop.lat, longitude: stop.lng }}
+              image={markerImages.stopSmall[Math.min(i + 1, 9)]}
+              tracksViewChanges={false}
+              anchor={{ x: 0.5, y: 1 }}
+            />
+          ))}
+          {activeRide?.dropoff?.lat && (
+            <Marker
+              coordinate={{ latitude: activeRide.dropoff.lat, longitude: activeRide.dropoff.lng }}
+              image={markerImages.dropoff}
+              tracksViewChanges={false}
+              anchor={{ x: 0.5, y: 1 }}
+            />
+          )}
+        </MapView>
 
         {/* Top Header */}
         <View style={[styles.headerOverlay, { paddingTop: insets.top + spacing.sm }]}>
@@ -252,6 +237,8 @@ export default function HomeScreen({ navigation }) {
             <TouchableOpacity
               style={styles.settingsButton}
               onPress={() => navigation.navigate('Settings')}
+              accessibilityLabel={t('settings.title')}
+              accessibilityRole="button"
             >
               <Ionicons name="settings-outline" size={24} color={colors.foreground} />
             </TouchableOpacity>
@@ -266,10 +253,14 @@ export default function HomeScreen({ navigation }) {
                 </Text>
               </View>
             </View>
-            <View style={[styles.connectionBadge, { backgroundColor: isConnected ? '#dcfce7' : '#fee2e2' }]}>
+            <View
+              style={[styles.connectionBadge, { backgroundColor: isConnected ? '#dcfce7' : '#fee2e2' }]}
+              accessibilityLabel={isConnected ? t('connection.connected') : t('connection.reconnecting')}
+              accessibilityRole="image"
+            >
               <Ionicons
                 name={isConnected ? 'wifi' : 'wifi-outline'}
-                size={18}
+                size={20}
                 color={isConnected ? colors.success : colors.destructive}
               />
             </View>
@@ -308,15 +299,19 @@ export default function HomeScreen({ navigation }) {
           </View>
 
           {/* Toggle Button */}
-          <TouchableOpacity
-            style={[
+          <Pressable
+            style={({ pressed }) => [
               styles.toggleCard,
               isOnline && styles.toggleCardOnline,
               loading && styles.toggleCardDisabled,
+              Platform.OS === 'ios' && pressed && { opacity: 0.9 },
             ]}
             onPress={handleToggleOnline}
             disabled={loading}
-            activeOpacity={0.9}
+            android_ripple={{ color: 'rgba(255,255,255,0.25)', borderless: false }}
+            accessibilityRole="button"
+            accessibilityLabel={isOnline ? t('home.goOffline') : t('home.goOnline')}
+            accessibilityState={{ disabled: loading }}
           >
             {loading ? (
               <View style={styles.toggleContent}>
@@ -343,7 +338,7 @@ export default function HomeScreen({ navigation }) {
                 <Ionicons name="chevron-forward" size={24} color="rgba(255,255,255,0.7)" />
               </View>
             )}
-          </TouchableOpacity>
+          </Pressable>
 
           {/* Quick Actions */}
           <View style={styles.actionsSection}>
@@ -387,6 +382,7 @@ export default function HomeScreen({ navigation }) {
       >
         <View style={styles.modalOverlay}>
           <View style={[styles.rideRequestModal, { paddingBottom: insets.bottom + spacing['3xl'] }]}>
+            <View style={styles.dragHandle} />
             <View style={styles.modalHeader}>
               <View style={styles.modalIconBadge}>
                 <Ionicons name="car" size={28} color={colors.primaryForeground} />
@@ -411,7 +407,7 @@ export default function HomeScreen({ navigation }) {
                     <React.Fragment key={`stop-${index}`}>
                       <View style={styles.locationLine} />
                       <View style={styles.rideDetailRow}>
-                        <View style={[styles.locationDot, { backgroundColor: '#f97316' }]} />
+                        <View style={[styles.locationDot, { backgroundColor: colors.stop }]} />
                         <View style={styles.rideDetailText}>
                           <Text style={styles.rideDetailLabel} numberOfLines={1}>{t('rides.stop')} {index + 1}</Text>
                           <Text style={styles.rideDetailValue} numberOfLines={2}>{stop.address}</Text>
@@ -443,7 +439,7 @@ export default function HomeScreen({ navigation }) {
                   <View style={styles.rideInfoItem}>
                     <Text style={styles.rideInfoLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{t('rides.estimatedFare')}</Text>
                     <Text style={[styles.rideInfoValue, styles.fareHighlight]} numberOfLines={1}>
-                      ${newRideRequest.quote?.totalPrice?.toFixed(2) || '0.00'}
+                      {newRideRequest.quote?.totalPrice?.toFixed(2) || '0.00'} ₾
                     </Text>
                   </View>
                 </View>
@@ -455,6 +451,8 @@ export default function HomeScreen({ navigation }) {
                 style={styles.declineButton}
                 onPress={handleDeclineRide}
                 disabled={accepting}
+                accessibilityRole="button"
+                accessibilityLabel={t('rides.decline')}
               >
                 <Ionicons name="close" size={20} color={colors.destructive} />
                 <Text style={styles.declineButtonText} numberOfLines={1}>{t('rides.decline')}</Text>
@@ -464,6 +462,9 @@ export default function HomeScreen({ navigation }) {
                 style={[styles.acceptButton, accepting && styles.acceptButtonDisabled]}
                 onPress={handleAcceptRide}
                 disabled={accepting}
+                accessibilityRole="button"
+                accessibilityLabel={t('rides.accept')}
+                accessibilityState={{ disabled: accepting }}
               >
                 {accepting ? (
                   <ActivityIndicator color={colors.primaryForeground} />
@@ -488,7 +489,8 @@ const createStyles = (typography) => StyleSheet.create({
     backgroundColor: colors.muted,
   },
   mapContainer: {
-    height: height * 0.4,
+    height: Math.max(SCREEN_HEIGHT * 0.35, 240),
+    minHeight: 240,
   },
   map: {
     flex: 1,
@@ -542,8 +544,8 @@ const createStyles = (typography) => StyleSheet.create({
     color: colors.mutedForeground,
   },
   connectionBadge: {
-    width: 36,
-    height: 36,
+    width: 44,
+    height: 44,
     borderRadius: radius.full,
     backgroundColor: colors.muted,
     justifyContent: 'center',
@@ -628,6 +630,7 @@ const createStyles = (typography) => StyleSheet.create({
     borderRadius: radius.lg,
     padding: spacing.lg,
     marginBottom: spacing.xl,
+    overflow: 'hidden',
     ...shadows.md,
   },
   toggleCardOnline: {
@@ -711,9 +714,14 @@ const createStyles = (typography) => StyleSheet.create({
     borderTopRightRadius: radius['2xl'],
     padding: spacing.xl,
     paddingBottom: spacing['3xl'],
-    borderWidth: 2,
-    borderColor: colors.primary,
-    borderBottomWidth: 0,
+  },
+  dragHandle: {
+    width: 36,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: colors.border,
+    alignSelf: 'center',
+    marginBottom: spacing.lg,
   },
   modalHeader: {
     alignItems: 'center',
@@ -741,8 +749,6 @@ const createStyles = (typography) => StyleSheet.create({
     borderRadius: radius.lg,
     padding: spacing.lg,
     marginBottom: spacing.md,
-    borderWidth: 2,
-    borderColor: colors.primary,
   },
   rideDetailRow: {
     flexDirection: 'row',
@@ -787,8 +793,6 @@ const createStyles = (typography) => StyleSheet.create({
     borderRadius: radius.lg,
     padding: spacing.md,
     alignItems: 'center',
-    borderWidth: 2,
-    borderColor: colors.primary,
   },
   rideInfoLabel: {
     ...typography.captionSmall,

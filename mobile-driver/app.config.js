@@ -14,9 +14,13 @@ export default {
       resizeMode: 'contain',
       backgroundColor: '#171717'
     },
+    runtimeVersion: {
+      policy: 'appVersion',
+    },
     updates: {
+      url: 'https://u.expo.dev/d95167ad-aa6e-4509-9721-4eb2cc99c70c',
       fallbackToCacheTimeout: 0,
-      enabled: false
+      enabled: true,
     },
     assetBundlePatterns: [
       '**/*'
@@ -55,14 +59,6 @@ export default {
         'FOREGROUND_SERVICE_LOCATION',
         'POST_NOTIFICATIONS'
       ],
-      // Only configure Google Maps if a valid API key is provided
-      ...(process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ? {
-        config: {
-          googleMaps: {
-            apiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY
-          }
-        }
-      } : {})
     },
     web: {
       favicon: './assets/favicon.png'
@@ -89,7 +85,7 @@ export default {
       ['@sentry/react-native/expo', {
         organization: 'cryptalyst',
         project: 'mobile-driver',
-      }]
+      }],
     ],
     extra: {
       eas: {

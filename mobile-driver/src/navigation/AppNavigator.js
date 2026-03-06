@@ -2,12 +2,13 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { View, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 
 import { useAuth } from '../context/AuthContext';
-import { colors } from '../theme/colors';
+import { colors, useTypography } from '../theme/colors';
 
 // Screens
 import LoginScreen from '../screens/LoginScreen';
@@ -27,6 +28,7 @@ const Tab = createBottomTabNavigator();
 function MainTabs() {
   const insets = useSafeAreaInsets();
   const { t } = useTranslation();
+  const typography = useTypography();
 
   return (
     <Tab.Navigator
@@ -56,7 +58,7 @@ function MainTabs() {
           paddingTop: 8,
         },
         tabBarLabelStyle: {
-          fontSize: 12,
+          fontSize: typography.captionSmall.fontSize,
           fontWeight: '500',
         },
         headerShown: false,
@@ -90,7 +92,11 @@ export default function AppNavigator() {
   const { isAuthenticated, loading } = useAuth();
 
   if (loading) {
-    return null; // Or a loading screen
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
   }
 
   return (

@@ -5,6 +5,7 @@ import React, {
   useEffect,
   useRef,
   useCallback,
+  useMemo,
 } from 'react';
 import * as Location from 'expo-location';
 import { Alert, AppState, Platform } from 'react-native';
@@ -14,6 +15,7 @@ import {
   stopBackgroundLocationUpdates,
   clearRetryQueue,
 } from '../services/backgroundLocation';
+import { haversineKm } from '../utils/distance';
 
 /**
  * LocationContext — Production-grade driver location tracking
@@ -52,37 +54,41 @@ const MIN_SERVER_UPDATE_INTERVAL = 5000;
 // Speed limit for foreground validation
 const MAX_SPEED_KMH = 200;
 
-function haversineKm(lat1, lon1, lat2, lon2) {
-  const R = 6371;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
 export const LocationProvider = ({ children }) => {
   const [location, setLocation] = useState(null);
   const [address, setAddress] = useState('');
   const [isTracking, setIsTracking] = useState(false);
   const [error, setError] = useState(null);
   const [permissionStatus, setPermissionStatus] = useState(null); // 'foreground' | 'background' | null
+  const [permissionsReady, setPermissionsReady] = useState(false);
 
   const locationSubscription = useRef(null);
   const isShowingAlert = useRef(false);
   const activeRideRef = useRef(null);
+  // [C4 FIX] Promise-based lock to prevent overlapping permission requests (iOS crash fix)
+  const permissionLockRef = useRef(null); // null = unlocked, Promise = locked
 
   // Throttle server updates from foreground watcher
   const lastServerUpdate = useRef({ lat: 0, lng: 0, time: 0 });
+  // Track background permission status via ref (avoid stale closure in watcher callback)
+  const bgPermissionRef = useRef(false);
 
   // ─── Permission flow ────────────────────────────────────────────────────
 
   useEffect(() => {
-    requestPermissions();
+    let mounted = true;
+    (async () => {
+      try {
+        await requestPermissions();
+      } catch (e) {
+        console.warn('[Location] Initial permission request failed:', e.message);
+        if (mounted) setLocation(DEFAULT_LOCATION);
+      } finally {
+        if (mounted) setPermissionsReady(true);
+      }
+    })();
     return () => {
+      mounted = false;
       stopTracking();
     };
   }, []);
@@ -122,6 +128,15 @@ export const LocationProvider = ({ children }) => {
   }, []);
 
   const requestPermissions = async () => {
+    // [C4 FIX] Promise-based lock — concurrent callers wait for the first to finish
+    if (permissionLockRef.current) {
+      await permissionLockRef.current;
+      return permissionStatus === 'foreground' || permissionStatus === 'background';
+    }
+
+    let unlockResolve;
+    permissionLockRef.current = new Promise((resolve) => { unlockResolve = resolve; });
+
     try {
       // Check location services
       const servicesEnabled = await Location.hasServicesEnabledAsync();
@@ -149,22 +164,37 @@ export const LocationProvider = ({ children }) => {
       }
       setPermissionStatus('foreground');
 
-      // Step 2: Background permission (required for production tracking)
-      const { status: bgStatus } =
-        await Location.requestBackgroundPermissionsAsync();
-      if (bgStatus === 'granted') {
-        setPermissionStatus('background');
+      // Step 2: Background permission
+      // On iOS, defer background permission — iOS requires the user to first
+      // interact with foreground location before prompting for "Always".
+      // Requesting it too early can crash or silently fail.
+      if (Platform.OS !== 'ios') {
+        try {
+          const { status: bgStatus } =
+            await Location.requestBackgroundPermissionsAsync();
+          if (bgStatus === 'granted') {
+            setPermissionStatus('background');
+          } else {
+            console.warn(
+              '[Location] Background permission not granted — foreground only',
+            );
+            showAlert(
+              'Background Location',
+              'For best experience, please allow "All the time" location access in app settings.',
+            );
+          }
+        } catch (bgErr) {
+          console.warn('[Location] Background permission request failed:', bgErr.message);
+        }
       } else {
-        // Background not granted — app will work but only in foreground
-        console.warn(
-          '[Location] Background permission not granted — foreground only',
-        );
-        showAlert(
-          'Background Location',
-          Platform.OS === 'ios'
-            ? 'For best experience, please set location access to "Always" in Settings > Lulini Driver > Location.'
-            : 'For best experience, please allow "All the time" location access in app settings.',
-        );
+        // iOS: just check current status, don't prompt yet
+        try {
+          const { status: bgStatus } =
+            await Location.getBackgroundPermissionsAsync();
+          if (bgStatus === 'granted') {
+            setPermissionStatus('background');
+          }
+        } catch (_) {}
       }
 
       // Get initial location
@@ -190,9 +220,9 @@ export const LocationProvider = ({ children }) => {
       return true;
     } catch (err) {
       let msg = 'Failed to get your location. ';
-      if (err.message.includes('timeout')) {
+      if (err.message?.includes('timeout')) {
         msg += 'Make sure you have a clear view of the sky and try again.';
-      } else if (err.message.includes('denied')) {
+      } else if (err.message?.includes('denied')) {
         msg += 'Please enable location permissions in your device settings.';
       } else {
         msg += err.message;
@@ -201,6 +231,9 @@ export const LocationProvider = ({ children }) => {
       setError('Location error');
       setLocation(DEFAULT_LOCATION);
       return false;
+    } finally {
+      permissionLockRef.current = null;
+      unlockResolve();
     }
   };
 
@@ -249,9 +282,21 @@ export const LocationProvider = ({ children }) => {
 
       const hasActiveRide = !!activeRideRef.current;
 
-      // Start background location updates (handles own batching + server sends)
-      const bgPermission = await Location.getBackgroundPermissionsAsync();
-      if (bgPermission.status === 'granted') {
+      // Check background permission — on iOS, request it now (deferred from init)
+      let bgPermission = await Location.getBackgroundPermissionsAsync();
+      if (bgPermission.status !== 'granted' && Platform.OS === 'ios') {
+        try {
+          bgPermission = await Location.requestBackgroundPermissionsAsync();
+          if (bgPermission.status === 'granted') {
+            setPermissionStatus('background');
+          }
+        } catch (e) {
+          console.warn('[Location] iOS background permission request failed:', e.message);
+        }
+      }
+
+      bgPermissionRef.current = bgPermission.status === 'granted';
+      if (bgPermissionRef.current) {
         await startBackgroundLocationUpdates(hasActiveRide);
       } else {
         // Background not granted — foreground watcher will handle server updates instead
@@ -313,7 +358,7 @@ export const LocationProvider = ({ children }) => {
           setLocation(coords);
 
           // Send to server if background isn't handling it
-          if (bgPermission.status !== 'granted') {
+          if (!bgPermissionRef.current) {
             updateLocationOnServer(coords);
           }
         },
@@ -434,23 +479,29 @@ export const LocationProvider = ({ children }) => {
     setError(null);
     setPermissionStatus(null);
     lastServerUpdate.current = { lat: 0, lng: 0, time: 0 };
+    // [H7 FIX] Reset all refs to prevent stale state on next login
+    isShowingAlert.current = false;
+    activeRideRef.current = null;
+    permissionLockRef.current = null;
+    bgPermissionRef.current = false;
   }, [stopTracking]);
 
   // ─── Context value ─────────────────────────────────────────────────────
 
-  const value = {
+  const value = useMemo(() => ({
     location,
     address,
     isTracking,
     error,
     permissionStatus,
+    permissionsReady,
     requestPermissions,
     startTracking,
     stopTracking,
     getCurrentLocation,
     setActiveRide,
     cleanupForLogout,
-  };
+  }), [location, address, isTracking, error, permissionStatus, permissionsReady, stopTracking, cleanupForLogout]);
 
   return (
     <LocationContext.Provider value={value}>{children}</LocationContext.Provider>

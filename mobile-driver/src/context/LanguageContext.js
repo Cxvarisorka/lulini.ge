@@ -1,4 +1,4 @@
-import React, { createContext, useState, useContext, useEffect } from 'react';
+import React, { createContext, useState, useContext, useEffect, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as SecureStore from 'expo-secure-store';
 
@@ -37,7 +37,7 @@ export const LanguageProvider = ({ children }) => {
     }
   };
 
-  const changeLanguage = async (languageCode) => {
+  const changeLanguage = useCallback(async (languageCode) => {
     try {
       await SecureStore.setItemAsync('language', languageCode);
       await i18n.changeLanguage(languageCode);
@@ -45,19 +45,19 @@ export const LanguageProvider = ({ children }) => {
     } catch (error) {
       // Failed to change language
     }
-  };
+  }, [i18n]);
 
-  const getCurrentLanguageName = () => {
+  const getCurrentLanguageName = useCallback(() => {
     const language = LANGUAGES.find((lang) => lang.code === currentLanguage);
     return language ? language.nativeName : 'ქართული';
-  };
+  }, [currentLanguage]);
 
-  const value = {
+  const value = useMemo(() => ({
     currentLanguage,
     changeLanguage,
     languages: LANGUAGES,
     getCurrentLanguageName,
-  };
+  }), [currentLanguage, changeLanguage, getCurrentLanguageName]);
 
   return <LanguageContext.Provider value={value}>{children}</LanguageContext.Provider>;
 };

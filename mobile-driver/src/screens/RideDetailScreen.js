@@ -10,20 +10,10 @@ import {
   Linking,
   Platform,
 } from 'react-native';
-// Defensive import: react-native-maps can crash on iOS if the Google Maps SDK
-// was initialised with an empty API key. Falling back to a WebView map avoids
-// a hard crash for users on builds where the key was missing.
-let MapView, Marker, Polyline, PROVIDER_GOOGLE;
-try {
-  const Maps = require('react-native-maps');
-  MapView = Maps.default;
-  Marker = Maps.Marker;
-  Polyline = Maps.Polyline;
-  PROVIDER_GOOGLE = Maps.PROVIDER_GOOGLE;
-} catch (e) {
-  console.warn('[RideDetail] react-native-maps failed to load:', e.message);
-  MapView = null;
-}
+import MapView from '../components/map/MapViewWrapper';
+import Marker from '../components/map/MarkerWrapper';
+import Polyline from '../components/map/PolylineWrapper';
+import { markerImages } from '../components/map/markerImages';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -204,7 +194,7 @@ export default function RideDetailScreen({ navigation, route }) {
     if (!ride) return;
     Alert.alert(
       t('rides.completeRide'),
-      `${t('rides.confirmComplete')}\n${t('rides.fare')}: $${ride.quote?.totalPrice}`,
+      `${t('rides.confirmComplete')}\n${t('rides.fare')}: ${ride.quote?.totalPrice} ₾`,
       [
         { text: t('common.cancel'), style: 'cancel' },
         {
@@ -215,10 +205,13 @@ export default function RideDetailScreen({ navigation, route }) {
               const fare = parseFloat(ride.quote?.totalPrice || 0);
               const response = await rideAPI.completeRide(rideId, fare);
               if (response.data.success) {
+                const completedRide = response.data.data.ride;
+                setRide(completedRide);
                 removeActiveRide(rideId);
                 invalidateCache();
+                const finalFare = completedRide.fare ?? fare;
                 navigation.goBack();
-                Alert.alert(t('common.success'), `${t('rides.rideCompletedSuccess')}\n${t('rides.earned')}: $${fare.toFixed(2)}`);
+                Alert.alert(t('common.success'), `${t('rides.rideCompletedSuccess')}\n${t('rides.earned')}: ${finalFare.toFixed(2)} ₾`);
               }
             } catch (error) {
               Alert.alert(t('common.error'), error.response?.data?.message || t('errors.somethingWentWrong'));
@@ -289,6 +282,8 @@ export default function RideDetailScreen({ navigation, route }) {
       <TouchableOpacity
         style={[styles.backButtonOverlay, { top: insets.top + 8 }]}
         onPress={() => navigation.goBack()}
+        accessibilityRole="button"
+        accessibilityLabel={t('common.back') || 'Go back'}
       >
         <Ionicons name="arrow-back" size={22} color={colors.foreground} />
       </TouchableOpacity>
@@ -296,71 +291,59 @@ export default function RideDetailScreen({ navigation, route }) {
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         {/* Map */}
         <View style={styles.mapContainer}>
-          {MapView ? (
-            <MapView
-              ref={mapRef}
-              style={styles.map}
-              initialRegion={initialRegion}
-              onMapReady={fitMapToMarkers}
-              onLayout={fitMapToMarkers}
-              provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
-              scrollEnabled={true}
-              zoomEnabled={true}
-              pitchEnabled={false}
-              rotateEnabled={false}
-            >
-              {ride.pickup?.lat && Marker && (
+          <MapView
+            ref={mapRef}
+            style={styles.map}
+            initialRegion={initialRegion}
+            onMapReady={fitMapToMarkers}
+            onLayout={fitMapToMarkers}
+            scrollEnabled={true}
+            zoomEnabled={true}
+            pitchEnabled={false}
+            rotateEnabled={false}
+          >
+            {ride.pickup?.lat && (
+              <Marker
+                id="pickup"
+                coordinate={{ latitude: ride.pickup.lat, longitude: ride.pickup.lng }}
+                image={markerImages.pickup}
+                anchor={{ x: 0.5, y: 0.5 }}
+                tracksViewChanges={false}
+                zIndex={10}
+              />
+            )}
+            {ride.stops?.map((stop, i) => (
+              stop.lat ? (
                 <Marker
-                  coordinate={{ latitude: ride.pickup.lat, longitude: ride.pickup.lng }}
+                  key={`stop-${i}`}
+                  id={`stop-${i}`}
+                  coordinate={{ latitude: stop.lat, longitude: stop.lng }}
+                  image={markerImages.stopSmall[i + 1] || markerImages.stopSmall[1]}
                   anchor={{ x: 0.5, y: 0.5 }}
                   tracksViewChanges={false}
-                  zIndex={10}
-                >
-                  <View style={styles.pickupMarker}>
-                    <View style={styles.pickupDot} />
-                  </View>
-                </Marker>
-              )}
-              {ride.stops?.map((stop, i) => (
-                stop.lat && Marker ? (
-                  <Marker
-                    key={`stop-${i}`}
-                    coordinate={{ latitude: stop.lat, longitude: stop.lng }}
-                    anchor={{ x: 0.5, y: 0.5 }}
-                    tracksViewChanges={false}
-                    zIndex={9}
-                  >
-                    <View style={styles.stopMarker}>
-                      <Text style={styles.stopMarkerText}>{i + 1}</Text>
-                    </View>
-                  </Marker>
-                ) : null
-              ))}
-              {ride.dropoff?.lat && Marker && (
-                <Marker
-                  coordinate={{ latitude: ride.dropoff.lat, longitude: ride.dropoff.lng }}
-                  anchor={{ x: 0.5, y: 0.5 }}
-                  tracksViewChanges={false}
-                  zIndex={10}
-                >
-                  <View style={styles.dropoffMarker}>
-                    <Ionicons name="flag" size={14} color="#fff" />
-                  </View>
-                </Marker>
-              )}
-              {polylineCoords.length > 1 && Polyline && (
-                <Polyline
-                  coordinates={polylineCoords}
-                  strokeColor={colors.primary}
-                  strokeWidth={4}
+                  zIndex={9}
                 />
-              )}
-            </MapView>
-          ) : (
-            <View style={[styles.map, { backgroundColor: colors.muted, justifyContent: 'center', alignItems: 'center' }]}>
-              <Ionicons name="map-outline" size={48} color={colors.mutedForeground} />
-            </View>
-          )}
+              ) : null
+            ))}
+            {ride.dropoff?.lat && (
+              <Marker
+                id="dropoff"
+                coordinate={{ latitude: ride.dropoff.lat, longitude: ride.dropoff.lng }}
+                image={markerImages.dropoff}
+                anchor={{ x: 0.5, y: 0.5 }}
+                tracksViewChanges={false}
+                zIndex={10}
+              />
+            )}
+            {polylineCoords.length > 1 && (
+              <Polyline
+                id="ride-route"
+                coordinates={polylineCoords}
+                strokeColor={colors.primary}
+                strokeWidth={4}
+              />
+            )}
+          </MapView>
         </View>
 
         {/* Status Badge Row */}
@@ -517,6 +500,8 @@ export default function RideDetailScreen({ navigation, route }) {
               <TouchableOpacity
                 style={styles.contactButton}
                 onPress={() => Linking.openURL(`tel:${ride.passengerPhone}`)}
+                accessibilityRole="button"
+                accessibilityLabel={t('rides.callPassenger') || 'Call passenger'}
               >
                 <Ionicons name="call" size={18} color={colors.primary} />
               </TouchableOpacity>
@@ -540,7 +525,7 @@ export default function RideDetailScreen({ navigation, route }) {
                 styles.waitingTimeValue,
                 waitingTimeLeft <= 60 && styles.waitingTimeUrgent
               ]}>
-                {Math.floor(waitingTimeLeft / 60)}:{(waitingTimeLeft % 60).toString().padStart(2, '0')}
+                {Math.floor(Math.max(0, waitingTimeLeft) / 60)}:{(Math.max(0, waitingTimeLeft) % 60).toString().padStart(2, '0')}
               </Text>
               <Text style={styles.waitingTimeLabel}>{t('rides.timeRemaining')}</Text>
             </View>
@@ -603,7 +588,7 @@ export default function RideDetailScreen({ navigation, route }) {
                   key={star}
                   name={star <= ride.rating ? 'star' : 'star-outline'}
                   size={24}
-                  color={star <= ride.rating ? '#FFA500' : colors.border}
+                  color={star <= ride.rating ? colors.gold : colors.border}
                   style={{ marginRight: 4 }}
                 />
               ))}
@@ -640,6 +625,9 @@ export default function RideDetailScreen({ navigation, route }) {
                 style={[styles.actionButton, styles.arrivedButton]}
                 onPress={handleNotifyArrival}
                 disabled={actionLoading}
+                accessibilityRole="button"
+                accessibilityLabel={t('rides.imHere')}
+                accessibilityState={{ disabled: actionLoading }}
               >
                 {actionLoading ? (
                   <ActivityIndicator color={colors.background} />
@@ -656,6 +644,9 @@ export default function RideDetailScreen({ navigation, route }) {
                 style={[styles.actionButton, styles.startButton]}
                 onPress={handleStartRide}
                 disabled={actionLoading}
+                accessibilityRole="button"
+                accessibilityLabel={t('rides.startRide')}
+                accessibilityState={{ disabled: actionLoading }}
               >
                 {actionLoading ? (
                   <ActivityIndicator color={colors.background} />
@@ -672,6 +663,9 @@ export default function RideDetailScreen({ navigation, route }) {
                 style={[styles.actionButton, styles.completeButton]}
                 onPress={handleCompleteRide}
                 disabled={actionLoading}
+                accessibilityRole="button"
+                accessibilityLabel={t('rides.completeRide')}
+                accessibilityState={{ disabled: actionLoading }}
               >
                 {actionLoading ? (
                   <ActivityIndicator color={colors.background} />
@@ -729,63 +723,13 @@ const createStyles = (typography) => StyleSheet.create({
     position: 'absolute',
     left: 16,
     zIndex: 20,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: colors.background,
     alignItems: 'center',
     justifyContent: 'center',
     ...shadows.md,
-  },
-  // Markers
-  pickupMarker: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: colors.success + '30',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  pickupDot: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: colors.success,
-    borderWidth: 2,
-    borderColor: '#fff',
-  },
-  stopMarker: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: '#f97316',
-    borderWidth: 2,
-    borderColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...Platform.select({
-      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 3 },
-      android: { elevation: 3 },
-    }),
-  },
-  stopMarkerText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  dropoffMarker: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: colors.destructive,
-    borderWidth: 2,
-    borderColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...Platform.select({
-      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 3 },
-      android: { elevation: 3 },
-    }),
   },
   // Status row
   statusRow: {
@@ -859,8 +803,8 @@ const createStyles = (typography) => StyleSheet.create({
   timelineNavButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 6,
-    paddingVertical: 4,
+    marginTop: 4,
+    paddingVertical: 10,
   },
   timelineNavText: {
     ...typography.captionSmall,
@@ -896,7 +840,7 @@ const createStyles = (typography) => StyleSheet.create({
     width: 16,
     height: 16,
     borderRadius: 8,
-    backgroundColor: '#f97316',
+    backgroundColor: colors.stop,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 2,

@@ -1,23 +1,4 @@
-import { Dimensions } from 'react-native';
 import { useTranslation } from 'react-i18next';
-
-// Get screen dimensions
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-
-// Base screen width for scaling (iPhone 14/15 standard)
-const BASE_WIDTH = 390;
-
-// Calculate scale factor based on screen width
-const scale = SCREEN_WIDTH / BASE_WIDTH;
-
-// Scale font size responsively, with limits
-const scaleFont = (size) => {
-  const newSize = size * scale;
-  // Limit scaling between 0.9x and 1.15x for better consistency
-  if (scale > 1.15) return size * 1.15;
-  if (scale < 0.9) return size * 0.9;
-  return Math.round(newSize);
-};
 
 // Standard typography (for non-Georgian languages) - 2025 mobile best practices
 export const staticTypography = {
