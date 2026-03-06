@@ -1,43 +1,35 @@
 /**
  * AnimatedCarMarker
  *
- * Smooth Uber-like car marker with:
- *   - Native position interpolation via animateMarkerToCoordinate()
+ * Smooth Uber-like car marker:
+ *   - iOS: Top-down car SVG-style shape with smooth rotation
+ *   - Android: Pre-rendered PNG + animateMarkerToCoordinate()
  *   - GPS noise filtering (ignores < 2m movements)
  *   - Heading rotation only on significant movement (> 8m)
- *   - Adaptive animation duration based on update interval
- *   - tracksViewChanges managed to avoid Android bitmap re-rasterization
  *
  * Props:
  *   coordinate  { latitude, longitude }  — target position
  *   isAssigned  boolean                  — true = assigned driver (larger)
  */
 import { useRef, useEffect, useState, memo } from 'react';
-import { View, Animated as RNAnimated, StyleSheet, Platform, Easing } from 'react-native';
-import { Marker } from 'react-native-maps';
-import { Ionicons } from '@expo/vector-icons';
+import { View, StyleSheet, Platform } from 'react-native';
+import AnimatedMarker from './AnimatedMarkerWrapper';
+import Marker from './MarkerWrapper';
+import { markerImages } from './markerImages';
 
-// --- Tuning constants ---
-const ROTATION_DURATION = 400;
-// How long to keep tracksViewChanges=true after a heading update.
-// Must be long enough for the native bitmap snapshot, then turn off
-// to avoid constant re-rasterization (the #1 Android map perf killer).
-const TRACKS_CHANGES_WINDOW_MS = 600;
-// GPS noise thresholds
-const MIN_MOVE_KM = 0.002;    // 2m — below this, ignore (GPS jitter)
-const MIN_HEADING_KM = 0.008; // 8m — below this, don't recalculate heading
-// Position animation bounds
+const isIOS = Platform.OS === 'ios';
+
+const MIN_MOVE_KM = 0.002;
+const MIN_HEADING_KM = 0.008;
 const MIN_ANIMATION_MS = 500;
 const MAX_ANIMATION_MS = 3000;
 
-// Fast approximate distance in km — avoids expensive trig, good for < 10km
 function quickDistance(lat1, lng1, lat2, lng2) {
   const dlat = (lat2 - lat1) * 111.32;
   const dlng = (lng2 - lng1) * 111.32 * Math.cos(lat1 * 0.01745329);
   return Math.sqrt(dlat * dlat + dlng * dlng);
 }
 
-// Bearing from point A → B in degrees (0 = north, clockwise)
 function calcBearing(from, to) {
   const toRad = (d) => d * 0.01745329;
   const dLng = toRad(to.longitude - from.longitude);
@@ -50,10 +42,41 @@ function calcBearing(from, to) {
   return (Math.atan2(y, x) * 57.29577951 + 360) % 360;
 }
 
-// Shortest rotation direction between two angles (avoids 360 spin)
 function shortestRotation(from, to) {
-  return from + (((to - from + 540) % 360) - 180);
+  let diff = ((to - from + 540) % 360) - 180;
+  return from + diff;
 }
+
+/** Top-down car shape for iOS */
+const TopDownCar = memo(({ isAssigned, rotation }) => {
+  const s = isAssigned ? 1.3 : 1;
+  return (
+    <View style={[styles.carWrapper, { width: 32 * s, height: 32 * s }]}>
+      <View style={[styles.carOuter, {
+        width: 16 * s,
+        height: 28 * s,
+        borderRadius: 5 * s,
+        transform: [{ rotate: `${rotation}deg` }],
+      }]}>
+        {/* Windshield */}
+        <View style={[styles.windshield, {
+          width: 12 * s,
+          height: 6 * s,
+          borderRadius: 3 * s,
+          top: 3 * s,
+        }]} />
+        {/* Rear window */}
+        <View style={[styles.rearWindow, {
+          width: 10 * s,
+          height: 4 * s,
+          borderRadius: 2 * s,
+          bottom: 4 * s,
+        }]} />
+      </View>
+    </View>
+  );
+});
+TopDownCar.displayName = 'TopDownCar';
 
 const AnimatedCarMarker = memo(
   ({ coordinate, isAssigned = false }) => {
@@ -65,17 +88,9 @@ const AnimatedCarMarker = memo(
     const prevCoord = useRef(null);
     const lastUpdateTime = useRef(Date.now());
     const headingTarget = useRef(0);
-    const heading = useRef(new RNAnimated.Value(0)).current;
 
-    // tracksViewChanges strategy:
-    // - Assigned driver (single marker): always true — negligible perf cost,
-    //   guarantees rotation animation is always visible on Android.
-    // - Non-assigned/nearby (bulk markers): toggle on briefly for bitmap
-    //   snapshot, then off to avoid re-rasterization of 50+ markers.
-    const [tracksChanges, setTracksChanges] = useState(true);
-    const tracksTimerRef = useRef(null);
+    const [rotation, setRotation] = useState(0);
 
-    // Set initial coordinate on first valid render (before effects run)
     if (!prevCoord.current && isValid) {
       prevCoord.current = { latitude: lat, longitude: lng };
     }
@@ -86,29 +101,14 @@ const AnimatedCarMarker = memo(
       const prev = prevCoord.current;
       if (!prev) {
         prevCoord.current = { latitude: lat, longitude: lng };
-        // For non-assigned (bulk) markers: snapshot bitmap then disable tracking.
-        // For assigned (single) marker: stay true always for reliable display.
-        if (!isAssigned) {
-          tracksTimerRef.current = setTimeout(
-            () => setTracksChanges(false),
-            TRACKS_CHANGES_WINDOW_MS
-          );
-        }
         return;
       }
 
-      // Same position — nothing to do
       if (prev.latitude === lat && prev.longitude === lng) return;
 
       const distKm = quickDistance(prev.latitude, prev.longitude, lat, lng);
-
-      // Filter GPS noise — ignore movements under 2 meters
       if (distKm < MIN_MOVE_KM) return;
 
-      // === SMOOTH POSITION INTERPOLATION ===
-      // Use native marker animation for Uber-like gliding movement.
-      // Duration adapts to update interval: if updates come every 3s,
-      // animation takes ~2.4s (80%), creating continuous motion.
       const now = Date.now();
       const elapsed = now - lastUpdateTime.current;
       const duration = Math.max(
@@ -117,107 +117,58 @@ const AnimatedCarMarker = memo(
       );
       lastUpdateTime.current = now;
 
-      // animateMarkerToCoordinate is only available on Android (Google Maps).
-      // On iOS (Apple Maps) it throws a native bridge error, so skip it entirely.
-      if (Platform.OS === 'android') {
+      if (!isIOS) {
         try {
           markerRef.current?.animateMarkerToCoordinate?.(
             { latitude: lat, longitude: lng },
             duration
           );
         } catch {
-          // Fallback: coordinate prop updates on next render via prevCoord
+          // Fallback: coordinate prop update
         }
       }
 
-      // === HEADING / ROTATION ===
-      // Only recalculate heading for significant movement (> 8m).
-      // This prevents erratic rotation from GPS jitter.
       if (distKm >= MIN_HEADING_KM) {
         const newBearing = calcBearing(prev, { latitude: lat, longitude: lng });
         const smoothTarget = shortestRotation(headingTarget.current, newBearing);
         headingTarget.current = smoothTarget;
-
-        // For non-assigned markers: briefly enable tracksViewChanges so
-        // Android re-snapshots the rotated bitmap, then disable again.
-        // Assigned markers always have it enabled, so skip the toggle.
-        if (!isAssigned) {
-          setTracksChanges(true);
-          if (tracksTimerRef.current) clearTimeout(tracksTimerRef.current);
-          tracksTimerRef.current = setTimeout(
-            () => setTracksChanges(false),
-            TRACKS_CHANGES_WINDOW_MS
-          );
-        }
-
-        RNAnimated.timing(heading, {
-          toValue: smoothTarget,
-          duration: ROTATION_DURATION,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }).start();
+        setRotation(smoothTarget);
       }
 
       prevCoord.current = { latitude: lat, longitude: lng };
-    }, [lat, lng, isValid, heading]);
-
-    // Cleanup timer on unmount
-    useEffect(() => {
-      return () => {
-        if (tracksTimerRef.current) clearTimeout(tracksTimerRef.current);
-      };
-    }, []);
+    }, [lat, lng, isValid]);
 
     if (!isValid) return null;
 
-    // Extended range supports many full rotations from shortestRotation accumulation
-    const rotation = heading.interpolate({
-      inputRange: [-3600, 0, 3600],
-      outputRange: ['-3600deg', '0deg', '3600deg'],
-    });
+    const coord = prevCoord.current || { latitude: lat, longitude: lng };
 
-    const size = isAssigned ? 38 : 30;
-    // Extra padding prevents Android bitmap clipping. Android rasterizes
-    // the marker View into a bitmap cropped to the root view bounds —
-    // tight padding causes borders/shadows to get sliced off.
-    // 28px extra (14px/side) gives room for border + rotation transform.
-    const wrapperSize = size + 28;
+    if (!isIOS) {
+      return (
+        <AnimatedMarker
+          ref={markerRef}
+          coordinate={coord}
+          image={isAssigned ? markerImages.carAssigned : markerImages.car}
+          anchor={{ x: 0.5, y: 0.5 }}
+          flat={true}
+          rotation={rotation}
+          tracksViewChanges={false}
+          zIndex={isAssigned ? 8 : 4}
+        />
+      );
+    }
 
+    // On iOS, use native rotation prop instead of CSS transform
+    // so we don't need tracksViewChanges={true}
     return (
       <Marker
-        ref={markerRef}
-        // Use prevCoord (previous position) as the prop value.
-        // The native animateMarkerToCoordinate() handles smooth
-        // movement from here to the actual target position.
-        coordinate={prevCoord.current || { latitude: lat, longitude: lng }}
+        coordinate={coord}
         anchor={{ x: 0.5, y: 0.5 }}
         flat={true}
-        tracksViewChanges={isAssigned || tracksChanges}
+        rotation={rotation}
+        tracksViewChanges={false}
+        image={isAssigned ? markerImages.carAssigned : markerImages.car}
         zIndex={isAssigned ? 8 : 4}
-      >
-        <View
-          style={[styles.wrapper, { width: wrapperSize, height: wrapperSize }]}
-        >
-          <RNAnimated.View
-            style={[
-              styles.circle,
-              {
-                width: size,
-                height: size,
-                borderRadius: size / 2,
-                transform: [{ rotate: rotation }],
-              },
-              isAssigned && styles.assigned,
-            ]}
-          >
-            <Ionicons
-              name="car-sport"
-              size={isAssigned ? 20 : 15}
-              color="#fff"
-            />
-          </RNAnimated.View>
-        </View>
-      </Marker>
+      />
     );
   },
   (prev, next) =>
@@ -228,44 +179,27 @@ const AnimatedCarMarker = memo(
 
 AnimatedCarMarker.displayName = 'AnimatedCarMarker';
 
+export default AnimatedCarMarker;
+
 const styles = StyleSheet.create({
-  wrapper: {
+  carWrapper: {
     alignItems: 'center',
     justifyContent: 'center',
-    // Android collapses Views with no visual properties during bitmap capture,
-    // causing the marker to be clipped. A near-invisible background forces
-    // Android to respect the full wrapper dimensions in the bitmap.
-    ...Platform.select({
-      android: { backgroundColor: 'rgba(255,255,255,0.01)' },
-      ios: {},
-    }),
   },
-  circle: {
-    backgroundColor: '#374151',
-    borderWidth: 2.5,
-    borderColor: '#ffffff',
+  carOuter: {
+    backgroundColor: '#1A1A2E',
     alignItems: 'center',
-    justifyContent: 'center',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.3,
-        shadowRadius: 4,
-      },
-      android: {},
-    }),
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35,
+    shadowRadius: 3,
   },
-  assigned: {
-    backgroundColor: '#171717',
-    borderWidth: 3,
-    ...Platform.select({
-      ios: {
-        shadowOpacity: 0.45,
-      },
-      android: {},
-    }),
+  windshield: {
+    position: 'absolute',
+    backgroundColor: 'rgba(135,206,250,0.6)',
+  },
+  rearWindow: {
+    position: 'absolute',
+    backgroundColor: 'rgba(135,206,250,0.4)',
   },
 });
-
-export default AnimatedCarMarker;

@@ -2,11 +2,7 @@
  * DriverCluster
  *
  * Renders nearby driver markers with grid-based clustering when zoomed out.
- * Optimized for 50–200 active drivers without overwhelming the map.
- *
- * When zoom < 14 and there are 15+ drivers, nearby drivers are grouped
- * into cluster bubbles showing a count. When zoomed in, individual
- * AnimatedCarMarker components are rendered.
+ * iOS: JSX custom elements | Android: PNG images
  *
  * Props:
  *   drivers       Array<{ lat, lng }>  — nearby driver positions
@@ -14,27 +10,18 @@
  */
 import React, { useMemo, memo } from 'react';
 import { View, Text, StyleSheet, Platform } from 'react-native';
-import { Marker } from 'react-native-maps';
-import { Ionicons } from '@expo/vector-icons';
+import Marker from './MarkerWrapper';
+import { markerImages } from './markerImages';
 
-// Cluster radius in degrees — scales with zoom level
-const BASE_CLUSTER_RADIUS = 0.003; // ~300m at equator
+const BASE_CLUSTER_RADIUS = 0.003;
 const MIN_DRIVERS_TO_CLUSTER = 15;
 const CLUSTER_ZOOM_THRESHOLD = 14;
 
-/**
- * Grid-based clustering algorithm.
- * Groups drivers whose lat/lng fall within the same grid cell.
- */
 function clusterDrivers(drivers, zoomLevel) {
   if (!drivers || drivers.length === 0) return [];
 
-  // Don't cluster when zoomed in or few drivers
   if (zoomLevel > CLUSTER_ZOOM_THRESHOLD || drivers.length < MIN_DRIVERS_TO_CLUSTER) {
     return drivers.map((d, i) => ({
-      // Coordinate-based key (5-decimal ~ 1m) prevents marker flicker when
-      // the driver array reorders between API fetches. Index suffix is a
-      // tiebreaker for drivers at the same location (same rounded coords).
       key: `d-${(d.lat * 100000 | 0)}_${(d.lng * 100000 | 0)}_${i}`,
       lat: d.lat,
       lng: d.lng,
@@ -47,7 +34,6 @@ function clusterDrivers(drivers, zoomLevel) {
   const grid = new Map();
 
   for (const d of drivers) {
-    // Quantize position to grid cell
     const cellX = Math.floor(d.lng / cellSize);
     const cellY = Math.floor(d.lat / cellSize);
     const cellKey = `${cellX}:${cellY}`;
@@ -89,14 +75,13 @@ function clusterDrivers(drivers, zoomLevel) {
   return result;
 }
 
-/**
- * Cluster count marker — shows number of grouped drivers
- */
+/** Cluster count bubble — always JSX (dynamic text) */
 const ClusterBubble = memo(({ coordinate, count }) => (
   <Marker
     coordinate={coordinate}
     anchor={{ x: 0.5, y: 0.5 }}
     tracksViewChanges={false}
+    style={styles.clusterMarkerFixed}
     zIndex={3}
   >
     <View style={styles.clusterWrapper}>
@@ -108,30 +93,19 @@ const ClusterBubble = memo(({ coordinate, count }) => (
 ));
 ClusterBubble.displayName = 'ClusterBubble';
 
-/**
- * Simple static car marker for individual nearby drivers.
- * Uses a plain Marker (no AnimatedRegion) to avoid AIRMapMarker errors.
- */
+/** Static car marker — image-based on both platforms for reliability */
 const StaticCarMarker = memo(({ coordinate }) => (
   <Marker
     coordinate={coordinate}
+    image={markerImages.car}
     anchor={{ x: 0.5, y: 0.5 }}
     flat={true}
     tracksViewChanges={false}
     zIndex={4}
-  >
-    <View style={styles.carWrapper}>
-      <View style={styles.carCircle}>
-        <Ionicons name="car-sport" size={15} color="#fff" />
-      </View>
-    </View>
-  </Marker>
+  />
 ));
 StaticCarMarker.displayName = 'StaticCarMarker';
 
-/**
- * Main export — renders clustered or individual driver markers
- */
 const DriverCluster = memo(({ drivers = [], zoomLevel = 15 }) => {
   const items = useMemo(
     () => clusterDrivers(drivers, zoomLevel),
@@ -167,18 +141,15 @@ const DriverCluster = memo(({ drivers = [], zoomLevel = 15 }) => {
 DriverCluster.displayName = 'DriverCluster';
 
 const styles = StyleSheet.create({
+  clusterMarkerFixed: {
+    width: 44,
+    height: 44,
+  },
   clusterWrapper: {
-    // 60px for 36px circle = 12px padding per side.
-    // Was 48px (6px padding) — too tight, caused Android bitmap clipping
-    // of the 2.5px border. Transparent padding is free in the bitmap.
-    width: 60,
-    height: 60,
+    width: 44,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
-    ...Platform.select({
-      android: { backgroundColor: 'rgba(255,255,255,0.01)' },
-      ios: {},
-    }),
   },
   clusterCircle: {
     width: 36,
@@ -203,36 +174,6 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 13,
     fontWeight: '700',
-  },
-  carWrapper: {
-    // 56px for 30px circle = 13px padding per side
-    width: 56,
-    height: 56,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...Platform.select({
-      android: { backgroundColor: 'rgba(255,255,255,0.01)' },
-      ios: {},
-    }),
-  },
-  carCircle: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: '#374151',
-    borderWidth: 2.5,
-    borderColor: '#ffffff',
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.3,
-        shadowRadius: 4,
-      },
-      android: {},
-    }),
   },
 });
 

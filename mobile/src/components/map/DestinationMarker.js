@@ -1,66 +1,93 @@
 /**
  * DestinationMarker
  *
- * Clean red destination pin with flag icon.
- *
- * Android fix: no elevation — it draws shadows outside the view bounds
- * and Android's react-native-maps clips the bitmap to the root view.
- * Container is 66x66 giving generous padding around the 38px pin.
+ * Red destination pin — JSX on iOS, PNG image on Android.
  */
-import React, { memo } from 'react';
+import { memo } from 'react';
 import { View, StyleSheet, Platform } from 'react-native';
-import { Marker } from 'react-native-maps';
-import { Ionicons } from '@expo/vector-icons';
+import Marker from './MarkerWrapper';
+import { markerImages } from './markerImages';
 
-const DestinationMarker = memo(({ coordinate }) => (
-  <Marker
-    coordinate={coordinate}
-    anchor={{ x: 0.5, y: 1 }}
-    tracksViewChanges={false}
-    zIndex={10}
-  >
-    <View style={styles.container}>
-      <View style={styles.pin}>
-        <Ionicons name="flag" size={16} color="#fff" />
-      </View>
+const isIOS = Platform.OS === 'ios';
+
+const DestinationPin = () => (
+  <View style={styles.wrapper}>
+    <View style={styles.pin}>
+      <View style={styles.pinInner} />
     </View>
-  </Marker>
-));
+    <View style={styles.pinTail} />
+  </View>
+);
+
+const DestinationMarker = memo(({ coordinate }) => {
+  if (!isIOS) {
+    return (
+      <Marker
+        coordinate={coordinate}
+        image={markerImages.destination}
+        anchor={{ x: 0.5, y: 1 }}
+        tracksViewChanges={false}
+        zIndex={10}
+      />
+    );
+  }
+
+  return (
+    <Marker
+      coordinate={coordinate}
+      anchor={{ x: 0.5, y: 1 }}
+      tracksViewChanges={false}
+      style={styles.markerFixed}
+      zIndex={10}
+    >
+      <DestinationPin />
+    </Marker>
+  );
+});
 
 DestinationMarker.displayName = 'DestinationMarker';
 
+export default DestinationMarker;
+
+const PIN_SIZE = 30;
+
 const styles = StyleSheet.create({
-  container: {
-    // 66px for 38px pin = 14px padding per side.
-    // Prevents Android bitmap clipping of the 3px border and iOS shadow.
-    width: 66,
-    height: 66,
+  markerFixed: {
+    width: 34,
+    height: 42,
+  },
+  wrapper: {
+    width: 34,
+    height: 42,
     alignItems: 'center',
-    justifyContent: 'flex-end',
-    ...Platform.select({
-      android: { backgroundColor: 'rgba(255,255,255,0.01)' },
-      ios: {},
-    }),
   },
   pin: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: '#ef4444',
-    borderWidth: 3,
-    borderColor: '#ffffff',
+    width: PIN_SIZE,
+    height: PIN_SIZE,
+    borderRadius: PIN_SIZE / 2,
+    backgroundColor: '#E53E3E',
     alignItems: 'center',
     justifyContent: 'center',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 3 },
-        shadowOpacity: 0.25,
-        shadowRadius: 4,
-      },
-      android: {},
-    }),
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+  },
+  pinInner: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#FFFFFF',
+  },
+  pinTail: {
+    width: 0,
+    height: 0,
+    borderLeftWidth: 7,
+    borderRightWidth: 7,
+    borderTopWidth: 10,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderTopColor: '#E53E3E',
+    marginTop: -2,
   },
 });
-
-export default DestinationMarker;
