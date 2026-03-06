@@ -6,6 +6,30 @@ const AppError = require('../utils/AppError');
 const catchAsync = require('../utils/catchAsync');
 const pushService = require('../services/pushNotification.service');
 
+// ── Vehicle type hierarchy ──
+// Higher-tier drivers can serve lower-tier ride requests:
+//   economy → economy, comfort, business drivers
+//   comfort → comfort, business drivers
+//   business → business drivers only
+function getEligibleDriverTypes(rideVehicleType) {
+    switch (rideVehicleType) {
+        case 'economy': return ['economy', 'comfort', 'business'];
+        case 'comfort': return ['comfort', 'business'];
+        case 'business': return ['business'];
+        default: return [rideVehicleType];
+    }
+}
+
+// Inverse: which ride types can a driver of a given type accept?
+function getEligibleRideTypes(driverVehicleType) {
+    switch (driverVehicleType) {
+        case 'business': return ['economy', 'comfort', 'business'];
+        case 'comfort': return ['economy', 'comfort'];
+        case 'economy': return ['economy'];
+        default: return [driverVehicleType];
+    }
+}
+
 // ── Push-if-offline helper ──
 // Only send push notifications when the user has NO active socket connection.
 // When the app is foregrounded the socket event already triggers an in-app Alert;
@@ -96,6 +120,7 @@ const createRide = catchAsync(async (req, res, next) => {
         passengerName,
         passengerPhone,
         paymentMethod,
+        paymentId,
         notes
     } = req.body;
 
@@ -173,14 +198,29 @@ const createRide = catchAsync(async (req, res, next) => {
         expiresAt
     });
 
+    // Link pre-paid card payment to this ride
+    if (paymentId && ['card', 'saved_card'].includes(paymentMethod || '')) {
+        const Payment = require('../models/payment.model');
+        await Payment.updateOne(
+            { _id: paymentId, user: req.user.id, type: 'ride_payment', status: 'completed', ride: null },
+            { ride: ride._id }
+        );
+        ride.paymentStatus = 'completed';
+        await ride.save();
+    }
+
     // Populate user in-place (avoids re-fetching the ride from DB)
     await ride.populate('user', 'firstName lastName email phone');
 
-    // Broadcast to ALL online drivers via shared room (O(1) — no DB query needed)
-    // Drivers filter by vehicleType on the client side
+    // Broadcast to eligible driver type rooms only (O(1) — no DB query needed)
     const io = req.app.get('io');
     if (io) {
-        io.to('drivers:all').to('admin').emit('ride:request', ride);
+        const eligibleTypes = getEligibleDriverTypes(vehicleType);
+        let broadcast = io.to('admin');
+        for (const type of eligibleTypes) {
+            broadcast = broadcast.to(`drivers:${type}`);
+        }
+        broadcast.emit('ride:request', ride);
     }
 
     const responseBody = {
@@ -205,7 +245,7 @@ const createRide = catchAsync(async (req, res, next) => {
                 status: 'online',
                 isActive: true,
                 isApproved: true,
-                'vehicle.type': vehicleType
+                'vehicle.type': { $in: getEligibleDriverTypes(vehicleType) }
             }).select('user').lean();
 
             const driverUserIds = onlineDrivers.map(d => d.user.toString());
@@ -550,11 +590,14 @@ const completeRide = catchAsync(async (req, res, next) => {
         return next(new AppError('Ride transition failed — status may have changed', 409));
     }
 
-    // Update driver stats
-    driver.status = 'online';
-    driver.totalTrips += 1;
-    driver.totalEarnings += ride.fare;
-    await driver.save();
+    // Update driver stats atomically (prevents race conditions on concurrent completions)
+    await Driver.updateOne(
+        { _id: driver._id },
+        {
+            $set: { status: 'online' },
+            $inc: { totalTrips: 1, totalEarnings: ride.fare }
+        }
+    );
 
     const populatedRide = await Ride.findById(ride._id)
         .populate('user', 'firstName lastName email phone')
@@ -894,11 +937,12 @@ const getAvailableRides = catchAsync(async (req, res, next) => {
         });
     }
 
-    // Find all pending rides matching driver's vehicle type that haven't expired
+    // Find all pending rides that this driver's tier can serve
     const now = new Date();
+    const eligibleRideTypes = getEligibleRideTypes(driver.vehicle.type);
     const availableRides = await Ride.find({
         status: 'pending',
-        vehicleType: driver.vehicle.type,
+        vehicleType: { $in: eligibleRideTypes },
         $or: [
             { expiresAt: { $gt: now } },  // Not expired yet
             { expiresAt: null }            // Legacy rides without expiration (will be handled by cleanup)
@@ -929,9 +973,9 @@ const getAllRides = catchAsync(async (req, res, next) => {
         if (endDate) query.createdAt.$lte = new Date(endDate);
     }
 
-    // Convert to numbers
-    const pageNum = parseInt(page, 10);
-    const limitNum = parseInt(limit, 10);
+    // Convert to numbers with bounds (prevent unbounded queries)
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 10));
     const skip = (pageNum - 1) * limitNum;
 
     // Get total count for pagination

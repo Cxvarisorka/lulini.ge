@@ -20,6 +20,9 @@ const protect = catchAsync(async (req, res, next) => {
     }
 
     const decoded = verifyToken(token);
+    if (!decoded) {
+        return next(new AppError('Invalid or expired token', 401));
+    }
 
     // Check cache first (60s TTL)
     const cached = userCache.get(decoded.id);

@@ -3,18 +3,7 @@ const User = require('../models/user.model');
 const Ride = require('../models/ride.model');
 const AppError = require('../utils/AppError');
 const catchAsync = require('../utils/catchAsync');
-
-// Haversine distance in km (for speed/distance validation)
-function haversineDistance(lat1, lon1, lat2, lon2) {
-    const R = 6371;
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLon = (lon2 - lon1) * Math.PI / 180;
-    const a = Math.sin(dLat / 2) ** 2 +
-        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-        Math.sin(dLon / 2) ** 2;
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c;
-}
+const { haversineKm } = require('../utils/distance');
 
 // @desc    Create new driver
 // @route   POST /api/drivers
@@ -259,12 +248,17 @@ const updateDriverStatus = catchAsync(async (req, res, next) => {
         const userRoom = `user:${req.user.id}`;
         const driverRoom = `driver:${req.user.id}`;
 
+        const typeRoom = driver.vehicle?.type ? `drivers:${driver.vehicle.type}` : null;
         if (status === 'online') {
             // Ensure sockets join driver rooms when going online
-            io.in(userRoom).socketsJoin([driverRoom, 'drivers:all']);
+            const rooms = [driverRoom, 'drivers:all'];
+            if (typeRoom) rooms.push(typeRoom);
+            io.in(userRoom).socketsJoin(rooms);
         } else if (status === 'offline') {
-            // Remove from broadcast room when going offline
-            io.in(userRoom).socketsLeave('drivers:all');
+            // Remove from broadcast rooms when going offline
+            const leaveRooms = ['drivers:all'];
+            if (typeRoom) leaveRooms.push(typeRoom);
+            io.in(userRoom).socketsLeave(leaveRooms);
         }
     }
 
@@ -292,7 +286,7 @@ const updateDriverLocation = catchAsync(async (req, res, next) => {
     if (driver.location && driver.location.coordinates &&
         driver.location.coordinates[0] !== 0 && driver.location.coordinates[1] !== 0) {
         const [prevLng, prevLat] = driver.location.coordinates;
-        const distKm = haversineDistance(prevLat, prevLng, latitude, longitude);
+        const distKm = haversineKm(prevLat, prevLng, latitude, longitude);
         const timeDeltaSec = (Date.now() - new Date(driver.updatedAt).getTime()) / 1000;
 
         // Only validate with reasonable time delta (> 2s) and non-trivial movement
@@ -667,7 +661,7 @@ const batchUpdateDriverLocation = catchAsync(async (req, res, next) => {
         if (lastValid) {
             const timeDeltaSec = (timestamp - lastValid.time) / 1000;
             if (timeDeltaSec > 2) {
-                const distKm = haversineDistance(lastValid.lat, lastValid.lng, latitude, longitude);
+                const distKm = haversineKm(lastValid.lat, lastValid.lng, latitude, longitude);
                 const speedKmh = (distKm / timeDeltaSec) * 3600;
                 if (speedKmh > 200) {
                     continue; // skip implausible

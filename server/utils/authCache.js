@@ -17,4 +17,15 @@ setInterval(() => {
     }
 }, AUTH_CACHE_TTL);
 
-module.exports = { userCache, driverCache, AUTH_CACHE_TTL };
+// Invalidate a specific user/driver from cache (call on delete/deactivate/ban)
+const invalidateUser = (userId) => {
+    const key = typeof userId === 'object' ? userId.toString() : userId;
+    userCache.delete(key);
+};
+
+const invalidateDriver = (userId) => {
+    const key = typeof userId === 'object' ? userId.toString() : userId;
+    driverCache.delete(key);
+};
+
+module.exports = { userCache, driverCache, AUTH_CACHE_TTL, invalidateUser, invalidateDriver };

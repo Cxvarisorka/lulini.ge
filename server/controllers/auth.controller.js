@@ -11,7 +11,7 @@ const appleSignin = require('apple-signin-auth');
 const cookieOptions = {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // 'none' for cross-origin (mobile apps)
+    sameSite: 'lax', // Mobile apps use Bearer token, cookies are for same-origin web admin only
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     path: '/'
 };
@@ -118,6 +118,9 @@ const login = catchAsync(async (req, res, next) => {
 const logout = (req, res) => {
     res.cookie('token', '', {
         httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        path: '/',
         expires: new Date(0)
     });
 
@@ -162,13 +165,21 @@ const oauthSuccess = (req, res) => {
     res.redirect(`${process.env.CLIENT_URL || 'http://localhost:5173'}/profile`);
 };
 
+// Allowlist of valid redirect URI schemes for OAuth mobile flow
+const ALLOWED_REDIRECT_SCHEMES = ['lulini://', 'lulinidriver://', 'exp://'];
+
+const isAllowedRedirectUri = (uri) => {
+    if (!uri || typeof uri !== 'string') return false;
+    return ALLOWED_REDIRECT_SCHEMES.some(scheme => uri.startsWith(scheme));
+};
+
 // @desc    Handle OAuth callback success (mobile)
 const oauthSuccessMobile = (req, res) => {
     const token = generateToken(req.user._id);
     const redirectUri = req.query.state || req.session?.redirectUri;
 
-    if (redirectUri) {
-        // Redirect back to mobile app with token
+    if (redirectUri && isAllowedRedirectUri(redirectUri)) {
+        // Redirect back to mobile app with token (validated against allowlist)
         res.redirect(`${redirectUri}?token=${token}`);
     } else {
         // Fallback: return JSON response
@@ -358,7 +369,8 @@ const verifyPhoneOtp = catchAsync(async (req, res, next) => {
             await OTP.deleteOne({ _id: otpRecord._id });
             return next(new AppError('Too many failed attempts. Please request a new code', 400));
         }
-        if (otpRecord.code !== code) {
+        const codeMatches = await otpRecord.compareCode(code);
+        if (!codeMatches) {
             otpRecord.attempts += 1;
             await otpRecord.save();
             return next(new AppError('Invalid OTP code', 400));
@@ -563,7 +575,8 @@ const verifyPhoneUpdateOtp = catchAsync(async (req, res, next) => {
             await OTP.deleteOne({ _id: otpRecord._id });
             return next(new AppError('Too many failed attempts. Please request a new code', 400));
         }
-        if (otpRecord.code !== code) {
+        const codeMatches = await otpRecord.compareCode(code);
+        if (!codeMatches) {
             otpRecord.attempts += 1;
             await otpRecord.save();
             return next(new AppError('Invalid OTP code', 400));

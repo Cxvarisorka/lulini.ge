@@ -27,7 +27,9 @@ const generateOTP = () => {
 const sendVerification = async (phone) => {
     if (!client) {
         const code = generateOTP();
-        console.warn('Twilio not configured. OTP code:', code);
+        if (process.env.NODE_ENV !== 'production') {
+            console.warn('Twilio not configured. OTP code:', code);
+        }
         return { devCode: code };
     }
 

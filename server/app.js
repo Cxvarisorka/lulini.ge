@@ -65,6 +65,8 @@ const rideRouter = require('./routers/ride.router');
 const mapsRouter = require('./routers/maps.router');
 const notificationRouter = require('./routers/notification.router');
 const settingsRouter = require('./routers/settings.router');
+const waitlistRouter = require('./routers/waitlist.router');
+const paymentRouter = require('./routers/payment.router');
 
 const app = express();
 const server = http.createServer(app);
@@ -131,6 +133,17 @@ const parseCookies = (cookieString) => {
 
 // Socket.io authentication middleware (uses shared auth cache to avoid DB storm on reconnect)
 const { userCache, AUTH_CACHE_TTL } = require('./utils/authCache');
+const { verifyToken } = require('./utils/jwt.utils');
+
+// Capacity-based admission control: reject new connections BEFORE auth (fail fast)
+const MAX_SOCKET_CONNECTIONS = parseInt(process.env.MAX_SOCKET_CONNECTIONS || '5000');
+io.use((socket, next) => {
+    const currentConnections = io.engine.clientsCount;
+    if (currentConnections >= MAX_SOCKET_CONNECTIONS) {
+        return next(new Error('Server at capacity. Please retry.'));
+    }
+    next();
+});
 
 io.use(async (socket, next) => {
     try {
@@ -150,7 +163,10 @@ io.use(async (socket, next) => {
             return next(new Error('Authentication required'));
         }
 
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const decoded = verifyToken(token);
+        if (!decoded) {
+            return next(new Error('Invalid or expired token'));
+        }
 
         // Check shared auth cache first (prevents thundering herd on mass reconnect)
         const cached = userCache.get(decoded.id);
@@ -212,16 +228,6 @@ function createSocketRateLimiter() {
 
 io.use(createSocketRateLimiter());
 
-// Capacity-based admission control: reject new connections when server is at capacity
-const MAX_SOCKET_CONNECTIONS = parseInt(process.env.MAX_SOCKET_CONNECTIONS || '5000');
-io.use((socket, next) => {
-    const currentConnections = io.engine.clientsCount;
-    if (currentConnections >= MAX_SOCKET_CONNECTIONS) {
-        return next(new Error('Server at capacity. Please retry.'));
-    }
-    next();
-});
-
 // Socket.io connection handling
 // IMPORTANT: All socket.on() listeners MUST be registered synchronously (before any await)
 // to avoid race conditions where the client sends events before handlers are set up.
@@ -256,6 +262,7 @@ io.on('connection', async (socket) => {
         socket.join(driverRoom);
         socket.join('drivers:all');
         io.in(userRoom).socketsJoin(driverRoom);
+        // Join vehicle-type room asynchronously (needs DB lookup)
     }
 
     // ── Register ALL event listeners synchronously (before any await) ──
@@ -287,6 +294,12 @@ io.on('connection', async (socket) => {
                 socket.join(driverRoom);
                 socket.join('drivers:all');
                 io.in(userRoom).socketsJoin(driverRoom);
+                // Join vehicle-type room
+                if (profile?.vehicle?.type) {
+                    const typeRoom = `drivers:${profile.vehicle.type}`;
+                    socket.join(typeRoom);
+                    io.in(userRoom).socketsJoin(typeRoom);
+                }
             }
             // Always ACK to prevent client timeout loops
             socket.emit('driver:rejoined', { success: !!(socket.user.role === 'driver' || profile) });
@@ -305,13 +318,30 @@ io.on('connection', async (socket) => {
 
     // ── Async work: verify driver profile in DB (non-blocking) ──
     // This runs AFTER listeners are registered, so no events are missed.
-    if (socket.user.role !== 'driver') {
+    // Also joins vehicle-type room for targeted ride broadcasts.
+    if (socket.user.role === 'driver') {
+        try {
+            const driverProfile = await Driver.findOne({ user: socket.user.id, isActive: true, isApproved: true }).select('vehicle.type').lean();
+            if (driverProfile?.vehicle?.type) {
+                const typeRoom = `drivers:${driverProfile.vehicle.type}`;
+                socket.join(typeRoom);
+                io.in(userRoom).socketsJoin(typeRoom);
+            }
+        } catch (err) {
+            // DB lookup failed — vehicle-type room will be joined on rejoin
+        }
+    } else {
         try {
             const driverProfile = await Driver.findOne({ user: socket.user.id, isActive: true, isApproved: true });
             if (driverProfile) {
                 socket.join(driverRoom);
                 socket.join('drivers:all');
                 io.in(userRoom).socketsJoin(driverRoom);
+                if (driverProfile.vehicle?.type) {
+                    const typeRoom = `drivers:${driverProfile.vehicle.type}`;
+                    socket.join(typeRoom);
+                    io.in(userRoom).socketsJoin(typeRoom);
+                }
             }
         } catch (err) {
             // DB lookup failed — role-based join already handled above
@@ -356,6 +386,12 @@ app.use(cors({
 // Global rate limiter: 200 req / 15 min per IP
 app.use(globalLimiter);
 
+// Capture raw body for BOG callback signature verification
+app.use('/api/payments/callback', express.json({
+    limit: '16kb',
+    verify: (req, _res, buf) => { req.rawBody = buf.toString(); }
+}));
+
 // Body parsing with size limits (prevents payload bombs)
 app.use(express.json({ limit: '16kb' }));
 app.use(express.urlencoded({ extended: true, limit: '16kb' }));
@@ -393,10 +429,23 @@ app.use('/api/rides', rideRouter);
 app.use('/api/maps', mapsRouter);
 app.use('/api/notifications', notificationRouter);
 app.use('/api/settings', settingsRouter);
+app.use('/api/waitlist', waitlistRouter);
+app.use('/api/payments', paymentRouter);
 
-// Health check
+// Health check (verifies DB connectivity for load balancer routing)
 app.get('/health', (req, res) => {
-    res.json({ status: 'ok', message: 'Server is running' });
+    const mongoose = require('mongoose');
+    const dbState = mongoose.connection.readyState; // 0=disconnected, 1=connected, 2=connecting, 3=disconnecting
+    const isDbHealthy = dbState === 1;
+
+    const status = isDbHealthy ? 'ok' : 'degraded';
+    const httpStatus = isDbHealthy ? 200 : 503;
+
+    res.status(httpStatus).json({
+        status,
+        db: isDbHealthy ? 'connected' : 'disconnected',
+        uptime: Math.floor(process.uptime()),
+    });
 });
 
 // Handle undefined routes
@@ -511,5 +560,24 @@ function gracefulShutdown(signal) {
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// Catch unhandled promise rejections and uncaught exceptions
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('Unhandled Rejection:', reason);
+    try {
+        const Sentry = require('@sentry/node');
+        Sentry.captureException(reason);
+    } catch (_) {}
+});
+
+process.on('uncaughtException', (error) => {
+    console.error('Uncaught Exception:', error);
+    try {
+        const Sentry = require('@sentry/node');
+        Sentry.captureException(error);
+    } catch (_) {}
+    // Give Sentry time to flush, then exit
+    setTimeout(() => process.exit(1), 2000).unref();
+});
 
 module.exports = { app, io };

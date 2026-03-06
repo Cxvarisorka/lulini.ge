@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
 
 const otpSchema = new mongoose.Schema({
     phone: {
@@ -31,6 +32,19 @@ const otpSchema = new mongoose.Schema({
 }, {
     timestamps: true
 });
+
+// Hash OTP code before saving (prevent plaintext exposure if DB is compromised)
+otpSchema.pre('save', async function (next) {
+    if (!this.isModified('code') || this.code === 'verified') return next();
+    this.code = await bcrypt.hash(this.code, 6);
+    next();
+});
+
+// Compare a candidate code against the stored hash
+otpSchema.methods.compareCode = async function (candidateCode) {
+    if (this.code === 'verified') return false;
+    return bcrypt.compare(candidateCode, this.code);
+};
 
 // Compound index for efficient lookups
 otpSchema.index({ phone: 1, purpose: 1 });

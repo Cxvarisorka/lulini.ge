@@ -19,12 +19,11 @@ passport.use(new GoogleStrategy({
         });
 
         if (user) {
-            // If user exists with email but different provider, update provider info
+            // If user exists with email but different provider, reject (prevent account takeover)
             if (user.provider !== 'google') {
-                user.provider = 'google';
-                user.providerId = profile.id;
-                user.avatar = profile.photos[0]?.value || user.avatar;
-                await user.save();
+                return done(null, false, {
+                    message: `An account with this email already exists. Please log in with ${user.provider}`
+                });
             }
             return done(null, user);
         }

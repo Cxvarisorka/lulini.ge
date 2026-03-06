@@ -29,6 +29,19 @@ module.exports = {
             max_restarts: 10,
             restart_delay: 1000,
             max_memory_restart: '256M',
+        },
+        {
+            name: 'lulini-ride-worker',
+            script: 'workers/rideEventWorker.js',
+            instances: 1,
+            exec_mode: 'fork',
+            env: {
+                NODE_ENV: 'production',
+            },
+            kill_timeout: 10000,
+            max_restarts: 10,
+            restart_delay: 1000,
+            max_memory_restart: '256M',
         }
     ]
 };
