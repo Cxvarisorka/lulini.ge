@@ -8,8 +8,10 @@ import {
   Alert,
   Platform,
   AppState,
+  Animated,
 } from 'react-native';
-import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
+import MapView from '../components/map/MapViewWrapper';
+import Polyline from '../components/map/PolylineWrapper';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import * as Crypto from 'expo-crypto';
@@ -23,7 +25,6 @@ import { taxiAPI, settingsAPI } from '../services/api';
 import { persistRideState, loadRideState, clearRideState } from '../services/rideStorage';
 import {
   showRideNotification,
-  updateRideNotification,
   dismissRideNotification,
 } from '../services/rideNotification';
 import { getDirections, getDirectionsOSRM, reverseGeocode } from '../services/googleMaps';
@@ -42,6 +43,39 @@ import AnimatedCarMarker from '../components/map/AnimatedCarMarker';
 import DriverCluster from '../components/map/DriverCluster';
 import StopMarker from '../components/map/StopMarker';
 import { ROUTE_STYLE, ROUTE_SHADOW_STYLE, DRIVER_ROUTE_STYLE } from '../components/map/mapStyle';
+import { haversineKm } from '../utils/distance';
+
+// In-memory ride cache — survives screen navigation, cleared on ride end.
+// Prevents redundant server fetches when user navigates Home → TaxiScreen.
+let _rideCache = null;
+const RIDE_CACHE_MAX_AGE = 5 * 60 * 1000;
+
+// Module-level search state — survives TaxiScreen unmount/remount.
+// Stores metadata needed to resume the progress bar and driver markers.
+let _searchStartedAt = null;   // Timestamp when search began (for progress calculation)
+let _nearbyDriversCache = [];  // Drivers visible during search
+
+function setCachedRide(ride) {
+  _rideCache = ride ? { ride, timestamp: Date.now() } : null;
+}
+function getCachedRide() {
+  if (!_rideCache) return null;
+  if (Date.now() - _rideCache.timestamp > RIDE_CACHE_MAX_AGE) {
+    _rideCache = null;
+    return null;
+  }
+  return _rideCache.ride;
+}
+function clearCachedRide() {
+  _rideCache = null;
+}
+function clearSearchMeta() {
+  _searchStartedAt = null;
+  _nearbyDriversCache = [];
+}
+
+// Distance threshold (km) for "driver is close" notification
+const DRIVER_CLOSE_THRESHOLD_KM = 0.3; // 300 meters
 
 // Default location (Kutaisi, Georgia)
 const DEFAULT_LOCATION = {
@@ -61,19 +95,6 @@ const BOOKING_STEPS = {
   DRIVER_ARRIVED: 'driver_arrived',
   IN_PROGRESS: 'in_progress',
 };
-
-// Haversine distance between two points (km) — module-level, zero allocation per render
-function calculateDistance(lat1, lon1, lat2, lon2) {
-  const R = 6371;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-    Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-}
 
 // L14: Fetch OSRM route with AbortController timeout
 const fetchRouteOSRM = async (from, to, waypoints = []) => {
@@ -137,6 +158,8 @@ export default function TaxiScreen({ navigation }) {
   const [bookingStep, setBookingStep] = useState(BOOKING_STEPS.LOCATION_SEARCH);
   const [selectedVehicle, setSelectedVehicle] = useState('economy');
   const [paymentMethod, setPaymentMethod] = useState('cash');
+  const [selectedCardId, setSelectedCardId] = useState(null);
+  const [confirmedPaymentId, setConfirmedPaymentId] = useState(null);
   const [estimatedPrice, setEstimatedPrice] = useState(null);
   const [estimatedDuration, setEstimatedDuration] = useState(null);
   const [isRequesting, setIsRequesting] = useState(false);
@@ -150,7 +173,8 @@ export default function TaxiScreen({ navigation }) {
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
   const [showPaymentMethodModal, setShowPaymentMethodModal] = useState(false);
   const timeoutTimerRef = useRef(null);
-  const [progress, setProgress] = useState(0);
+  const progressAnim = useRef(new Animated.Value(0)).current;
+  const progress = progressAnim;
 
   // Driver tracking states
   const [driverLocation, setDriverLocation] = useState(null);
@@ -163,6 +187,7 @@ export default function TaxiScreen({ navigation }) {
   const [nearbyDrivers, setNearbyDrivers] = useState([]);
   const [driverRoute, setDriverRoute] = useState(null);
   const [totalDistance, setTotalDistance] = useState(null); // Total route KM (pickup → stops → destination)
+  const routeDistanceRef = useRef(null); // Persists route distance across closures
 
   // Refs for values used inside socket handlers to avoid re-registering listeners
   const locationRef = useRef(null);
@@ -179,12 +204,18 @@ export default function TaxiScreen({ navigation }) {
   // Track shown alerts to prevent duplicates (key: "rideId:eventType")
   const shownAlertsRef = useRef(new Set());
 
+  // Track whether "driver is close" notification was already sent for current ride
+  const driverCloseNotifiedRef = useRef(false);
+
   // Flag: true while user-initiated cancel is in progress (prevents socket handler from duplicating)
   const userCancellingRef = useRef(false);
 
   // Saved destination data for restoring after searching state
   const savedDestinationRef = useRef(null);
   const savedDestinationCoordsRef = useRef(null);
+
+  // Tracks when the current search started — used by progress useEffect to resume correctly
+  const searchStartedAtRef = useRef(null);
 
   // Route polyline for directions
   const [routePolyline, setRoutePolyline] = useState(null);
@@ -257,8 +288,10 @@ export default function TaxiScreen({ navigation }) {
   useEffect(() => {
     if (!locationRef.current) return;
     if (bookingStep !== BOOKING_STEPS.RIDE_OPTIONS) {
-      // Clear stale drivers when leaving RIDE_OPTIONS
-      setNearbyDrivers(prev => prev.length > 0 ? [] : prev);
+      // Keep nearby drivers visible during SEARCHING so user sees cars on map
+      if (bookingStep !== BOOKING_STEPS.SEARCHING) {
+        setNearbyDrivers(prev => prev.length > 0 ? [] : prev);
+      }
       return;
     }
 
@@ -360,7 +393,16 @@ export default function TaxiScreen({ navigation }) {
     if (ride.dropoff) {
       setDestination(ride.dropoff.address || '');
       if (ride.dropoff.lat && ride.dropoff.lng) {
-        setDestinationCoords({ latitude: ride.dropoff.lat, longitude: ride.dropoff.lng });
+        // Only show destination marker during in_progress (ride started).
+        // During accepted/driver_arrived, only driver marker + route is shown.
+        if (ride.status === 'in_progress') {
+          setDestinationCoords({ latitude: ride.dropoff.lat, longitude: ride.dropoff.lng });
+        } else {
+          setDestinationCoords(null);
+        }
+        // Always save to refs so ride:started handler can restore it
+        savedDestinationRef.current = ride.dropoff.address || '';
+        savedDestinationCoordsRef.current = { latitude: ride.dropoff.lat, longitude: ride.dropoff.lng };
       }
     }
     if (ride.pickup?.address) setLocationAddress(ride.pickup.address);
@@ -374,6 +416,12 @@ export default function TaxiScreen({ navigation }) {
     if (ride.quote) {
       setEstimatedPrice(ride.quote.totalPrice);
       setEstimatedDuration(ride.quote.duration);
+      // Restore route distance from quote (sent during ride request)
+      if (ride.quote.distance) {
+        const dist = Math.round(parseFloat(ride.quote.distance) * 10) / 10;
+        setTotalDistance(dist);
+        routeDistanceRef.current = dist;
+      }
     }
     if (ride.vehicleType) setSelectedVehicle(ride.vehicleType);
     if (ride.paymentMethod) setPaymentMethod(ride.paymentMethod);
@@ -394,17 +442,25 @@ export default function TaxiScreen({ navigation }) {
     setTimeout(() => {
       if (!mapRef.current) return;
       const coords = [];
+
+      // During accepted/driver_arrived: only show pickup + driver (no dropoff)
+      // During in_progress: show full route (pickup + stops + dropoff)
+      const isDriverEnRoute = ['accepted', 'driver_arrived'].includes(ride.status);
+
       if (ride.pickup?.lat && ride.pickup?.lng)
         coords.push({ latitude: ride.pickup.lat, longitude: ride.pickup.lng });
-      // Include stops in fit bounds
-      if (ride.stops?.length > 0) {
-        ride.stops.forEach(stop => {
-          if (stop.lat && stop.lng)
-            coords.push({ latitude: stop.lat, longitude: stop.lng });
-        });
+
+      if (!isDriverEnRoute) {
+        if (ride.stops?.length > 0) {
+          ride.stops.forEach(stop => {
+            if (stop.lat && stop.lng)
+              coords.push({ latitude: stop.lat, longitude: stop.lng });
+          });
+        }
+        if (ride.dropoff?.lat && ride.dropoff?.lng)
+          coords.push({ latitude: ride.dropoff.lat, longitude: ride.dropoff.lng });
       }
-      if (ride.dropoff?.lat && ride.dropoff?.lng)
-        coords.push({ latitude: ride.dropoff.lat, longitude: ride.dropoff.lng });
+
       if (ride.driver?.location?.coordinates) {
         const [dLng, dLat] = ride.driver.location.coordinates;
         coords.push({ latitude: dLat, longitude: dLng });
@@ -418,16 +474,54 @@ export default function TaxiScreen({ navigation }) {
     }, 500);
   }, []);
 
-  // Two-phase active ride restore:
-  //   Phase 1: Instant restore from SecureStore (survives app kill)
-  //   Phase 2: Reconcile with server (authoritative source of truth)
+  // Restore active ride on mount:
+  //   1. In-memory cache (fastest — screen navigation)
+  //   2. SecureStore (survives app kill)
+  //   3. Server reconciliation (authoritative)
   useEffect(() => {
     const restoreAndReconcile = async () => {
-      // M10: Prevent concurrent reconciliation
       if (isReconcilingRef.current) return;
       isReconcilingRef.current = true;
 
-      // Phase 1 — instant local restore
+      // Fast path: in-memory cache from previous mount (screen navigation)
+      const cached = getCachedRide();
+      if (cached && !['completed', 'cancelled'].includes(cached.status)) {
+        // Restore search metadata BEFORE applyRideToState so the progress
+        // useEffect (triggered by bookingStep change) has the correct start time.
+        if (cached.status === 'pending') {
+          searchStartedAtRef.current = _searchStartedAt || Date.now();
+          setNearbyDrivers(_nearbyDriversCache);
+        }
+
+        applyRideToState(cached);
+        fitMapToRide(cached);
+
+        if (cached.dropoff?.lat && cached.dropoff?.lng) {
+          // Refs already set by applyRideToState
+
+          // Only fetch pickup→destination route during in_progress.
+          // During accepted/driver_arrived, driver-to-pickup route is fetched
+          // by the driverLocation useEffect automatically.
+          if (cached.status === 'in_progress') {
+            const pickupCoords = cached.pickup?.lat
+              ? { latitude: cached.pickup.lat, longitude: cached.pickup.lng }
+              : locationRef.current;
+            if (pickupCoords) {
+              const destCoords = { latitude: cached.dropoff.lat, longitude: cached.dropoff.lng };
+              const waypoints = (cached.stops || [])
+                .filter(s => s.lat && s.lng)
+                .map(s => ({ latitude: s.lat, longitude: s.lng }));
+              fetchRouteOSRM(pickupCoords, destCoords, waypoints)
+                .then(coords => setRoutePolyline(coords));
+            }
+          }
+        }
+
+        isReconcilingRef.current = false;
+        return; // Skip server fetch — cache is fresh
+      }
+
+      // Phase 1 — instant local restore from SecureStore
       const savedState = await loadRideState();
       if (savedState) {
         const localRide = {
@@ -440,24 +534,29 @@ export default function TaxiScreen({ navigation }) {
           quote: {
             totalPrice: savedState.estimatedPrice,
             duration: savedState.estimatedDuration,
+            distance: savedState.totalDistance,
           },
           driver: savedState.driverLocation
             ? { location: { coordinates: [savedState.driverLocation.longitude, savedState.driverLocation.latitude] } }
             : null,
         };
+        // Set search start time from SecureStore so progress useEffect can resume correctly
+        if (savedState.status === 'pending') {
+          searchStartedAtRef.current = savedState.savedAt || Date.now();
+        }
         applyRideToState(localRide);
 
-        // Resume notification from cached data (will be corrected by Phase 2)
-        if (savedState.driverName && ['accepted', 'driver_arrived', 'in_progress'].includes(savedState.status)) {
-          const driverInfo = {
-            driverName: savedState.driverName,
-            vehicleMakeModel: savedState.driverVehicle
-              ? `${savedState.driverVehicle.make} ${savedState.driverVehicle.model}`
-              : '',
-            vehicleColor: savedState.driverVehicle?.color || '',
-            licensePlate: savedState.driverVehicle?.licensePlate || '',
-          };
-          updateRideNotification(savedState.status, driverInfo, null);
+        if (savedState.dropoff?.lat && savedState.dropoff?.lng) {
+          // Refs already set by applyRideToState
+
+          // Only fetch pickup→destination route during in_progress
+          if (savedState.status === 'in_progress' && savedState.pickup?.lat && savedState.pickup?.lng) {
+            const pickupCoords = { latitude: savedState.pickup.lat, longitude: savedState.pickup.lng };
+            const destCoords = { latitude: savedState.dropoff.lat, longitude: savedState.dropoff.lng };
+            fetchRouteOSRM(pickupCoords, destCoords).then(coords => {
+              if (coords) setRoutePolyline(coords);
+            }).catch(() => {});
+          }
         }
       }
 
@@ -470,9 +569,51 @@ export default function TaxiScreen({ navigation }) {
         );
 
         if (activeRide) {
+          // Set search start time from server BEFORE applyRideToState so the
+          // progress useEffect (triggered by bookingStep change) uses correct timing.
+          if (activeRide.status === 'pending') {
+            const createdAt = activeRide.createdAt
+              ? new Date(activeRide.createdAt).getTime()
+              : (savedState?.savedAt || Date.now());
+            searchStartedAtRef.current = createdAt;
+            _searchStartedAt = createdAt;
+          }
+
           applyRideToState(activeRide);
           fitMapToRide(activeRide);
-          // Persist reconciled state
+          setCachedRide(activeRide); // Cache for future screen navigation
+
+          if (!activeRide.quote?.distance && !routeDistanceRef.current
+              && activeRide.pickup?.lat && activeRide.dropoff?.lat) {
+            const fallbackDist = Math.round(haversineKm(
+              activeRide.pickup.lat, activeRide.pickup.lng,
+              activeRide.dropoff.lat, activeRide.dropoff.lng,
+            ) * 10) / 10;
+            setTotalDistance(fallbackDist);
+            routeDistanceRef.current = fallbackDist;
+          }
+
+          // Refs already set by applyRideToState.
+          // Only fetch pickup→destination route during in_progress.
+          if (activeRide.status === 'in_progress' && activeRide.dropoff?.lat && activeRide.dropoff?.lng) {
+            const destCoords = { latitude: activeRide.dropoff.lat, longitude: activeRide.dropoff.lng };
+
+            const pickupCoords = activeRide.pickup?.lat
+              ? { latitude: activeRide.pickup.lat, longitude: activeRide.pickup.lng }
+              : locationRef.current;
+            if (pickupCoords) {
+              const waypoints = (activeRide.stops || [])
+                .filter(s => s.lat && s.lng)
+                .map(s => ({ latitude: s.lat, longitude: s.lng }));
+              fetchRouteOSRM(pickupCoords, destCoords, waypoints).then(coords => {
+                setRoutePolyline(coords);
+              });
+            }
+          }
+
+          // Progress bar and timeout for pending rides are handled by the
+          // consolidated progress useEffect (triggered by bookingStep change).
+
           const reconciledVehicle = activeRide.driver?.vehicle;
           persistRideState({
             rideId: activeRide._id,
@@ -492,19 +633,16 @@ export default function TaxiScreen({ navigation }) {
               : null,
             driverName: activeRide.driver?.user?.firstName || null,
             driverVehicle: reconciledVehicle ? { make: reconciledVehicle.make, model: reconciledVehicle.model, color: reconciledVehicle.color, licensePlate: reconciledVehicle.licensePlate } : null,
+            totalDistance: activeRide.quote?.distance ? parseFloat(activeRide.quote.distance) : routeDistanceRef.current,
           });
-
-          // Resume notification silently with authoritative server data
-          if (['accepted', 'driver_arrived', 'in_progress'].includes(activeRide.status)) {
-            updateRideNotification(activeRide.status, extractDriverInfo(activeRide), activeRide.quote?.duration || null);
-          }
         } else if (savedState) {
-          // Ride ended while app was killed — clear stale local state
           resetBookingState();
+          clearCachedRide();
         }
       } catch (error) {
-        // Offline: rely on local state already restored in Phase 1
         console.warn('[TaxiScreen] Offline — using cached ride state');
+        // searchStartedAtRef was already set in Phase 1 from savedState.savedAt.
+        // The progress useEffect will handle animation and timeout.
       } finally {
         isReconcilingRef.current = false;
       }
@@ -574,17 +712,15 @@ export default function TaxiScreen({ navigation }) {
 
   // Fetch driver-to-pickup route when driver location updates (throttled to 15s)
   useEffect(() => {
-    if (!driverLocation) return;
-    const loc = locationRef.current;
-    if (!loc) return;
+    if (!driverLocation || !location) return;
     if (bookingStep !== BOOKING_STEPS.DRIVER_FOUND && bookingStep !== BOOKING_STEPS.DRIVER_ARRIVED) return;
 
     const now = Date.now();
     if (now - lastDriverRouteFetchRef.current < 15000) return; // 15s throttle (was 5s)
     lastDriverRouteFetchRef.current = now;
 
-    fetchRouteOSRM(driverLocation, loc).then(setDriverRoute);
-  }, [driverLocation, bookingStep]);
+    fetchRouteOSRM(driverLocation, location).then(setDriverRoute);
+  }, [driverLocation, bookingStep, location]);
 
   // Fit map to driver + pickup — only on first driver location, not every update.
   // Constant fitToCoordinates prevents user from panning the map manually.
@@ -641,8 +777,12 @@ export default function TaxiScreen({ navigation }) {
       clearRideTimeout();
       setCurrentRide(ride);
       setBookingStep(BOOKING_STEPS.DRIVER_FOUND);
+      setCachedRide(ride);
 
-      // Clear nearby drivers and destination
+      // Clear nearby drivers, destination, and search metadata
+      _nearbyDriversCache = [];
+      _searchStartedAt = null;
+      searchStartedAtRef.current = null;
       setNearbyDrivers([]);
       setDestinationCoords(null);
       setRoutePolyline(null);
@@ -670,6 +810,7 @@ export default function TaxiScreen({ navigation }) {
         driverLocation: driverLoc,
         driverName: ride.driver?.user?.firstName || null,
         driverVehicle: vehicle ? { make: vehicle.make, model: vehicle.model, color: vehicle.color, licensePlate: vehicle.licensePlate } : null,
+        totalDistance: ride.quote?.distance ? parseFloat(ride.quote.distance) : routeDistanceRef.current,
       });
 
       // Show persistent notification (visible outside app)
@@ -706,7 +847,7 @@ export default function TaxiScreen({ navigation }) {
       setDriverLocation(newLoc);
 
       if (loc) {
-        const distance = calculateDistance(
+        const distance = haversineKm(
           latitude,
           longitude,
           loc.latitude,
@@ -716,10 +857,10 @@ export default function TaxiScreen({ navigation }) {
         const eta = Math.round((distance / 30) * 60);
         setDriverETA(eta);
 
-        // Update persistent notification with new ETA (silent)
-        if (ride) {
-          const status = ride.status === 'in_progress' ? 'in_progress' : 'accepted';
-          updateRideNotification(status, extractDriverInfo(ride), eta);
+        // One-time "driver is close" notification when within threshold
+        if (ride && !driverCloseNotifiedRef.current && distance <= DRIVER_CLOSE_THRESHOLD_KM) {
+          driverCloseNotifiedRef.current = true;
+          showRideNotification('accepted', extractDriverInfo(ride), eta);
         }
       }
     });
@@ -731,6 +872,7 @@ export default function TaxiScreen({ navigation }) {
 
       setCurrentRide(ride);
       setBookingStep(BOOKING_STEPS.DRIVER_ARRIVED);
+      setCachedRide(ride);
 
       const vehicle = ride.driver?.vehicle;
       persistRideState({
@@ -746,6 +888,7 @@ export default function TaxiScreen({ navigation }) {
         driverLocation: null,
         driverName: ride.driver?.user?.firstName || null,
         driverVehicle: vehicle ? { make: vehicle.make, model: vehicle.model, color: vehicle.color, licensePlate: vehicle.licensePlate } : null,
+        totalDistance: ride.quote?.distance ? parseFloat(ride.quote.distance) : routeDistanceRef.current,
       });
 
       // Update persistent notification
@@ -767,6 +910,7 @@ export default function TaxiScreen({ navigation }) {
 
       setCurrentRide(ride);
       setBookingStep(BOOKING_STEPS.IN_PROGRESS);
+      setCachedRide(ride);
 
       const vehicle = ride.driver?.vehicle;
       persistRideState({
@@ -782,6 +926,7 @@ export default function TaxiScreen({ navigation }) {
         driverLocation: null,
         driverName: ride.driver?.user?.firstName || null,
         driverVehicle: vehicle ? { make: vehicle.make, model: vehicle.model, color: vehicle.color, licensePlate: vehicle.licensePlate } : null,
+        totalDistance: ride.quote?.distance ? parseFloat(ride.quote.distance) : routeDistanceRef.current,
       });
 
       // Update persistent notification
@@ -819,12 +964,13 @@ export default function TaxiScreen({ navigation }) {
             // Calculate total distance from polyline
             let totalDist = 0;
             for (let i = 1; i < coords.length; i++) {
-              totalDist += calculateDistance(
+              totalDist += haversineKm(
                 coords[i - 1].latitude, coords[i - 1].longitude,
                 coords[i].latitude, coords[i].longitude,
               );
             }
             setTotalDistance(Math.round(totalDist * 10) / 10); // 1 decimal place
+            routeDistanceRef.current = Math.round(totalDist * 10) / 10;
 
             if (mapRef.current) {
               mapRef.current.fitToCoordinates(coords, {
@@ -937,7 +1083,25 @@ export default function TaxiScreen({ navigation }) {
         );
 
         if (activeRide) {
+          // Update search start time for pending rides before applying state
+          if (activeRide.status === 'pending' && activeRide.createdAt) {
+            const createdAt = new Date(activeRide.createdAt).getTime();
+            searchStartedAtRef.current = createdAt;
+            _searchStartedAt = createdAt;
+          }
+
           applyRideToState(activeRide);
+          setCachedRide(activeRide);
+
+          // Restore destination refs for socket handlers
+          if (activeRide.dropoff?.lat && activeRide.dropoff?.lng) {
+            savedDestinationRef.current = activeRide.dropoff.address || '';
+            savedDestinationCoordsRef.current = {
+              latitude: activeRide.dropoff.lat,
+              longitude: activeRide.dropoff.lng,
+            };
+          }
+
           const reconnVehicle = activeRide.driver?.vehicle;
           persistRideState({
             rideId: activeRide._id,
@@ -957,12 +1121,10 @@ export default function TaxiScreen({ navigation }) {
               : null,
             driverName: activeRide.driver?.user?.firstName || null,
             driverVehicle: reconnVehicle ? { make: reconnVehicle.make, model: reconnVehicle.model, color: reconnVehicle.color, licensePlate: reconnVehicle.licensePlate } : null,
+            totalDistance: activeRide.quote?.distance ? parseFloat(activeRide.quote.distance) : routeDistanceRef.current,
           });
 
-          // Update notification with fresh data after reconnect
-          if (['accepted', 'driver_arrived', 'in_progress'].includes(activeRide.status)) {
-            updateRideNotification(activeRide.status, extractDriverInfo(activeRide), activeRide.quote?.duration || null);
-          }
+          // Reconnect reconciliation: no notification — avoid spamming
         } else if (currentRideRef.current) {
           // Ride ended while offline
           resetBookingState();
@@ -976,57 +1138,51 @@ export default function TaxiScreen({ navigation }) {
     return unsubscribe;
   }, [onReconnect, applyRideToState]);
 
-  // Progress bar animation for searching
+  // Unified progress bar + timeout for SEARCHING state.
+  // Uses searchStartedAtRef to calculate elapsed time, so it works correctly for:
+  //   - Fresh search (elapsed ≈ 0, full 30s animation)
+  //   - Resume after navigation (elapsed > 0, animation continues from correct position)
+  //   - Resume after app kill (elapsed from server createdAt or SecureStore savedAt)
   useEffect(() => {
     if (bookingStep === BOOKING_STEPS.SEARCHING) {
-      const startTime = Date.now();
+      const startedAt = searchStartedAtRef.current || Date.now();
+      const elapsed = Date.now() - startedAt;
+      const remaining = Math.max(0, RIDE_REQUEST_TIMEOUT - elapsed);
+      const startProgress = Math.min(100, (elapsed / RIDE_REQUEST_TIMEOUT) * 100);
 
-      const interval = setInterval(() => {
-        const elapsed = Date.now() - startTime;
-        const newProgress = Math.min((elapsed / RIDE_REQUEST_TIMEOUT) * 100, 100);
-        setProgress(newProgress);
-      }, 100);
+      progressAnim.stopAnimation();
+      progressAnim.setValue(startProgress);
 
-      return () => clearInterval(interval);
+      if (remaining > 0) {
+        Animated.timing(progressAnim, {
+          toValue: 100,
+          duration: remaining,
+          useNativeDriver: false,
+        }).start();
+        timeoutTimerRef.current = setTimeout(handleRideTimeout, remaining);
+      } else {
+        handleRideTimeout();
+      }
+
+      return () => {
+        progressAnim.stopAnimation();
+        if (timeoutTimerRef.current) {
+          clearTimeout(timeoutTimerRef.current);
+          timeoutTimerRef.current = null;
+        }
+      };
     } else {
-      setProgress(0);
+      progressAnim.stopAnimation();
+      progressAnim.setValue(0);
     }
   }, [bookingStep]);
 
-  // ETA countdown for notification — decrement every 30s between driver:locationUpdate events
-  const lastNotifEtaRef = useRef(null);
-  useEffect(() => {
-    if (!currentRide || !driverETA) {
-      lastNotifEtaRef.current = null;
-      return;
-    }
-
-    const activeSteps = [BOOKING_STEPS.DRIVER_FOUND, BOOKING_STEPS.IN_PROGRESS];
-    if (!activeSteps.includes(bookingStep)) return;
-
-    lastNotifEtaRef.current = driverETA;
-    const startTime = Date.now();
-    const startEta = driverETA;
-
-    const interval = setInterval(() => {
-      const elapsed = (Date.now() - startTime) / 60000;
-      const newEta = Math.max(1, Math.round(startEta - elapsed));
-
-      if (newEta !== lastNotifEtaRef.current) {
-        lastNotifEtaRef.current = newEta;
-        const ride = currentRideRef.current;
-        if (ride) {
-          const status = bookingStep === BOOKING_STEPS.IN_PROGRESS ? 'in_progress' : 'accepted';
-          updateRideNotification(status, extractDriverInfo(ride), newEta);
-        }
-      }
-    }, 30000);
-
-    return () => clearInterval(interval);
-  }, [driverETA, bookingStep, currentRide]);
+  // ETA countdown — no longer sends notifications, just kept as state for UI display
 
   const resetBookingState = () => {
     dismissRideNotification();
+    clearCachedRide();
+    clearSearchMeta();
     setCurrentRide(null);
     setBookingStep(BOOKING_STEPS.LOCATION_SEARCH);
     setDestination('');
@@ -1041,9 +1197,12 @@ export default function TaxiScreen({ navigation }) {
     setNearbyDrivers([]);
     setDriverRoute(null);
     setTotalDistance(null);
+    routeDistanceRef.current = null;
     driverLocationRef.current = null;
+    driverCloseNotifiedRef.current = false;
     savedDestinationRef.current = null;
     savedDestinationCoordsRef.current = null;
+    searchStartedAtRef.current = null;
     // Do NOT clear shownAlertsRef here — it must persist across resetBookingState
     // calls to prevent duplicate alerts from reconnection re-delivery or admin-room
     // double-emit. Old entries are harmless (keyed by rideId, new rides have new IDs).
@@ -1126,7 +1285,7 @@ export default function TaxiScreen({ navigation }) {
           // Estimate total distance from polyline
           let totalDist = 0;
           for (let i = 1; i < polylineCoords.length; i++) {
-            totalDist += calculateDistance(
+            totalDist += haversineKm(
               polylineCoords[i - 1].latitude, polylineCoords[i - 1].longitude,
               polylineCoords[i].latitude, polylineCoords[i].longitude,
             );
@@ -1134,6 +1293,7 @@ export default function TaxiScreen({ navigation }) {
           setEstimatedPrice(calculatePrice(totalDist, selectedVehicle));
           setEstimatedDuration(Math.round(totalDist * 2.5));
           setTotalDistance(Math.round(totalDist * 10) / 10);
+          routeDistanceRef.current = Math.round(totalDist * 10) / 10;
           setRoutePolyline(polylineCoords);
 
           setTimeout(() => {
@@ -1159,6 +1319,7 @@ export default function TaxiScreen({ navigation }) {
         setEstimatedPrice(calculatePrice(directions.distance, selectedVehicle));
         setEstimatedDuration(directions.duration);
         setTotalDistance(Math.round(directions.distance * 10) / 10);
+        routeDistanceRef.current = Math.round(directions.distance * 10) / 10;
 
         // Convert polyline to {latitude, longitude} format for react-native-maps
         const polyline = directions.polyline.map(p => ({
@@ -1178,7 +1339,7 @@ export default function TaxiScreen({ navigation }) {
         }, 100);
       } else {
         // Last resort fallback to straight line
-        const distance = calculateDistance(
+        const distance = haversineKm(
           location.latitude,
           location.longitude,
           destCoords.latitude,
@@ -1187,6 +1348,7 @@ export default function TaxiScreen({ navigation }) {
         setEstimatedPrice(calculatePrice(distance, selectedVehicle));
         setEstimatedDuration(Math.round(distance * 2.5));
         setTotalDistance(Math.round(distance * 10) / 10);
+        routeDistanceRef.current = Math.round(distance * 10) / 10;
         setRoutePolyline([
           { latitude: location.latitude, longitude: location.longitude },
           { latitude: destCoords.latitude, longitude: destCoords.longitude },
@@ -1203,7 +1365,7 @@ export default function TaxiScreen({ navigation }) {
       }
     } catch (error) {
       // Fallback calculation
-      const distance = calculateDistance(
+      const distance = haversineKm(
         location.latitude,
         location.longitude,
         destCoords.latitude,
@@ -1248,15 +1410,16 @@ export default function TaxiScreen({ navigation }) {
     }
   }, [handleDestinationSelectWithCoords, handleDestinationChange]);
 
-  // H2: Use stored route distance (totalDistance) instead of Haversine straight-line
+  // H2: Use stored route distance (totalDistance / ref) instead of Haversine straight-line
   const handleVehicleSelect = useCallback((vehicleId) => {
     setSelectedVehicle(vehicleId);
 
-    if (totalDistance) {
-      setEstimatedPrice(calculatePrice(totalDistance, vehicleId));
+    const dist = totalDistance || routeDistanceRef.current;
+    if (dist) {
+      setEstimatedPrice(calculatePrice(dist, vehicleId));
     } else if (location && destinationCoords) {
       // Fallback to Haversine only if no route distance available yet
-      const distance = calculateDistance(
+      const distance = haversineKm(
         location.latitude,
         location.longitude,
         destinationCoords.latitude,
@@ -1271,7 +1434,7 @@ export default function TaxiScreen({ navigation }) {
       clearTimeout(timeoutTimerRef.current);
       timeoutTimerRef.current = null;
     }
-    setProgress(0);
+    progressAnim.setValue(0);
   };
 
   const handleRideTimeout = async () => {
@@ -1299,7 +1462,11 @@ export default function TaxiScreen({ navigation }) {
         [{ text: t('common.ok') }]
       );
     } catch (error) {
-      resetBookingState();
+      Alert.alert(
+        t('errors.error'),
+        t('taxi.noDriverFoundMessage'),
+        [{ text: t('common.ok'), onPress: () => resetBookingState() }]
+      );
     }
   };
 
@@ -1345,7 +1512,7 @@ export default function TaxiScreen({ navigation }) {
     submitRideRequest(paymentMethod);
   };
 
-  const submitRideRequest = async (selectedPaymentMethod) => {
+  const submitRideRequest = async (selectedPaymentMethod, paymentId = null) => {
     // Duplicate guard: prevent submitting if there's already an active ride
     const existingRide = currentRideRef.current;
     if (existingRide && !['completed', 'cancelled'].includes(existingRide.status)) {
@@ -1356,16 +1523,20 @@ export default function TaxiScreen({ navigation }) {
     setIsRequesting(true);
 
     try {
-      const distance = calculateDistance(
+      // Use route distance (from directions API) for consistency with estimatedPrice shown to passenger.
+      // Fall back to straight-line only if route distance is unavailable.
+      const distance = totalDistance || haversineKm(
         location.latitude,
         location.longitude,
         destinationCoords.latitude,
         destinationCoords.longitude
       );
 
-      const totalPrice = parseFloat(calculatePrice(distance, selectedVehicle));
-      const basePrice = 5 + (distance * 1.5);
-      const duration = Math.round(distance * 2.5);
+      const price = estimatedPrice
+        ? parseFloat(estimatedPrice)
+        : parseFloat(calculatePrice(distance, selectedVehicle));
+      const basePrice = pricingConfig.basePrice + (distance * pricingConfig.kmPrice);
+      const duration = estimatedDuration || Math.round(distance * 2.5);
 
       const rideData = {
         pickup: {
@@ -1385,16 +1556,17 @@ export default function TaxiScreen({ navigation }) {
         })),
         vehicleType: selectedVehicle,
         quote: {
-          distance: distance.toFixed(2),
-          distanceText: `${distance.toFixed(2)} km`,
+          distance: parseFloat(distance).toFixed(2),
+          distanceText: `${parseFloat(distance).toFixed(2)} km`,
           duration: duration,
           durationText: `${duration} min`,
-          basePrice: basePrice.toFixed(2),
-          totalPrice: totalPrice.toFixed(2)
+          basePrice: parseFloat(basePrice).toFixed(2),
+          totalPrice: price.toFixed(2)
         },
         passengerName: `${user.firstName} ${user.lastName}`,
         passengerPhone: user.phone || '',
         paymentMethod: selectedPaymentMethod,
+        paymentId: paymentId || undefined,
         notes: ''
       };
 
@@ -1407,8 +1579,15 @@ export default function TaxiScreen({ navigation }) {
       if (response.data.success) {
         const ride = response.data.data.ride;
         setCurrentRide(ride);
+        setCachedRide(ride);
+
+        // Record search start time BEFORE setting bookingStep so the
+        // progress useEffect has the correct value when it fires.
+        const now = Date.now();
+        searchStartedAtRef.current = now;
+        _searchStartedAt = now;
+
         setBookingStep(BOOKING_STEPS.SEARCHING);
-        setProgress(0);
 
         // Persist ride state to survive app kill
         persistRideState({
@@ -1419,10 +1598,11 @@ export default function TaxiScreen({ navigation }) {
           dropoff: rideData.dropoff,
           vehicleType: selectedVehicle,
           paymentMethod: selectedPaymentMethod,
-          estimatedPrice: totalPrice.toFixed(2),
+          estimatedPrice: price.toFixed(2),
           estimatedDuration: duration,
           driverLocation: null,
           driverName: null,
+          totalDistance: totalDistance || routeDistanceRef.current,
         });
 
         // Save destination data for restoring after driver is found
@@ -1442,7 +1622,7 @@ export default function TaxiScreen({ navigation }) {
           }, 300);
         }
 
-        // Fetch and show nearby online drivers on map
+        // Fetch and show nearby online drivers on map, cache for navigation resilience
         try {
           const driversRes = await taxiAPI.getNearbyDrivers(
             location.latitude,
@@ -1450,14 +1630,13 @@ export default function TaxiScreen({ navigation }) {
             selectedVehicle
           );
           const drivers = driversRes.data?.data?.drivers || [];
+          _nearbyDriversCache = drivers;
           setNearbyDrivers(drivers);
         } catch (err) {
           console.warn('[TaxiScreen] Failed to fetch nearby drivers:', err.message);
         }
 
-        timeoutTimerRef.current = setTimeout(() => {
-          handleRideTimeout();
-        }, RIDE_REQUEST_TIMEOUT);
+        // Timeout is handled by the progress useEffect (triggered by bookingStep change).
       }
     } catch (error) {
       // Offline-specific error handling
@@ -1562,9 +1741,10 @@ export default function TaxiScreen({ navigation }) {
 
   const handleRemoveStop = useCallback((index) => {
     setStops(prev => prev.filter((_, i) => i !== index));
-    // Re-fetch route after stop removed
-    if (destinationCoords) {
-      setTimeout(() => fetchDirectionsAndUpdate(destinationCoords), 100);
+    // Re-fetch route after stop removed — use ref to avoid stale closure
+    const currentDestCoords = savedDestinationCoordsRef.current || destinationCoords;
+    if (currentDestCoords) {
+      setTimeout(() => fetchDirectionsAndUpdate(currentDestCoords), 100);
     }
   }, [destinationCoords, fetchDirectionsAndUpdate]);
 
@@ -1757,9 +1937,12 @@ export default function TaxiScreen({ navigation }) {
       <PaymentMethodModal
         visible={showPaymentMethodModal}
         onClose={() => setShowPaymentMethodModal(false)}
-        onSelect={(method) => {
+        amount={estimatedPrice ? parseFloat(estimatedPrice) : 0}
+        onSelect={(method, cardId, paymentId) => {
           setShowPaymentMethodModal(false);
-          submitRideRequest(method);
+          setSelectedCardId(cardId || null);
+          setConfirmedPaymentId(paymentId || null);
+          submitRideRequest(method, paymentId);
         }}
       />
 
@@ -1767,7 +1950,6 @@ export default function TaxiScreen({ navigation }) {
       <View style={styles.mapContainer}>
         <MapView
           ref={mapRef}
-          provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
           style={styles.map}
           initialRegion={initialRegion}
           onPress={handleMapPress}
@@ -1800,8 +1982,6 @@ export default function TaxiScreen({ navigation }) {
               key={`stop-${index}`}
               coordinate={stop.coords}
               index={index}
-              title={`${t('taxi.stop')} ${index + 1}`}
-              description={stop.address}
             />
           ))}
 
@@ -1817,16 +1997,16 @@ export default function TaxiScreen({ navigation }) {
 
           {/* Main route shadow (rendered behind for depth) */}
           {routePolyline && routePolyline.length > 1 && (
-            <Polyline coordinates={routePolyline} {...ROUTE_SHADOW_STYLE} />
+            <Polyline id="route-shadow" coordinates={routePolyline} {...ROUTE_SHADOW_STYLE} />
           )}
           {/* Main route polyline (pickup → destination) */}
           {routePolyline && routePolyline.length > 1 && (
-            <Polyline coordinates={routePolyline} {...ROUTE_STYLE} />
+            <Polyline id="route-main" coordinates={routePolyline} {...ROUTE_STYLE} />
           )}
 
           {/* Driver-to-pickup route */}
           {driverRoute && driverRoute.length > 1 && (
-            <Polyline coordinates={driverRoute} {...DRIVER_ROUTE_STYLE} />
+            <Polyline id="driver-route" coordinates={driverRoute} {...DRIVER_ROUTE_STYLE} />
           )}
         </MapView>
 

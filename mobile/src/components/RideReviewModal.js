@@ -12,12 +12,14 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
-import { colors, shadows, radius, useTypography } from '../theme/colors';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { colors, shadows, radius, spacing, useTypography } from '../theme/colors';
 
 export default function RideReviewModal({ visible, ride, onClose, onSubmit, isLoading }) {
-const typography = useTypography();
+  const typography = useTypography();
+  const insets = useSafeAreaInsets();
   const styles = React.useMemo(() => createStyles(typography), [typography]);
-    const { t } = useTranslation();
+  const { t } = useTranslation();
   const [rating, setRating] = useState(0);
   const [review, setReview] = useState('');
   const [scaleValues] = useState([1, 2, 3, 4, 5].map(() => new Animated.Value(1)));
@@ -40,12 +42,16 @@ const typography = useTypography();
     ]).start();
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (rating > 0) {
-      onSubmit(rating, review);
-      // Reset form
-      setRating(0);
-      setReview('');
+      try {
+        await onSubmit(rating, review);
+        // Only reset form after successful submission
+        setRating(0);
+        setReview('');
+      } catch {
+        // Keep user input on failure so they can retry
+      }
     }
   };
 
@@ -71,7 +77,7 @@ const typography = useTypography();
       onRequestClose={handleClose}
     >
       <View style={styles.modalOverlay}>
-        <View style={styles.modalContent}>
+        <View style={[styles.modalContent, { paddingBottom: Math.max(insets.bottom, spacing['3xl']) }]}>
           {/* Header */}
           <View style={styles.header}>
             <View style={styles.headerIcon}>
@@ -94,7 +100,7 @@ const typography = useTypography();
                 <View style={styles.driverMeta}>
                   {driver?.rating > 0 && (
                     <View style={styles.driverRatingRow}>
-                      <Ionicons name="star" size={14} color="#FFA500" />
+                      <Ionicons name="star" size={14} color={colors.warning} />
                       <Text style={styles.driverRating}>
                         {driver.rating.toFixed(1)}
                       </Text>
@@ -130,6 +136,9 @@ const typography = useTypography();
                     onPress={() => handleStarPress(star)}
                     style={styles.starButton}
                     disabled={isLoading}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${star} ${star === 1 ? t('taxi.star', { defaultValue: 'star' }) : t('taxi.stars', { defaultValue: 'stars' })}`}
+                    accessibilityState={{ selected: star <= rating }}
                   >
                     <Animated.View
                       style={{
@@ -139,7 +148,7 @@ const typography = useTypography();
                       <Ionicons
                         name={star <= rating ? 'star' : 'star-outline'}
                         size={44}
-                        color={star <= rating ? '#FFD700' : colors.border}
+                        color={star <= rating ? colors.warning : colors.border}
                       />
                     </Animated.View>
                   </TouchableOpacity>
@@ -232,9 +241,8 @@ const createStyles = (typography) => StyleSheet.create({
     backgroundColor: colors.background,
     borderTopLeftRadius: radius['2xl'],
     borderTopRightRadius: radius['2xl'],
-    paddingTop: 24,
-    paddingHorizontal: 20,
-    paddingBottom: 32,
+    paddingTop: spacing['2xl'],
+    paddingHorizontal: spacing.xl,
     maxHeight: '90%',
     ...shadows.lg,
   },

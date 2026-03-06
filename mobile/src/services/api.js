@@ -162,5 +162,33 @@ export const settingsAPI = {
     api.get('/settings/pricing'),
 };
 
+// Payment API
+export const paymentAPI = {
+  registerCard: (lang) =>
+    api.post('/payments/cards/register', { lang }),
+
+  verifyCardRegistration: (orderId) =>
+    api.post(`/payments/cards/verify/${orderId}`),
+
+  getSavedCards: () =>
+    api.get('/payments/cards'),
+
+  deleteCard: (cardId) =>
+    api.delete(`/payments/cards/${cardId}`),
+
+  setDefaultCard: (cardId) =>
+    api.patch(`/payments/cards/${cardId}/default`),
+
+  // Pre-ride payment: charge card before requesting drivers
+  preChargeRide: (cardId, amount, lang) =>
+    api.post('/payments/ride/pre-charge', { cardId, amount, lang }),
+
+  verifyRidePayment: (orderId) =>
+    api.post(`/payments/ride/verify/${orderId}`),
+
+  getPaymentStatus: (paymentId) =>
+    api.get(`/payments/${paymentId}/status`),
+};
+
 export { API_URL };
 export default api;

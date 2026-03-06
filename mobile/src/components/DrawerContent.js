@@ -10,6 +10,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
+import Constants from 'expo-constants';
 import { useAuth } from '../context/AuthContext';
 import { colors, radius, spacing, useTypography } from '../theme/colors';
 
@@ -192,7 +193,7 @@ export default function DrawerContent({ navigation }) {
           <Ionicons name="log-out-outline" size={22} color={colors.destructive} />
           <Text style={styles.logoutText}>{t('profile.logout')}</Text>
         </TouchableOpacity>
-        <Text style={styles.versionText}>v1.0.0</Text>
+        <Text style={styles.versionText}>v{Constants.expoConfig?.version || '1.0.0'}</Text>
       </View>
     </View>
   );

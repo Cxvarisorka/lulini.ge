@@ -11,7 +11,8 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
-import { colors, shadows, radius, useTypography } from '../theme/colors';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { colors, shadows, radius, spacing, useTypography } from '../theme/colors';
 
 const CANCELLATION_REASONS = [
   {
@@ -54,18 +55,23 @@ export default function CancelRideModal({
   onConfirm,
   isLoading = false,
 }) {
-const typography = useTypography();
+  const typography = useTypography();
+  const insets = useSafeAreaInsets();
   const styles = React.useMemo(() => createStyles(typography), [typography]);
-    const { t } = useTranslation();
+  const { t } = useTranslation();
   const [selectedReason, setSelectedReason] = useState(null);
   const [additionalNote, setAdditionalNote] = useState('');
 
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
     if (!selectedReason) return;
-    onConfirm(selectedReason, additionalNote);
-    // Reset state
-    setSelectedReason(null);
-    setAdditionalNote('');
+    try {
+      await onConfirm(selectedReason, additionalNote);
+      // Only reset state after successful confirmation
+      setSelectedReason(null);
+      setAdditionalNote('');
+    } catch {
+      // Keep user input on failure so they can retry
+    }
   };
 
   const handleClose = () => {
@@ -82,7 +88,7 @@ const typography = useTypography();
       onRequestClose={handleClose}
     >
       <View style={styles.overlay}>
-        <View style={styles.modalContainer}>
+        <View style={[styles.modalContainer, { paddingBottom: Math.max(insets.bottom, spacing.xl) }]}>
           {/* Header */}
           <View style={styles.header}>
             <Text style={styles.title}>{t('taxi.cancelRide')}</Text>
@@ -214,9 +220,8 @@ const createStyles = (typography) => StyleSheet.create({
     borderTopLeftRadius: radius['2xl'],
     borderTopRightRadius: radius['2xl'],
     maxHeight: '85%',
-    paddingTop: 20,
-    paddingHorizontal: 20,
-    paddingBottom: 30,
+    paddingTop: spacing.xl,
+    paddingHorizontal: spacing.xl,
     ...shadows.xl,
   },
   header: {
@@ -230,7 +235,7 @@ const createStyles = (typography) => StyleSheet.create({
     color: colors.foreground,
   },
   closeButton: {
-    padding: 4,
+    padding: 10,
   },
   subtitle: {
     ...typography.body,

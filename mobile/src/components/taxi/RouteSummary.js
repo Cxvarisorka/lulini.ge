@@ -2,9 +2,11 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
-import { colors, radius } from '../../theme/colors';
+import { colors, radius, useTypography } from '../../theme/colors';
 
 export default function RouteSummary({ pickup, destination, duration }) {
+  const typography = useTypography();
+  const styles = React.useMemo(() => createStyles(typography), [typography]);
   const { t } = useTranslation();
 
   return (
@@ -41,7 +43,7 @@ export default function RouteSummary({ pickup, destination, duration }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   container: {
     backgroundColor: colors.background,
     borderRadius: radius.lg,
@@ -83,14 +85,14 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   locationLabel: {
-    fontSize: 11,
+    ...typography.captionSmall,
     color: colors.mutedForeground,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginBottom: 2,
   },
   locationText: {
-    fontSize: 14,
+    ...typography.bodySmall,
     fontWeight: '500',
     color: colors.foreground,
   },
@@ -109,7 +111,7 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
   },
   durationText: {
-    fontSize: 13,
+    ...typography.caption,
     color: colors.mutedForeground,
     marginLeft: 6,
   },

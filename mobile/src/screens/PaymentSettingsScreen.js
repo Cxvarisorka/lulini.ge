@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,25 +6,49 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
+import * as WebBrowser from 'expo-web-browser';
 import { colors, shadows, radius, spacing, useTypography } from '../theme/colors';
+import { paymentAPI } from '../services/api';
 
 export default function PaymentSettingsScreen({ navigation }) {
-const typography = useTypography();
+  const typography = useTypography();
   const styles = React.useMemo(() => createStyles(typography), [typography]);
-    const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const insets = useSafeAreaInsets();
 
-  // Payment preferences state
   const [defaultPayment, setDefaultPayment] = useState('cash');
-  const [savedCards, setSavedCards] = useState([
-    // Mock data - in production, this would come from the backend
-    // { id: '1', type: 'visa', last4: '4242', expiry: '12/26' },
-    // { id: '2', type: 'mastercard', last4: '8888', expiry: '09/25' },
-  ]);
+  const [savedCards, setSavedCards] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [addingCard, setAddingCard] = useState(false);
+
+  const fetchCards = useCallback(async () => {
+    try {
+      const res = await paymentAPI.getSavedCards();
+      const cards = res.data?.data?.cards || [];
+      setSavedCards(cards);
+      // If user has cards and current default is card, keep it
+      if (cards.length > 0 && defaultPayment === 'card') {
+        setDefaultPayment('card');
+      }
+    } catch {
+      setSavedCards([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Refresh cards when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      fetchCards();
+    }, [fetchCards])
+  );
 
   const paymentMethods = [
     {
@@ -38,32 +62,51 @@ const typography = useTypography();
       icon: 'card',
       label: t('payment.card'),
       description: t('payment.cardDesc'),
-    },
-    {
-      id: 'corporate',
-      icon: 'business',
-      label: t('payment.corporate'),
-      description: t('payment.corporateDesc'),
+      disabled: savedCards.length === 0,
     },
   ];
 
-  const getCardIcon = (type) => {
+  const getCardLabel = (type) => {
     switch (type) {
-      case 'visa':
-        return 'card';
-      case 'mastercard':
-        return 'card';
-      default:
-        return 'card-outline';
+      case 'visa': return 'Visa';
+      case 'mc': return 'Mastercard';
+      case 'amex': return 'Amex';
+      default: return 'Card';
     }
   };
 
-  const handleAddCard = () => {
-    Alert.alert(
-      t('payment.addCard'),
-      t('payment.addCardMessage'),
-      [{ text: t('common.ok') }]
-    );
+  const handleAddCard = async () => {
+    setAddingCard(true);
+    try {
+      const lang = i18n.language === 'ka' ? 'ka' : 'en';
+      const res = await paymentAPI.registerCard(lang);
+      const { redirectUrl, orderId } = res.data?.data || {};
+
+      if (redirectUrl) {
+        await WebBrowser.openBrowserAsync(redirectUrl, {
+          dismissButtonStyle: 'close',
+          presentationStyle: 'pageSheet',
+        });
+
+        // After browser closes, verify the card registration with BOG
+        if (orderId) {
+          try {
+            await paymentAPI.verifyCardRegistration(orderId);
+          } catch {
+            // Non-fatal
+          }
+        }
+
+        await fetchCards();
+      }
+    } catch (err) {
+      Alert.alert(
+        t('errors.error'),
+        err.response?.data?.message || t('errors.somethingWentWrong')
+      );
+    } finally {
+      setAddingCard(false);
+    }
   };
 
   const handleRemoveCard = (cardId) => {
@@ -75,12 +118,29 @@ const typography = useTypography();
         {
           text: t('common.delete'),
           style: 'destructive',
-          onPress: () => {
-            setSavedCards((prev) => prev.filter((card) => card.id !== cardId));
+          onPress: async () => {
+            try {
+              await paymentAPI.deleteCard(cardId);
+              setSavedCards((prev) => prev.filter((card) => card._id !== cardId));
+            } catch {
+              Alert.alert(t('errors.error'), t('errors.somethingWentWrong'));
+            }
           },
         },
       ]
     );
+  };
+
+  const handleSetDefault = async (cardId) => {
+    try {
+      await paymentAPI.setDefaultCard(cardId);
+      setSavedCards(prev => prev.map(c => ({
+        ...c,
+        isDefault: c._id === cardId
+      })));
+    } catch {
+      Alert.alert(t('errors.error'), t('errors.somethingWentWrong'));
+    }
   };
 
   return (
@@ -103,15 +163,26 @@ const typography = useTypography();
                 style={[
                   styles.paymentOption,
                   index !== paymentMethods.length - 1 && styles.paymentOptionBorder,
+                  method.disabled && styles.paymentOptionDisabled,
                 ]}
-                onPress={() => setDefaultPayment(method.id)}
+                onPress={() => {
+                  if (method.id === 'card' && savedCards.length === 0) {
+                    handleAddCard();
+                    return;
+                  }
+                  setDefaultPayment(method.id);
+                }}
               >
                 <View style={styles.paymentIcon}>
                   <Ionicons name={method.icon} size={22} color={colors.primary} />
                 </View>
                 <View style={styles.paymentContent}>
                   <Text style={styles.paymentLabel}>{method.label}</Text>
-                  <Text style={styles.paymentDescription}>{method.description}</Text>
+                  <Text style={styles.paymentDescription}>
+                    {method.id === 'card' && savedCards.length === 0
+                      ? t('payment.addCardToUse')
+                      : method.description}
+                  </Text>
                 </View>
                 <View
                   style={[
@@ -132,33 +203,37 @@ const typography = useTypography();
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{t('payment.savedCards')}</Text>
           <View style={styles.sectionContent}>
-            {savedCards.length > 0 ? (
+            {loading ? (
+              <ActivityIndicator size="small" color={colors.primary} style={{ padding: 24 }} />
+            ) : savedCards.length > 0 ? (
               savedCards.map((card, index) => (
                 <View
-                  key={card.id}
+                  key={card._id}
                   style={[
                     styles.cardItem,
                     index !== savedCards.length - 1 && styles.cardItemBorder,
                   ]}
                 >
-                  <View style={styles.cardIcon}>
-                    <Ionicons
-                      name={getCardIcon(card.type)}
-                      size={22}
-                      color={colors.primary}
-                    />
-                  </View>
-                  <View style={styles.cardContent}>
-                    <Text style={styles.cardNumber}>
-                      •••• •••• •••• {card.last4}
-                    </Text>
-                    <Text style={styles.cardExpiry}>
-                      {t('payment.expires')} {card.expiry}
-                    </Text>
-                  </View>
+                  <TouchableOpacity
+                    style={styles.cardMainContent}
+                    onPress={() => handleSetDefault(card._id)}
+                  >
+                    <View style={styles.cardIcon}>
+                      <Ionicons name="card" size={22} color={colors.primary} />
+                    </View>
+                    <View style={styles.cardContent}>
+                      <Text style={styles.cardNumber}>
+                        {getCardLabel(card.cardType)} •••• {card.maskedPan?.slice(-4) || '****'}
+                      </Text>
+                      <Text style={styles.cardExpiry}>
+                        {t('payment.expires')} {card.expiryDate}
+                        {card.isDefault ? ` · ${t('payment.default')}` : ''}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.removeButton}
-                    onPress={() => handleRemoveCard(card.id)}
+                    onPress={() => handleRemoveCard(card._id)}
                   >
                     <Ionicons
                       name="trash-outline"
@@ -182,8 +257,16 @@ const typography = useTypography();
             )}
 
             {/* Add Card Button */}
-            <TouchableOpacity style={styles.addCardButton} onPress={handleAddCard}>
-              <Ionicons name="add-circle" size={22} color={colors.primary} />
+            <TouchableOpacity
+              style={styles.addCardButton}
+              onPress={handleAddCard}
+              disabled={addingCard}
+            >
+              {addingCard ? (
+                <ActivityIndicator size="small" color={colors.primary} />
+              ) : (
+                <Ionicons name="add-circle" size={22} color={colors.primary} />
+              )}
               <Text style={styles.addCardText}>{t('payment.addNewCard')}</Text>
             </TouchableOpacity>
           </View>
@@ -204,21 +287,6 @@ const typography = useTypography();
               </Text>
             </View>
           </View>
-        </View>
-
-        {/* Payment History Link */}
-        <View style={styles.section}>
-          <TouchableOpacity style={styles.historyLink}>
-            <View style={styles.historyIcon}>
-              <Ionicons name="receipt" size={22} color={colors.primary} />
-            </View>
-            <Text style={styles.historyText}>{t('payment.viewHistory')}</Text>
-            <Ionicons
-              name="chevron-forward"
-              size={18}
-              color={colors.mutedForeground}
-            />
-          </TouchableOpacity>
         </View>
       </ScrollView>
     </View>
@@ -264,6 +332,9 @@ const createStyles = (typography) => StyleSheet.create({
   paymentOptionBorder: {
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
+  },
+  paymentOptionDisabled: {
+    opacity: 0.6,
   },
   paymentIcon: {
     width: 44,
@@ -318,6 +389,11 @@ const createStyles = (typography) => StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
+  cardMainContent: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   cardIcon: {
     width: 44,
     height: 44,
@@ -338,7 +414,6 @@ const createStyles = (typography) => StyleSheet.create({
   cardNumber: {
     ...typography.h2,
     color: colors.foreground,
-    letterSpacing: 1,
   },
   cardExpiry: {
     ...typography.bodySmall,
@@ -364,11 +439,11 @@ const createStyles = (typography) => StyleSheet.create({
     padding: spacing.lg,
     borderTopWidth: 1,
     borderTopColor: colors.border,
+    gap: spacing.sm,
   },
   addCardText: {
     ...typography.h3,
     color: colors.primary,
-    marginLeft: spacing.sm,
   },
   tipInfo: {
     flexDirection: 'row',
@@ -380,36 +455,5 @@ const createStyles = (typography) => StyleSheet.create({
     flex: 1,
     color: colors.mutedForeground,
     marginLeft: spacing.md,
-  },
-  historyLink: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.background,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  historyIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: radius.md,
-    backgroundColor: colors.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: spacing.md,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  historyText: {
-    ...typography.h3,
-    flex: 1,
-    color: colors.foreground,
   },
 });

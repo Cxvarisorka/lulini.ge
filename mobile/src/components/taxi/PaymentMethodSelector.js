@@ -2,9 +2,11 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
-import { colors, radius } from '../../theme/colors';
+import { colors, radius, useTypography } from '../../theme/colors';
 
 export default function PaymentMethodSelector({ selected, onSelect }) {
+  const typography = useTypography();
+  const styles = React.useMemo(() => createStyles(typography), [typography]);
   const { t } = useTranslation();
 
   return (
@@ -46,7 +48,7 @@ export default function PaymentMethodSelector({ selected, onSelect }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (typography) => StyleSheet.create({
   container: {
     flexDirection: 'row',
     gap: 10,
@@ -57,7 +59,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    paddingVertical: 10,
+    paddingVertical: 14,
     paddingHorizontal: 10,
     borderRadius: radius.md,
     borderWidth: 1,
@@ -67,7 +69,7 @@ const styles = StyleSheet.create({
     borderColor: colors.primary,
   },
   paymentText: {
-    fontSize: 14,
+    ...typography.bodySmall,
     color: colors.mutedForeground,
   },
   paymentTextSelected: {

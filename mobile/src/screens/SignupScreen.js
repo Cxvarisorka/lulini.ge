@@ -192,9 +192,9 @@ const typography = useTypography();
           <View style={styles.termsContainer}>
             <Text style={styles.termsText}>
               {t('auth.agreeToTerms')}{' '}
-              <Text style={styles.termsLink}>{t('auth.termsOfService')}</Text>
+              <Text style={styles.termsLink} onPress={() => Alert.alert(t('auth.termsOfService'))}>{t('auth.termsOfService')}</Text>
               {' '}{t('auth.and')}{' '}
-              <Text style={styles.termsLink}>{t('auth.privacyPolicy')}</Text>
+              <Text style={styles.termsLink} onPress={() => Alert.alert(t('auth.privacyPolicy'))}>{t('auth.privacyPolicy')}</Text>
             </Text>
           </View>
 

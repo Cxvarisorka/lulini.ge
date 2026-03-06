@@ -60,6 +60,9 @@ export default function RideOptionsSheet({
           style={[styles.requestButton, isRequesting && styles.requestButtonDisabled]}
           onPress={onRequestRide}
           disabled={isRequesting}
+          accessibilityRole="button"
+          accessibilityLabel={t('taxi.requestRide')}
+          accessibilityState={{ disabled: isRequesting }}
         >
           {isRequesting ? (
             <ActivityIndicator color={colors.background} size="small" />
@@ -115,16 +118,15 @@ const createStyles = (typography) => StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.primary,
-    paddingVertical: 12,
-    paddingHorizontal: 28,
+    paddingVertical: 16,
+    paddingHorizontal: 32,
     borderRadius: radius.lg,
   },
   requestButtonDisabled: {
     opacity: 0.5,
   },
   requestButtonText: {
-    ...typography.bodySmall,
-    fontWeight: '600',
+    ...typography.button,
     color: colors.background,
   },
 });

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,48 +6,53 @@ import {
   ScrollView,
   TouchableOpacity,
   Switch,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { colors, shadows, radius, spacing, useTypography } from '../theme/colors';
 
+const SETTINGS_STORAGE_KEY = '@app_settings';
+
 export default function SettingsScreen({ navigation }) {
-const typography = useTypography();
+  const typography = useTypography();
   const styles = React.useMemo(() => createStyles(typography), [typography]);
-    const { t } = useTranslation();
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
 
-  // Settings state (in production, these would be persisted)
-  const [settings, setSettings] = useState({
-    darkMode: false,
+  const defaultSettings = {
     locationServices: true,
     autoDetectPickup: true,
     soundEffects: true,
     hapticFeedback: true,
-    showETA: true,
-    showLiveTracking: true,
-    saveRideHistory: true,
-  });
-
-  const toggleSetting = (key) => {
-    setSettings((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
+  const [settings, setSettings] = useState(defaultSettings);
+
+  // Load persisted settings on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(SETTINGS_STORAGE_KEY);
+        if (raw) setSettings((prev) => ({ ...prev, ...JSON.parse(raw) }));
+      } catch {}
+    })();
+  }, []);
+
+  const toggleSetting = useCallback((key) => {
+    setSettings((prev) => {
+      const updated = { ...prev, [key]: !prev[key] };
+      AsyncStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(updated)).catch(() => {});
+      return updated;
+    });
+  }, []);
+
+  const comingSoon = () => Alert.alert(t('common.comingSoon', { defaultValue: 'Coming Soon' }), t('common.comingSoonDesc', { defaultValue: 'This feature is not available yet.' }));
+
   const settingsSections = [
-    {
-      title: t('settings.appearance'),
-      items: [
-        {
-          icon: 'moon',
-          label: t('settings.darkMode'),
-          description: t('settings.darkModeDesc'),
-          type: 'switch',
-          key: 'darkMode',
-        },
-      ],
-    },
     {
       title: t('settings.location'),
       items: [
@@ -87,51 +92,25 @@ const typography = useTypography();
       ],
     },
     {
-      title: t('settings.ridePreferences'),
-      items: [
-        {
-          icon: 'time',
-          label: t('settings.showETA'),
-          description: t('settings.showETADesc'),
-          type: 'switch',
-          key: 'showETA',
-        },
-        {
-          icon: 'map',
-          label: t('settings.liveTracking'),
-          description: t('settings.liveTrackingDesc'),
-          type: 'switch',
-          key: 'showLiveTracking',
-        },
-        {
-          icon: 'document-text',
-          label: t('settings.saveRideHistory'),
-          description: t('settings.saveRideHistoryDesc'),
-          type: 'switch',
-          key: 'saveRideHistory',
-        },
-      ],
-    },
-    {
       title: t('settings.privacy'),
       items: [
         {
           icon: 'shield-checkmark',
           label: t('settings.privacyPolicy'),
           type: 'link',
-          onPress: () => {},
+          onPress: comingSoon,
         },
         {
           icon: 'document',
           label: t('settings.termsOfService'),
           type: 'link',
-          onPress: () => {},
+          onPress: comingSoon,
         },
         {
           icon: 'trash',
           label: t('settings.deleteAccount'),
           type: 'danger',
-          onPress: () => {},
+          onPress: comingSoon,
         },
       ],
     },

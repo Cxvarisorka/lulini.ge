@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Image, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Image, ScrollView, Linking, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { colors, radius, shadows, useTypography } from '../../theme/colors';
@@ -52,7 +52,7 @@ export default function RideStatusSheet({
       <View style={styles.progressContainer}>
         <Text style={styles.progressLabel}>{t('taxi.searchingForDriver')}</Text>
         <View style={styles.progressBarBackground}>
-          <View style={[styles.progressBarFill, { width: `${progress}%` }]} />
+          <Animated.View style={[styles.progressBarFill, { width: progress.interpolate ? progress.interpolate({ inputRange: [0, 100], outputRange: ['0%', '100%'] }) : `${progress}%` }]} />
         </View>
       </View>
     </>
@@ -107,7 +107,7 @@ export default function RideStatusSheet({
                   || t('taxi.driver')}
               </Text>
               <View style={styles.driverRatingRow}>
-                <Ionicons name="star" size={14} color="#FFA500" />
+                <Ionicons name="star" size={14} color={colors.warning} />
                 <Text style={styles.driverRating}>
                   {currentRide.driver.rating?.toFixed(1) || '5.0'}
                 </Text>
@@ -116,7 +116,15 @@ export default function RideStatusSheet({
                 </Text>
               </View>
             </View>
-            <TouchableOpacity style={styles.callButton}>
+            <TouchableOpacity
+              style={styles.callButton}
+              onPress={() => {
+                const phone = currentRide.driver.user?.phone;
+                if (phone) Linking.openURL(`tel:${phone}`);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={t('taxi.callDriver', { defaultValue: 'Call driver' })}
+            >
               <Ionicons name="call" size={20} color={colors.primary} />
             </TouchableOpacity>
           </View>
@@ -193,7 +201,7 @@ export default function RideStatusSheet({
               {waitingFee > 0 ? t('taxi.paidWaiting') : t('taxi.freeWaiting')}
             </Text>
             {waitingFee > 0 && (
-              <Text style={styles.waitingFeeValue}>+${waitingFee.toFixed(2)}</Text>
+              <Text style={styles.waitingFeeValue}>+{waitingFee.toFixed(2)} ₾</Text>
             )}
           </View>
           {waitingTimeLeft <= 60 && (
@@ -232,7 +240,7 @@ export default function RideStatusSheet({
         <View style={styles.rideDetailItem}>
           <Text style={styles.rideDetailLabel}>{t('taxi.estimatedFare')}</Text>
           <Text style={styles.rideDetailValue}>
-            {estimatedPrice}{waitingFee > 0 ? ` (+${waitingFee.toFixed(2)})` : ''} ₾
+            {estimatedPrice}{waitingFee > 0 ? ` (+${waitingFee.toFixed(2)} ₾)` : ''} ₾
           </Text>
         </View>
         <View style={styles.rideDetailItem}>
@@ -247,7 +255,22 @@ export default function RideStatusSheet({
 
       {/* Cancel Button (not shown during in_progress) */}
       {rideStatus !== 'in_progress' && (
-        <TouchableOpacity style={styles.cancelButton} onPress={onCancel}>
+        <TouchableOpacity style={styles.cancelButton} onPress={() => {
+          if (rideStatus === 'driver_arrived') {
+            // Extra confirmation when driver has already arrived
+            const { Alert } = require('react-native');
+            Alert.alert(
+              t('taxi.cancelRide'),
+              t('taxi.cancelAfterArrivalWarning', { defaultValue: 'The driver has already arrived. Are you sure you want to cancel? A cancellation fee may apply.' }),
+              [
+                { text: t('common.no'), style: 'cancel' },
+                { text: t('taxi.cancelRide'), style: 'destructive', onPress: onCancel },
+              ]
+            );
+          } else {
+            onCancel();
+          }
+        }}>
           <Text style={styles.cancelButtonText}>{t('taxi.cancelRide')}</Text>
         </TouchableOpacity>
       )}
@@ -380,9 +403,9 @@ const createStyles = (typography) => StyleSheet.create({
     marginLeft: 4,
   },
   callButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center',
@@ -466,7 +489,7 @@ const createStyles = (typography) => StyleSheet.create({
     marginBottom: 12,
   },
   waitingTimeValue: {
-    fontSize: 36,
+    ...typography.display,
     fontWeight: '700',
     color: colors.warning,
   },

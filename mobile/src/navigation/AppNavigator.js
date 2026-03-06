@@ -7,6 +7,7 @@ import {
   Animated,
   Dimensions,
   TouchableWithoutFeedback,
+  PanResponder,
   Platform,
 } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
@@ -95,6 +96,8 @@ function MainTabs() {
 
           if (route.name === 'Home') {
             iconName = focused ? 'home' : 'home-outline';
+          } else if (route.name === 'Rides') {
+            iconName = focused ? 'time' : 'time-outline';
           } else if (route.name === 'Profile') {
             iconName = focused ? 'person' : 'person-outline';
           }
@@ -134,6 +137,14 @@ function MainTabs() {
         }}
       />
       <Tab.Screen
+        name="Rides"
+        component={TaxiHistoryScreen}
+        options={{
+          headerTitle: t('taxi.rideHistory'),
+          tabBarLabel: t('home.myRides'),
+        }}
+      />
+      <Tab.Screen
         name="Profile"
         component={ProfileScreen}
         options={{
@@ -151,7 +162,7 @@ function MainStackNavigator() {
 
   return (
     <Stack.Navigator
-      initialRouteName="Taxi"
+      initialRouteName="MainTabs"
       screenOptions={({ navigation }) => ({
         headerStyle: {
           backgroundColor: colors.background,
@@ -295,10 +306,39 @@ function MainStackNavigator() {
 
 // Custom Drawer Component — always mounted, uses pointerEvents to
 // let touches pass through when closed. No Modal, no mount/unmount.
+// Supports swipe-left-to-close gesture (HIG sidebar pattern).
 function CustomDrawerOverlay({ isOpen, onClose, navigation }) {
   const slideAnim = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const [visible, setVisible] = useState(false);
+  const isOpenRef = useRef(isOpen);
+  isOpenRef.current = isOpen;
+
+  // Swipe-to-close: detect horizontal swipe left on the drawer
+  const drawerPanResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        // Only respond to horizontal swipe left (negative dx) when drawer is open
+        return isOpenRef.current && gestureState.dx < -10 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy);
+      },
+      onPanResponderMove: (_, gestureState) => {
+        const clampedDx = Math.min(0, Math.max(-DRAWER_WIDTH, gestureState.dx));
+        slideAnim.setValue(clampedDx);
+        fadeAnim.setValue(1 + clampedDx / DRAWER_WIDTH);
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dx < -DRAWER_WIDTH * 0.3 || gestureState.vx < -0.5) {
+          onClose();
+        } else {
+          // Snap back open
+          Animated.parallel([
+            Animated.timing(slideAnim, { toValue: 0, duration: 200, useNativeDriver: true }),
+            Animated.timing(fadeAnim, { toValue: 1, duration: 200, useNativeDriver: true }),
+          ]).start();
+        }
+      },
+    })
+  ).current;
 
   // M9: Stop stale animations in cleanup to prevent visual glitches
   React.useEffect(() => {
@@ -342,6 +382,7 @@ function CustomDrawerOverlay({ isOpen, onClose, navigation }) {
         />
       </TouchableWithoutFeedback>
       <Animated.View
+        {...drawerPanResponder.panHandlers}
         style={[
           styles.drawerContent,
           { transform: [{ translateX: slideAnim }] },

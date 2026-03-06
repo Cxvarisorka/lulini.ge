@@ -58,7 +58,15 @@ export const SocketProvider = ({ children }) => {
 
         const socketInstance = io(API_URL, {
           transports: ['websocket', 'polling'],
-          auth: { token },
+          auth: async (cb) => {
+            try {
+              const freshToken = await SecureStore.getItemAsync('token');
+              if (!freshToken) return cb(new Error('No token'));
+              cb({ token: freshToken });
+            } catch (e) {
+              cb(e);
+            }
+          },
           reconnection: true,
           reconnectionAttempts: Infinity,
           reconnectionDelay: 1000,

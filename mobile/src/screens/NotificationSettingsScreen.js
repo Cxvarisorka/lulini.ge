@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,7 +9,10 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, radius, spacing, useTypography } from '../theme/colors';
+
+const NOTIFICATION_SETTINGS_KEY = '@notification_settings';
 
 export default function NotificationSettingsScreen({ navigation }) {
 const typography = useTypography();
@@ -17,8 +20,7 @@ const typography = useTypography();
     const { t } = useTranslation();
   const insets = useSafeAreaInsets();
 
-  // Notification settings state
-  const [settings, setSettings] = useState({
+  const defaultNotifSettings = {
     pushEnabled: true,
     rideUpdates: true,
     driverArrival: true,
@@ -29,11 +31,27 @@ const typography = useTypography();
     supportResponses: true,
     soundEnabled: true,
     vibrationEnabled: true,
-  });
-
-  const toggleSetting = (key) => {
-    setSettings((prev) => ({ ...prev, [key]: !prev[key] }));
   };
+
+  const [settings, setSettings] = useState(defaultNotifSettings);
+
+  // Load persisted notification settings on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(NOTIFICATION_SETTINGS_KEY);
+        if (raw) setSettings((prev) => ({ ...prev, ...JSON.parse(raw) }));
+      } catch {}
+    })();
+  }, []);
+
+  const toggleSetting = useCallback((key) => {
+    setSettings((prev) => {
+      const updated = { ...prev, [key]: !prev[key] };
+      AsyncStorage.setItem(NOTIFICATION_SETTINGS_KEY, JSON.stringify(updated)).catch(() => {});
+      return updated;
+    });
+  }, []);
 
   const notificationSections = [
     {

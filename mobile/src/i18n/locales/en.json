@@ -19,7 +19,8 @@
     "noResults": "No results found",
     "seeAll": "See All",
     "goBack": "Go Back",
-    "optional": "Optional"
+    "optional": "Optional",
+    "tryAgain": "Try Again"
   },
   "drawer": {
     "taxiServices": "Taxi Services",
@@ -76,12 +77,14 @@
     "whereTo": "Where to?",
     "enterDestination": "Enter destination address",
     "selectOnMap": "Select on map",
+    "confirmRoute": "Confirm Route",
     "addStop": "Add Stop",
     "stop": "Stop",
     "enterStopAddress": "Enter stop address",
     "removeStop": "Remove stop",
     "yourRoute": "Your Route",
     "recentPlaces": "Recent Places",
+    "noRecentPlaces": "No recent places yet",
     "home": "Home",
     "work": "Work",
     "confirmRide": "Confirm Ride",
@@ -247,6 +250,7 @@
     "invalidPhone": "Please enter a valid phone number",
     "invalidEmail": "Please enter a valid email address",
     "sendCode": "Send Code",
+    "resendIn": "Resend in {{seconds}}s",
     "verifyPhone": "Verify Phone",
     "otpSentTo": "We sent a code to",
     "enterFullCode": "Please enter the full verification code",
@@ -327,7 +331,8 @@
     "networkError": "Network error. Please check your connection.",
     "noInternetConnection": "You are offline. Please check your internet connection and try again.",
     "locationError": "Could not get your location",
-    "tryAgain": "Please try again"
+    "tryAgain": "Please try again",
+    "unexpectedError": "The app encountered an unexpected error.\nPlease try again."
   },
   "vehicles": {
     "economy": {
@@ -387,12 +392,19 @@
     "addNewCard": "Add New Card",
     "addCard": "Add Card",
     "addCardMessage": "Card payment feature coming soon!",
+    "addCardToUse": "Add a card to use card payments",
+    "default": "Default",
     "removeCard": "Remove Card",
     "removeCardConfirm": "Are you sure you want to remove this card?",
     "expires": "Expires",
     "tipsSettings": "Tips",
     "tipsInfo": "You can add a tip after your ride is completed. Tips go directly to your driver.",
-    "viewHistory": "View Payment History"
+    "viewHistory": "View Payment History",
+    "chargeAmount": "Amount to charge",
+    "cardPaymentFailed": "Card payment failed. You can retry or pay with cash.",
+    "cardPaymentProcessing": "Processing card payment...",
+    "cardPaymentSuccess": "Card payment successful!",
+    "paymentPendingMessage": "Your payment is still being processed. Please try again in a moment."
   },
   "support": {
     "contactUs": "Contact Us",

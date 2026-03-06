@@ -12,12 +12,6 @@ import { useTranslation } from 'react-i18next';
 import { useLanguage, LANGUAGES } from '../context/LanguageContext';
 import { colors, shadows, radius, useTypography } from '../theme/colors';
 
-// Country flag emoji helper
-const FLAGS = {
-  GB: 'GB',
-  GE: 'GE',
-};
-
 export default function LanguageSelectScreen({ navigation }) {
 const typography = useTypography();
   const styles = React.useMemo(() => createStyles(typography), [typography]);

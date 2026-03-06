@@ -58,7 +58,7 @@ const createStyles = (typography) => StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    paddingVertical: 10,
+    paddingVertical: 14,
     paddingHorizontal: 8,
     borderRadius: radius.md,
     borderWidth: 1,

@@ -2,7 +2,6 @@ import Constants from 'expo-constants';
 import api from './api';
 
 const GOOGLE_MAPS_API_KEY = Constants.expoConfig?.extra?.googleMapsApiKey || '';
-const MAPBOX_ACCESS_TOKEN = Constants.expoConfig?.extra?.mapboxAccessToken || '';
 
 /**
  * Maps Services for React Native (Expo Go compatible)
@@ -10,7 +9,7 @@ const MAPBOX_ACCESS_TOKEN = Constants.expoConfig?.extra?.mapboxAccessToken || ''
  *
  * Search: OSM Nominatim (primary) → Google Geocoding (backup)
  * Directions: Server proxy (primary) → OSRM (fallback) → Haversine (last resort)
- * Reverse geocode: Nominatim → Mapbox → Google
+ * Reverse geocode: Nominatim → Google
  */
 
 // Nominatim rate limiting - max 1 request per second per usage policy
@@ -24,6 +23,17 @@ const SEARCH_CACHE_TTL = 60000; // 1 minute
 
 const directionsCache = new Map();
 const searchCache = new Map();
+
+// Periodic TTL cleanup — sweep expired entries every 5 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, value] of directionsCache) {
+    if (now - (value._ts || 0) > DIRECTIONS_CACHE_TTL) directionsCache.delete(key);
+  }
+  for (const [key, value] of searchCache) {
+    if (now - (value.timestamp || 0) > SEARCH_CACHE_TTL) searchCache.delete(key);
+  }
+}, 5 * 60 * 1000);
 
 // Evict oldest entries when cache exceeds max size
 function cacheSet(cache, key, value) {
@@ -375,113 +385,6 @@ export async function searchPlaces(query, location = null) {
 }
 
 /**
- * Search using Mapbox Geocoding API
- * Optimized for Georgian street addresses with house numbers
- */
-export async function searchPlacesMapbox(query, location = null) {
-  if (!MAPBOX_ACCESS_TOKEN || !query || query.length < 2) {
-    return [];
-  }
-
-  try {
-    const proximity = location
-      ? `${location.longitude},${location.latitude}`
-      : `${KUTAISI_CONFIG.longitude},${KUTAISI_CONFIG.latitude}`;
-
-    // Detect if query looks like it has a house number
-    const hasNumber = /\d+/.test(query);
-
-    const params = new URLSearchParams({
-      access_token: MAPBOX_ACCESS_TOKEN,
-      // Prioritize addresses for queries with numbers, otherwise include POIs
-      types: hasNumber ? 'address' : 'address,poi,place,locality',
-      // Strong bias toward Kutaisi
-      proximity: proximity,
-      // Restrict to expanded Kutaisi bounding box
-      bbox: KUTAISI_CONFIG.bbox.join(','),
-      // Country restriction
-      country: 'GE',
-      // More results for better matching
-      limit: '10',
-      // Georgian primary, English fallback
-      language: 'ka,en',
-      // Enable autocomplete for partial matches
-      autocomplete: 'true',
-      // Enable fuzzy matching for typos (important for Georgian)
-      fuzzyMatch: 'true',
-    });
-
-    const encodedQuery = encodeURIComponent(query);
-    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodedQuery}.json?${params.toString()}`;
-
-    const response = await fetch(url);
-
-    if (!response.ok) {
-      console.warn('[googleMaps] Mapbox search failed:', response.status);
-      return [];
-    }
-
-    const data = await response.json();
-
-    if (!data.features || data.features.length === 0) {
-      return [];
-    }
-
-    return data.features.map(feature => {
-      // Extract location details from context
-      let city = '';
-      let district = '';
-      let region = '';
-
-      if (feature.context) {
-        for (const ctx of feature.context) {
-          if (ctx.id.startsWith('place')) city = ctx.text;
-          if (ctx.id.startsWith('locality') || ctx.id.startsWith('neighborhood')) district = ctx.text;
-          if (ctx.id.startsWith('region')) region = ctx.text;
-        }
-      }
-
-      // Build better display text for addresses
-      let mainText = feature.text || feature.place_name.split(',')[0];
-
-      // Add house number if available
-      if (feature.address) {
-        mainText = `${mainText} ${feature.address}`;
-      }
-
-      // Build secondary text
-      const secondaryParts = [district, city, region].filter(Boolean);
-      const secondaryText = secondaryParts.length > 0
-        ? secondaryParts.join(', ')
-        : feature.place_name.split(',').slice(1).join(',').trim();
-
-      return {
-        placeId: feature.id,
-        description: feature.place_name,
-        mainText: mainText,
-        secondaryText: secondaryText,
-        coordinates: {
-          latitude: feature.center[1],
-          longitude: feature.center[0],
-        },
-        // Additional address details
-        address: feature.properties?.address || feature.address,
-        houseNumber: feature.address,
-        street: feature.text,
-        city: city,
-        district: district,
-        relevance: feature.relevance,
-        placeType: feature.place_type?.[0],
-        context: feature.context,
-      };
-    });
-  } catch (error) {
-    console.warn('[googleMaps] Mapbox search error:', error.message);
-    return [];
-  }
-}
-
-/**
  * Search using Google Geocoding API - better for street addresses in Georgia
  * Uses viewport biasing to restrict to Kutaisi area
  */
@@ -640,12 +543,12 @@ async function searchPlacesAutocomplete(query, location = null) {
 
 /**
  * Get place details including coordinates
- * @param {string} placeId - Place ID (Mapbox or Google format)
- * @param {Object} existingCoords - If Mapbox already provided coordinates
+ * @param {string} placeId - Google Place ID
+ * @param {Object} existingCoords - If coordinates already provided (e.g. from Nominatim)
  * @returns {Promise<Object>} - Place details with coordinates
  */
 export async function getPlaceDetails(placeId, existingCoords = null) {
-  // If coordinates already provided (from Mapbox), return them
+  // If coordinates already provided, return them
   if (existingCoords) {
     return {
       name: '',
@@ -692,7 +595,7 @@ export async function getPlaceDetails(placeId, existingCoords = null) {
 
 /**
  * Reverse geocode coordinates to get address
- * Uses Nominatim first (free), then Mapbox/Google as fallback
+ * Uses Nominatim first (free), then Google as fallback
  * @param {number} latitude
  * @param {number} longitude
  * @returns {Promise<Object>} - Address details
@@ -701,12 +604,6 @@ export async function reverseGeocode(latitude, longitude) {
   // Try Nominatim first (free, no API key needed)
   const nominatimResult = await reverseGeocodeNominatim(latitude, longitude);
   if (nominatimResult) return nominatimResult;
-
-  // Fallback to Mapbox
-  if (MAPBOX_ACCESS_TOKEN) {
-    const result = await reverseGeocodeMapbox(latitude, longitude);
-    if (result) return result;
-  }
 
   // Fallback to Google
   if (GOOGLE_MAPS_API_KEY) {
@@ -719,68 +616,6 @@ export async function reverseGeocode(latitude, longitude) {
     houseNumber: '',
     coordinates: { latitude, longitude },
   };
-}
-
-/**
- * Reverse geocode using Mapbox
- * Returns detailed address including house number
- */
-async function reverseGeocodeMapbox(latitude, longitude) {
-  try {
-    const params = new URLSearchParams({
-      access_token: MAPBOX_ACCESS_TOKEN,
-      types: 'address,poi,place',
-      language: 'ka,en',
-      limit: '1',
-    });
-
-    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${longitude},${latitude}.json?${params.toString()}`;
-
-    const response = await fetch(url);
-
-    if (!response.ok) {
-      console.warn('[googleMaps] Mapbox reverse geocode failed:', response.status);
-      return null;
-    }
-
-    const data = await response.json();
-
-    if (!data.features || data.features.length === 0) {
-      return null;
-    }
-
-    const feature = data.features[0];
-
-    // Extract address components from context
-    let street = '';
-    let city = '';
-    let district = '';
-
-    if (feature.context) {
-      for (const ctx of feature.context) {
-        if (ctx.id.startsWith('locality')) district = ctx.text;
-        if (ctx.id.startsWith('place')) city = ctx.text;
-        if (ctx.id.startsWith('neighborhood')) district = ctx.text;
-      }
-    }
-
-    return {
-      address: feature.place_name,
-      street: feature.text || '',
-      houseNumber: feature.address || '',
-      district: district,
-      city: city,
-      mainText: feature.address
-        ? `${feature.text} ${feature.address}`
-        : feature.text,
-      secondaryText: [district, city].filter(Boolean).join(', '),
-      coordinates: { latitude, longitude },
-      placeType: feature.place_type?.[0],
-    };
-  } catch (error) {
-    console.warn('[googleMaps] Mapbox reverse geocode error:', error.message);
-    return null;
-  }
 }
 
 /**
@@ -835,13 +670,6 @@ async function reverseGeocodeGoogle(latitude, longitude) {
     console.warn('[googleMaps] Google reverse geocode error:', error.message);
     return null;
   }
-}
-
-/**
- * Check if Mapbox is configured
- */
-export function isMapboxConfigured() {
-  return !!MAPBOX_ACCESS_TOKEN;
 }
 
 /**
@@ -922,7 +750,6 @@ export default {
   getDirections,
   searchPlaces,
   searchPlacesNominatim,
-  searchPlacesMapbox,
   searchPlacesGoogle,
   getPlaceDetails,
   reverseGeocode,
@@ -933,5 +760,4 @@ export default {
   clearSearchCache,
   clearAllCaches,
   isGoogleMapsConfigured,
-  isMapboxConfigured,
 };

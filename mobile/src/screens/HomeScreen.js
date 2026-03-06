@@ -187,6 +187,8 @@ export default function HomeScreen({ navigation }) {
             <TouchableOpacity
               style={styles.menuButton}
               onPress={openDrawer}
+              accessibilityRole="button"
+              accessibilityLabel={t('home.openMenu', { defaultValue: 'Open menu' })}
             >
               <Ionicons name="menu" size={22} color={colors.foreground} />
             </TouchableOpacity>
@@ -199,6 +201,8 @@ export default function HomeScreen({ navigation }) {
             <TouchableOpacity
               style={styles.avatarButton}
               onPress={() => navigation.navigate('Profile')}
+              accessibilityRole="button"
+              accessibilityLabel={t('tabs.profile')}
             >
               {user?.avatar ? (
                 <Image source={{ uri: user.avatar }} style={styles.avatar} />
@@ -360,9 +364,9 @@ const createStyles = (typography) => StyleSheet.create({
     gap: spacing.md,
   },
   menuButton: {
-    width: 40,
-    height: 40,
-    borderRadius: radius.md,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center',
@@ -390,13 +394,13 @@ const createStyles = (typography) => StyleSheet.create({
     elevation: 3,
   },
   avatar: {
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
     borderRadius: radius.full,
   },
   avatarPlaceholder: {
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
     borderRadius: radius.full,
     backgroundColor: colors.primary,
     justifyContent: 'center',

@@ -49,7 +49,7 @@ const typography = useTypography();
           <Text style={styles.helpfulTitle}>{t('support.wasHelpful')}</Text>
           <View style={styles.helpfulButtons}>
             <TouchableOpacity
-              style={[styles.helpfulButton, feedback === 'yes' && { opacity: 0.5 }]}
+              style={[styles.helpfulButton, feedback !== null && feedback !== 'yes' && { opacity: 0.5 }]}
               onPress={() => setFeedback('yes')}
               disabled={feedback !== null}
             >
@@ -57,7 +57,7 @@ const typography = useTypography();
               <Text style={styles.helpfulButtonText}>{t('common.yes')}</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.helpfulButton, feedback === 'no' && { opacity: 0.5 }]}
+              style={[styles.helpfulButton, feedback !== null && feedback !== 'no' && { opacity: 0.5 }]}
               onPress={() => setFeedback('no')}
               disabled={feedback !== null}
             >

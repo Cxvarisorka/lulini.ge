@@ -47,27 +47,33 @@ const typography = useTypography();
     },
   ];
 
+  const safeLinkOpen = (url) => {
+    Linking.openURL(url).catch(() => {
+      Alert.alert(t('errors.error'), t('errors.cannotOpenLink', { defaultValue: 'Could not open this link on your device.' }));
+    });
+  };
+
   const contactOptions = [
     {
       icon: 'call',
       label: t('support.callUs'),
       subtitle: '+995 555 123 456',
       color: colors.success,
-      onPress: () => Linking.openURL('tel:+995555123456'),
+      onPress: () => safeLinkOpen('tel:+995555123456'),
     },
     {
       icon: 'chatbubble',
       label: t('support.liveChat'),
-      subtitle: t('support.available247'),
+      subtitle: t('common.comingSoon', { defaultValue: 'Coming Soon' }),
       color: colors.info,
-      onPress: () => {},
+      onPress: () => Alert.alert(t('common.comingSoon', { defaultValue: 'Coming Soon' }), t('common.comingSoonDesc', { defaultValue: 'This feature is not available yet.' })),
     },
     {
       icon: 'mail',
       label: t('support.emailUs'),
       subtitle: 'support@gotours.ge',
       color: colors.warning,
-      onPress: () => Linking.openURL('mailto:support@gotours.ge'),
+      onPress: () => safeLinkOpen('mailto:support@gotours.ge'),
     },
   ];
 

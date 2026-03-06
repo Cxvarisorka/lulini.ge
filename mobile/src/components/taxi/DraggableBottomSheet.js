@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useCallback, useState, useImperativeHandle, forwardRef } from 'react';
+import React, { useRef, useEffect, useCallback, useImperativeHandle, forwardRef } from 'react';
 import {
   View,
   StyleSheet,
@@ -35,9 +35,6 @@ const DraggableBottomSheet = forwardRef(function DraggableBottomSheet({
   const currentSnapIndex = useRef(initialSnapIndex);
   const preKeyboardSnapIndex = useRef(initialSnapIndex);
   const snapPointsRef = useRef(snapPointsPixels);
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
-  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
-
   // Keep ref in sync with latest snap points
   useEffect(() => {
     snapPointsRef.current = snapPointsPixels;
@@ -52,15 +49,13 @@ const DraggableBottomSheet = forwardRef(function DraggableBottomSheet({
       friction: 12,
     }).start();
     onChange?.(currentSnapIndex.current);
-  }, [snapPoints]);
+  }, [snapPoints.join(',')]);
 
   // Handle keyboard events
   useEffect(() => {
     const keyboardWillShow = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
       (event) => {
-        setKeyboardHeight(event.endCoordinates.height);
-        setIsKeyboardVisible(true);
         // Save current position and snap to highest point
         preKeyboardSnapIndex.current = currentSnapIndex.current;
         const highestIndex = snapPointsRef.current.length - 1;
@@ -73,8 +68,6 @@ const DraggableBottomSheet = forwardRef(function DraggableBottomSheet({
     const keyboardWillHide = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
       () => {
-        setKeyboardHeight(0);
-        setIsKeyboardVisible(false);
         // Restore to previous position
         snapToIndex(preKeyboardSnapIndex.current);
       }
@@ -189,10 +182,7 @@ const DraggableBottomSheet = forwardRef(function DraggableBottomSheet({
       </View>
 
       {/* Content */}
-      <View style={[
-        styles.content,
-        isKeyboardVisible && { paddingBottom: keyboardHeight }
-      ]}>
+      <View style={styles.content}>
         {children}
       </View>
     </Animated.View>
@@ -221,7 +211,7 @@ const styles = StyleSheet.create({
   },
   handleContainer: {
     alignItems: 'center',
-    paddingVertical: 12,
+    paddingVertical: 20,
     paddingHorizontal: 20,
   },
   handle: {

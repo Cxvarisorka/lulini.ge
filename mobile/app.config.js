@@ -33,11 +33,6 @@ export default {
       },
       edgeToEdgeEnabled: true,
       package: "com.lulini.mobile",
-      config: {
-        googleMaps: {
-          apiKey: process.env.GOOGLE_MAPS_API_KEY || ""
-        }
-      },
       permissions: [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
@@ -78,7 +73,6 @@ export default {
     ],
     extra: {
       googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY || "",
-      mapboxAccessToken: process.env.MAPBOX_ACCESS_TOKEN || "",
       EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || "",
       EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || "",
       EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || "",

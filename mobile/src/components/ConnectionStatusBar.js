@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { useSocket } from '../context/SocketContext';
 import { useNetwork } from '../context/NetworkContext';
 import { useAuth } from '../context/AuthContext';
+import { colors } from '../theme/colors';
 
 // Three-state connectivity indicator:
 //   offline       = no internet (red)
@@ -119,16 +120,16 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   barOffline: {
-    backgroundColor: '#dc2626',
+    backgroundColor: colors.destructive,
   },
   barReconnecting: {
-    backgroundColor: '#ea580c',
+    backgroundColor: colors.warning,
   },
   barConnected: {
-    backgroundColor: '#16a34a',
+    backgroundColor: colors.success,
   },
   text: {
-    color: '#fff',
+    color: colors.primaryForeground,
     fontSize: 13,
     fontWeight: '600',
   },

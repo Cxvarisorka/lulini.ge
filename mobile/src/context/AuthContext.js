@@ -82,7 +82,10 @@ export const AuthProvider = ({ children }) => {
           }
         }
       } catch (err) {
-        await SecureStore.deleteItemAsync('token');
+        // Only delete token on explicit 401 — network errors should keep the token
+        if (err.response?.status === 401) {
+          await SecureStore.deleteItemAsync('token');
+        }
       } finally {
         if (!isCancelled) setLoading(false);
       }

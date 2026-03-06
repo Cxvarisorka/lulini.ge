@@ -7,7 +7,10 @@ import {
   ActivityIndicator,
   Platform,
 } from 'react-native';
-import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
+import MapView from '../components/map/MapViewWrapper';
+import Marker from '../components/map/MarkerWrapper';
+import Polyline from '../components/map/PolylineWrapper';
+import { markerImages } from '../components/map/markerImages';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 
@@ -140,7 +143,6 @@ export default function RideDetailScreen({ route }) {
           initialRegion={initialRegion}
           onMapReady={fitMapToMarkers}
           onLayout={fitMapToMarkers}
-          provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
           scrollEnabled={true}
           zoomEnabled={true}
           pitchEnabled={false}
@@ -149,15 +151,13 @@ export default function RideDetailScreen({ route }) {
           {/* Pickup Marker */}
           {ride.pickup?.lat && (
             <Marker
+              id="pickup"
               coordinate={{ latitude: ride.pickup.lat, longitude: ride.pickup.lng }}
+              image={markerImages.pickup}
               anchor={{ x: 0.5, y: 0.5 }}
               tracksViewChanges={false}
               zIndex={10}
-            >
-              <View style={styles.pickupMarker}>
-                <View style={styles.pickupDot} />
-              </View>
-            </Marker>
+            />
           )}
 
           {/* Stop Markers */}
@@ -165,39 +165,35 @@ export default function RideDetailScreen({ route }) {
             stop.lat ? (
               <Marker
                 key={`stop-${i}`}
+                id={`stop-${i}`}
                 coordinate={{ latitude: stop.lat, longitude: stop.lng }}
+                image={markerImages.stopSmall[i + 1] || markerImages.stopSmall[1]}
                 anchor={{ x: 0.5, y: 0.5 }}
                 tracksViewChanges={false}
                 zIndex={9}
-              >
-                <View style={styles.stopMarker}>
-                  <Text style={styles.stopMarkerText}>{i + 1}</Text>
-                </View>
-              </Marker>
+              />
             ) : null
           ))}
 
           {/* Dropoff Marker */}
           {ride.dropoff?.lat && (
             <Marker
+              id="dropoff"
               coordinate={{ latitude: ride.dropoff.lat, longitude: ride.dropoff.lng }}
+              image={markerImages.dropoff}
               anchor={{ x: 0.5, y: 0.5 }}
               tracksViewChanges={false}
               zIndex={10}
-            >
-              <View style={styles.dropoffMarker}>
-                <Ionicons name="flag" size={14} color="#fff" />
-              </View>
-            </Marker>
+            />
           )}
 
           {/* Route Polyline */}
           {polylineCoords.length > 1 && (
             <Polyline
+              id="ride-route"
               coordinates={polylineCoords}
               strokeColor={colors.primary}
               strokeWidth={4}
-              lineDashPattern={null}
             />
           )}
         </MapView>
@@ -345,7 +341,7 @@ export default function RideDetailScreen({ route }) {
             </View>
             {ride.driver.rating > 0 && (
               <View style={styles.driverRatingBadge}>
-                <Ionicons name="star" size={14} color="#FFA500" />
+                <Ionicons name="star" size={14} color={colors.warning} />
                 <Text style={styles.driverRatingText}>{ride.driver.rating.toFixed(1)}</Text>
               </View>
             )}
@@ -400,7 +396,7 @@ export default function RideDetailScreen({ route }) {
                 key={star}
                 name={star <= ride.rating ? 'star' : 'star-outline'}
                 size={24}
-                color={star <= ride.rating ? '#FFA500' : colors.border}
+                color={star <= ride.rating ? colors.warning : colors.border}
                 style={{ marginRight: 4 }}
               />
             ))}
@@ -467,66 +463,6 @@ const createStyles = (typography) => StyleSheet.create({
     borderRadius: radius.full,
     padding: 8,
     ...shadows.md,
-  },
-  // Markers
-  pickupMarker: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: colors.success + '30',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  pickupDot: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: colors.success,
-    borderWidth: 2,
-    borderColor: '#fff',
-  },
-  stopMarker: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: '#f97316',
-    borderWidth: 2,
-    borderColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.2,
-        shadowRadius: 3,
-      },
-      android: { elevation: 3 },
-    }),
-  },
-  stopMarkerText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  dropoffMarker: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: colors.destructive,
-    borderWidth: 2,
-    borderColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.2,
-        shadowRadius: 3,
-      },
-      android: { elevation: 3 },
-    }),
   },
   // Status
   statusRow: {
@@ -625,7 +561,7 @@ const createStyles = (typography) => StyleSheet.create({
     width: 16,
     height: 16,
     borderRadius: 8,
-    backgroundColor: '#f97316',
+    backgroundColor: colors.warning,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 2,
@@ -720,7 +656,7 @@ const createStyles = (typography) => StyleSheet.create({
   driverRatingBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFA500' + '15',
+    backgroundColor: colors.warning + '15',
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: radius.full,

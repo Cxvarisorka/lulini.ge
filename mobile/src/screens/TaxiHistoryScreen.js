@@ -63,6 +63,40 @@ function formatShortDate(date) {
   return `${day}.${month}.${year}`;
 }
 
+// Skeleton loading card — mimics ride card layout with pulsing animation
+function SkeletonRideCard({ delay = 0 }) {
+  const pulseAnim = React.useRef(new Animated.Value(0.3)).current;
+  React.useEffect(() => {
+    const anim = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 0.7, duration: 800, delay, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 0.3, duration: 800, useNativeDriver: true }),
+      ])
+    );
+    anim.start();
+    return () => anim.stop();
+  }, []);
+  const bar = (width, height = 12, mb = 8) => (
+    <Animated.View style={{ width, height, borderRadius: 6, backgroundColor: colors.border, opacity: pulseAnim, marginBottom: mb }} />
+  );
+  return (
+    <View style={{ backgroundColor: colors.background, borderRadius: radius.xl, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: colors.border }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 }}>
+        {bar(120, 14, 0)}
+        {bar(70, 22, 0)}
+      </View>
+      {bar('80%', 10)}
+      {bar('60%', 10)}
+      {bar('70%', 10, 16)}
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.border }}>
+        {bar(60, 10, 0)}
+        {bar(50, 10, 0)}
+        {bar(50, 10, 0)}
+      </View>
+    </View>
+  );
+}
+
 export default function TaxiHistoryScreen({ navigation }) {
   // L2: Use hook instead of module-level Dimensions.get
   const { height: SCREEN_HEIGHT } = useWindowDimensions();
@@ -405,7 +439,7 @@ export default function TaxiHistoryScreen({ navigation }) {
           </Text>
           {item.driver.rating > 0 && (
             <View style={styles.driverRatingRow}>
-              <Ionicons name="star" size={12} color="#FFA500" />
+              <Ionicons name="star" size={12} color={colors.warning} />
               <Text style={styles.driverRating}>{item.driver.rating.toFixed(1)}</Text>
             </View>
           )}
@@ -485,8 +519,12 @@ export default function TaxiHistoryScreen({ navigation }) {
 
   if (loading && rides.length === 0) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={colors.primary} />
+      <View style={styles.container}>
+        <View style={styles.listContent}>
+          {[0, 1, 2, 3].map((i) => (
+            <SkeletonRideCard key={i} delay={i * 100} />
+          ))}
+        </View>
       </View>
     );
   }
@@ -931,7 +969,7 @@ const createStyles = (typography, SCREEN_HEIGHT = 800) => StyleSheet.create({
     width: 18,
     height: 18,
     borderRadius: 9,
-    backgroundColor: '#f97316',
+    backgroundColor: colors.warning,
     alignItems: 'center',
     justifyContent: 'center',
   },

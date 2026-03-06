@@ -35,7 +35,9 @@ export default function LocationSearchSheet({
   const [stopQueries, setStopQueries] = useState({});
   const scrollViewRef = useRef(null);
   const inputRef = useRef(null);
+  const stopInputRefs = useRef({});
   const searchIdRef = useRef(0);
+  const pendingStopFocus = useRef(null);
 
   // Sync pickup address from GPS when not manually edited
   useEffect(() => {
@@ -43,6 +45,18 @@ export default function LocationSearchSheet({
       setPickupQuery(pickup.address);
     }
   }, [pickup?.address, pickupEdited]);
+
+  // Auto-focus newly added stop input
+  useEffect(() => {
+    if (pendingStopFocus.current !== null) {
+      const idx = pendingStopFocus.current;
+      pendingStopFocus.current = null;
+      // Small delay to let the TextInput mount
+      setTimeout(() => {
+        stopInputRefs.current[idx]?.focus();
+      }, 100);
+    }
+  }, [stops.length]);
 
   // Get the active search query based on which input is focused
   const getActiveQuery = () => {
@@ -102,9 +116,35 @@ export default function LocationSearchSheet({
     setActiveInput(index);
   }, []);
 
+  // Determine the next input in sequence: pickup → stop0 → stop1 → destination
+  const focusNextInput = useCallback((currentInput) => {
+    if (currentInput === 'pickup') {
+      if (stops.length > 0) {
+        setActiveInput(0);
+        setSuggestions([]);
+        setTimeout(() => stopInputRefs.current[0]?.focus(), 100);
+      } else {
+        setActiveInput('destination');
+        setSuggestions([]);
+        setTimeout(() => inputRef.current?.focus(), 100);
+      }
+    } else if (typeof currentInput === 'number') {
+      const nextStop = currentInput + 1;
+      if (nextStop < stops.length) {
+        setActiveInput(nextStop);
+        setSuggestions([]);
+        setTimeout(() => stopInputRefs.current[nextStop]?.focus(), 100);
+      } else {
+        setActiveInput('destination');
+        setSuggestions([]);
+        setTimeout(() => inputRef.current?.focus(), 100);
+      }
+    }
+    // destination is the last input — no auto-advance
+  }, [stops.length]);
+
   // Handle place selection from suggestions
   const handlePlaceSelect = useCallback((place) => {
-    Keyboard.dismiss();
     setSuggestions([]);
 
     if (activeInput === 'pickup') {
@@ -113,13 +153,16 @@ export default function LocationSearchSheet({
       if (onPickupSelect && place.coordinates) {
         onPickupSelect(place.description, place.coordinates);
       }
+      focusNextInput('pickup');
     } else if (activeInput === 'destination') {
       setSearchQuery(place.description);
+      Keyboard.dismiss();
       if (place.coordinates) {
         onDestinationSelect(place.description, place.coordinates);
       } else {
         onDestinationChange(place.description);
       }
+      // Don't auto-advance — user stays on destination to review/submit
     } else {
       // Stop selection
       const stopIndex = activeInput;
@@ -127,8 +170,9 @@ export default function LocationSearchSheet({
       if (onStopSelect) {
         onStopSelect(stopIndex, place.description, place.coordinates || null);
       }
+      focusNextInput(stopIndex);
     }
-  }, [activeInput, onPickupSelect, onDestinationSelect, onDestinationChange, onStopSelect]);
+  }, [activeInput, onPickupSelect, onDestinationSelect, onDestinationChange, onStopSelect, focusNextInput]);
 
   // Handle manual submit
   const handleSubmit = useCallback(() => {
@@ -167,10 +211,7 @@ export default function LocationSearchSheet({
     if (onPickupRefresh) onPickupRefresh();
   }, [pickup?.address, onPickupRefresh]);
 
-  const recentPlaces = [
-    { id: 1, name: t('taxi.home'), address: 'Tsereteli Street, Kutaisi', icon: 'home-outline' },
-    { id: 2, name: t('taxi.work'), address: 'Kutaisi Central Park, Kutaisi', icon: 'briefcase-outline' },
-  ];
+  const recentPlaces = []; // TODO: Load from persisted user ride history
 
   const handleInputFocus = useCallback(() => {
     setTimeout(() => {
@@ -271,6 +312,7 @@ export default function LocationSearchSheet({
                   <Text style={styles.locationLabel}>{t('taxi.stop')} {index + 1}</Text>
                   <View style={styles.inputRow}>
                     <TextInput
+                      ref={(ref) => { stopInputRefs.current[index] = ref; }}
                       style={styles.destinationInput}
                       placeholder={t('taxi.enterStopAddress')}
                       placeholderTextColor={colors.mutedForeground}
@@ -324,7 +366,10 @@ export default function LocationSearchSheet({
                 {stops.length < MAX_STOPS && onAddStop && (
                   <TouchableOpacity
                     style={styles.addStopButton}
-                    onPress={onAddStop}
+                    onPress={() => {
+                      pendingStopFocus.current = stops.length;
+                      onAddStop();
+                    }}
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                   >
                     <Ionicons name="add-circle" size={20} color={colors.mutedForeground} />
@@ -369,8 +414,8 @@ export default function LocationSearchSheet({
         </View>
       )}
 
-      {/* Recent Places Section (show when no suggestions) */}
-      {suggestions.length === 0 && (
+      {/* Recent Places Section (show only when no suggestions and there are recent places) */}
+      {suggestions.length === 0 && recentPlaces.length > 0 && (
         <>
           <View style={styles.sectionHeader}>
             <Ionicons name="time-outline" size={18} color={colors.mutedForeground} />
@@ -398,21 +443,23 @@ export default function LocationSearchSheet({
               <Ionicons name="chevron-forward" size={20} color={colors.mutedForeground} />
             </TouchableOpacity>
           ))}
-
-          {/* Select on Map Option */}
-          <TouchableOpacity
-            style={styles.mapSelectButton}
-            onPress={() => {
-              Keyboard.dismiss();
-              if (onSelectOnMap) {
-                onSelectOnMap();
-              }
-            }}
-          >
-            <Ionicons name="map-outline" size={20} color={colors.primary} />
-            <Text style={styles.mapSelectText}>{t('taxi.selectOnMap')}</Text>
-          </TouchableOpacity>
         </>
+      )}
+
+      {/* Select on Map Option (show when no suggestions) */}
+      {suggestions.length === 0 && (
+        <TouchableOpacity
+          style={styles.mapSelectButton}
+          onPress={() => {
+            Keyboard.dismiss();
+            if (onSelectOnMap) {
+              onSelectOnMap();
+            }
+          }}
+        >
+          <Ionicons name="map-outline" size={20} color={colors.primary} />
+          <Text style={styles.mapSelectText}>{t('taxi.selectOnMap')}</Text>
+        </TouchableOpacity>
       )}
 
       {/* OpenStreetMap attribution (required by Nominatim usage policy) */}
@@ -489,7 +536,7 @@ const createStyles = (typography) => StyleSheet.create({
   },
   refreshButton: {
     marginLeft: 8,
-    padding: 2,
+    padding: 8,
   },
   inputDivider: {
     height: 1,
@@ -517,11 +564,11 @@ const createStyles = (typography) => StyleSheet.create({
   },
   addStopButton: {
     marginLeft: 8,
-    padding: 2,
+    padding: 8,
   },
   removeStopButton: {
     marginLeft: 8,
-    padding: 2,
+    padding: 8,
   },
   searchButton: {
     flexDirection: 'row',
