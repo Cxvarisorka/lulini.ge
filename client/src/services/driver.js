@@ -75,4 +75,30 @@ export const driverService = {
   getAllStatistics: async () => {
     return apiRequest('/drivers/admin/statistics');
   },
+
+  // Get driver 7-day activity (Admin)
+  getActivity: async (id) => {
+    return apiRequest(`/drivers/${id}/activity`);
+  },
+
+  // Get driver reviews (Admin)
+  getReviews: async (id) => {
+    return apiRequest(`/drivers/${id}/reviews`);
+  },
+
+  // Upload driver photo (Admin)
+  uploadPhoto: async (id, file) => {
+    const formData = new FormData();
+    formData.append('photo', file);
+    const response = await fetch(`${API_URL}/drivers/${id}/photo`, {
+      method: 'POST',
+      credentials: 'include',
+      body: formData,
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.message || 'Failed to upload photo');
+    }
+    return data;
+  },
 };

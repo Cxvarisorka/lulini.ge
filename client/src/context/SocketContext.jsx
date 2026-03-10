@@ -27,6 +27,7 @@ export function SocketProvider({ children }) {
 
         // Create socket connection - cookies will be sent automatically with withCredentials
         const newSocket = io(SOCKET_URL, {
+            query: { appType: 'admin' },
             withCredentials: true,
             transports: ['websocket', 'polling']
         });

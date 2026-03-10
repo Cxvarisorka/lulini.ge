@@ -36,6 +36,8 @@ export const rideService = {
   getAll: async (filters = {}) => {
     const params = new URLSearchParams();
     if (filters.status) params.append('status', filters.status);
+    if (filters.driver) params.append('driver', filters.driver);
+    if (filters.vehicleType) params.append('vehicleType', filters.vehicleType);
     if (filters.startDate) params.append('startDate', filters.startDate);
     if (filters.endDate) params.append('endDate', filters.endDate);
     if (filters.page) params.append('page', filters.page);
@@ -50,12 +52,21 @@ export const rideService = {
     return apiRequest(`/rides/${id}`);
   },
 
+  // Create ride (admin - on behalf of caller)
+  adminCreate: async (rideData) => {
+    return apiRequest('/rides/admin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(rideData),
+    });
+  },
+
   // Cancel ride (admin)
-  cancel: async (id, reason) => {
+  cancel: async (id, reason, note) => {
     return apiRequest(`/rides/${id}/cancel`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reason }),
+      body: JSON.stringify({ reason, note }),
     });
   },
 };

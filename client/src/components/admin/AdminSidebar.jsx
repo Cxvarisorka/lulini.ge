@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, ArrowLeft, Menu, X, Users, Navigation, DollarSign } from 'lucide-react';
+import { LayoutDashboard, ArrowLeft, Menu, X, Users, Navigation, DollarSign, PhoneCall } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
 export function AdminSidebar() {
@@ -9,6 +9,7 @@ export function AdminSidebar() {
 
   const navItems = [
     { path: '/admin', icon: LayoutDashboard, label: 'Dashboard' },
+    { path: '/admin/create-ride', icon: PhoneCall, label: 'Create Ride' },
     { path: '/admin/rides', icon: Navigation, label: 'Taxi Rides' },
     { path: '/admin/drivers', icon: Users, label: 'Drivers' },
     { path: '/admin/pricing', icon: DollarSign, label: 'Pricing' },

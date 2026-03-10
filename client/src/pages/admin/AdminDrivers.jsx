@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Loader2, Plus, Edit, Trash2, Check, X, User, Car } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Loader2, Plus, Edit, Trash2, Check, X, User, Car, BarChart3, Camera } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { driverService } from '../../services/driver';
 import { useAdmin } from '../../context/AdminContext';
@@ -29,6 +30,7 @@ function AdminDriversContent() {
     },
   });
   const [submitting, setSubmitting] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(null);
   const [filterStatus, setFilterStatus] = useState('all');
 
   useEffect(() => {
@@ -168,6 +170,24 @@ function AdminDriversContent() {
     }
   };
 
+  const handlePhotoUpload = async (driverId, file) => {
+    if (!file) return;
+    setUploadingPhoto(driverId);
+    try {
+      const response = await driverService.uploadPhoto(driverId, file);
+      if (response.success) {
+        setDrivers((prev) =>
+          prev.map((d) => (d._id === driverId ? response.data.driver : d))
+        );
+      }
+    } catch (error) {
+      console.error('Error uploading photo:', error);
+      alert(error.message || 'Failed to upload photo');
+    } finally {
+      setUploadingPhoto(null);
+    }
+  };
+
   const resetForm = () => {
     setEditingDriver(null);
     setFormData({
@@ -263,8 +283,32 @@ function AdminDriversContent() {
             <div key={driver._id} className="border rounded-lg p-6 space-y-4">
               <div className="flex justify-between items-start">
                 <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 bg-secondary rounded-full flex items-center justify-center">
-                    <User className="w-6 h-6" />
+                  <div className="relative group">
+                    {user.profileImage ? (
+                      <img
+                        src={user.profileImage}
+                        alt={`${user.firstName || ''} ${user.lastName || ''}`}
+                        className="w-12 h-12 rounded-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-12 h-12 bg-secondary rounded-full flex items-center justify-center">
+                        <User className="w-6 h-6" />
+                      </div>
+                    )}
+                    <label className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-full opacity-0 group-hover:opacity-100 cursor-pointer transition-opacity">
+                      {uploadingPhoto === driver._id ? (
+                        <Loader2 className="w-4 h-4 animate-spin text-white" />
+                      ) : (
+                        <Camera className="w-4 h-4 text-white" />
+                      )}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => handlePhotoUpload(driver._id, e.target.files[0])}
+                        disabled={uploadingPhoto === driver._id}
+                      />
+                    </label>
                   </div>
                   <div>
                     <h3 className="font-semibold">
@@ -302,6 +346,13 @@ function AdminDriversContent() {
               </div>
 
             <div className="flex gap-2 pt-4 border-t">
+              <Link
+                to={`/admin/drivers/${driver._id}`}
+                className="flex-1 inline-flex items-center justify-center px-3 py-2 border rounded-lg hover:bg-secondary"
+              >
+                <BarChart3 className="w-4 h-4 mr-2" />
+                Activity
+              </Link>
               <button
                 onClick={() => handleEdit(driver)}
                 className="flex-1 inline-flex items-center justify-center px-3 py-2 border rounded-lg hover:bg-secondary"
@@ -342,6 +393,60 @@ function AdminDriversContent() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
           <div className="bg-background rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6">
             <h2 className="text-xl font-bold mb-6">{editingDriver ? 'Edit Driver' : 'Add New Driver'}</h2>
+
+            {/* Photo Upload (only for existing drivers) */}
+            {editingDriver && (
+              <div className="flex items-center gap-4 mb-6 pb-4 border-b">
+                <div className="relative group">
+                  {editingDriver.user?.profileImage ? (
+                    <img
+                      src={editingDriver.user.profileImage}
+                      alt="Driver"
+                      className="w-20 h-20 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-20 h-20 bg-secondary rounded-full flex items-center justify-center">
+                      <User className="w-10 h-10 text-muted-foreground" />
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <p className="text-sm font-medium mb-2">Driver Photo</p>
+                  <label className="inline-flex items-center px-3 py-1.5 border rounded-lg hover:bg-secondary cursor-pointer text-sm">
+                    {uploadingPhoto === editingDriver._id ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Uploading...
+                      </>
+                    ) : (
+                      <>
+                        <Camera className="w-4 h-4 mr-2" />
+                        {editingDriver.user?.profileImage ? 'Change Photo' : 'Upload Photo'}
+                      </>
+                    )}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        handlePhotoUpload(editingDriver._id, e.target.files[0]);
+                        // Update editingDriver reference so preview updates
+                        const file = e.target.files[0];
+                        if (file) {
+                          const previewUrl = URL.createObjectURL(file);
+                          setEditingDriver((prev) => ({
+                            ...prev,
+                            user: { ...prev.user, profileImage: previewUrl },
+                          }));
+                        }
+                      }}
+                      disabled={uploadingPhoto === editingDriver._id}
+                    />
+                  </label>
+                </div>
+              </div>
+            )}
+
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>

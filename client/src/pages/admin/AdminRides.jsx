@@ -1,14 +1,18 @@
-import { useState, useEffect } from 'react';
-import { Calendar, MapPin, User, Phone, Car, Trash2, X, ChevronDown, Loader2, Navigation, Clock, DollarSign, TrendingUp, Award, ChevronLeft, ChevronRight } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { GoogleMap, Marker, DirectionsRenderer } from '@react-google-maps/api';
+import { Calendar, MapPin, User, Phone, Car, X, ChevronDown, Loader2, Navigation, Clock, DollarSign, Award, ChevronLeft, ChevronRight, Filter, Map } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { rideService } from '../../services/ride';
 import { driverService } from '../../services/driver';
 import { useSocket } from '../../context/SocketContext';
 
+const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+
 const statusColors = {
   pending: 'bg-yellow-100 text-yellow-800',
   accepted: 'bg-blue-100 text-blue-800',
+  driver_arrived: 'bg-indigo-100 text-indigo-800',
   in_progress: 'bg-purple-100 text-purple-800',
   completed: 'bg-green-100 text-green-800',
   cancelled: 'bg-red-100 text-red-800'
@@ -17,6 +21,7 @@ const statusColors = {
 const statusLabels = {
   pending: 'Pending',
   accepted: 'Accepted',
+  driver_arrived: 'Driver Arrived',
   in_progress: 'In Progress',
   completed: 'Completed',
   cancelled: 'Cancelled'
@@ -30,11 +35,168 @@ const vehicleTypes = {
   minibus: 'Minibus'
 };
 
+const defaultMapCenter = { lat: 42.2679, lng: 42.6946 };
+
+const mapContainerStyle = {
+  width: '100%',
+  height: '300px',
+  borderRadius: '0.5rem',
+};
+
+const mapOptions = {
+  disableDefaultUI: false,
+  zoomControl: true,
+  streetViewControl: false,
+  mapTypeControl: false,
+  fullscreenControl: true,
+  styles: [{ featureType: 'poi', elementType: 'labels', stylers: [{ visibility: 'off' }] }],
+};
+
+function loadGoogleMapsScript() {
+  return new Promise((resolve) => {
+    if (window.google?.maps) { resolve(); return; }
+    const existing = document.querySelector('script[src*="maps.googleapis.com"]');
+    if (existing) { existing.addEventListener('load', resolve); return; }
+    const script = document.createElement('script');
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places`;
+    script.async = true;
+    script.onload = resolve;
+    document.head.appendChild(script);
+  });
+}
+
+// Ride route map component
+function RideRouteMap({ ride }) {
+  const [directions, setDirections] = useState(null);
+  const [mapLoaded, setMapLoaded] = useState(!!window.google?.maps);
+
+  useEffect(() => {
+    if (!mapLoaded && GOOGLE_MAPS_API_KEY) {
+      loadGoogleMapsScript().then(() => setMapLoaded(true));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!mapLoaded || !ride.pickup || !ride.dropoff || !window.google) return;
+
+    const directionsService = new window.google.maps.DirectionsService();
+    const waypoints = (ride.stops || []).map(stop => ({
+      location: { lat: stop.lat, lng: stop.lng },
+      stopover: true,
+    }));
+
+    directionsService.route(
+      {
+        origin: { lat: ride.pickup.lat, lng: ride.pickup.lng },
+        destination: { lat: ride.dropoff.lat, lng: ride.dropoff.lng },
+        waypoints,
+        travelMode: window.google.maps.TravelMode.DRIVING,
+      },
+      (result, status) => {
+        if (status === window.google.maps.DirectionsStatus.OK) {
+          setDirections(result);
+        }
+      }
+    );
+  }, [mapLoaded, ride.pickup, ride.dropoff, ride.stops]);
+
+  if (!mapLoaded) {
+    return (
+      <div className="flex items-center justify-center bg-secondary rounded-lg" style={{ height: '300px' }}>
+        {GOOGLE_MAPS_API_KEY ? (
+          <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+        ) : (
+          <p className="text-muted-foreground text-sm">Google Maps API key not configured</p>
+        )}
+      </div>
+    );
+  }
+
+  const center = ride.pickup
+    ? { lat: ride.pickup.lat, lng: ride.pickup.lng }
+    : defaultMapCenter;
+
+  return (
+    <GoogleMap
+      mapContainerStyle={mapContainerStyle}
+      center={center}
+      zoom={13}
+      options={mapOptions}
+    >
+      {directions && (
+        <DirectionsRenderer
+          directions={directions}
+          options={{
+            suppressMarkers: true,
+            polylineOptions: { strokeColor: '#000000', strokeWeight: 4, strokeOpacity: 0.8 },
+          }}
+        />
+      )}
+
+      {/* Pickup marker */}
+      {ride.pickup && (
+        <Marker
+          position={{ lat: ride.pickup.lat, lng: ride.pickup.lng }}
+          icon={{
+            path: window.google?.maps?.SymbolPath?.CIRCLE || 0,
+            scale: 10,
+            fillColor: '#22c55e',
+            fillOpacity: 1,
+            strokeColor: '#ffffff',
+            strokeWeight: 3,
+          }}
+          title={`Pickup: ${ride.pickup.address}`}
+        />
+      )}
+
+      {/* Stop markers */}
+      {(ride.stops || []).map((stop, i) => (
+        <Marker
+          key={i}
+          position={{ lat: stop.lat, lng: stop.lng }}
+          icon={{
+            path: window.google?.maps?.SymbolPath?.CIRCLE || 0,
+            scale: 8,
+            fillColor: '#f59e0b',
+            fillOpacity: 1,
+            strokeColor: '#ffffff',
+            strokeWeight: 3,
+          }}
+          title={`Stop ${i + 1}: ${stop.address}`}
+        />
+      ))}
+
+      {/* Dropoff marker */}
+      {ride.dropoff && (
+        <Marker
+          position={{ lat: ride.dropoff.lat, lng: ride.dropoff.lng }}
+          icon={{
+            path: window.google?.maps?.SymbolPath?.CIRCLE || 0,
+            scale: 10,
+            fillColor: '#ef4444',
+            fillOpacity: 1,
+            strokeColor: '#ffffff',
+            strokeWeight: 3,
+          }}
+          title={`Dropoff: ${ride.dropoff.address}`}
+        />
+      )}
+    </GoogleMap>
+  );
+}
+
 export function AdminRides() {
   const [rides, setRides] = useState([]);
+  const [drivers, setDrivers] = useState([]);
   const [driverStats, setDriverStats] = useState([]);
   const [filterStatus, setFilterStatus] = useState('all');
+  const [filterDriver, setFilterDriver] = useState('');
+  const [filterVehicleType, setFilterVehicleType] = useState('all');
+  const [filterStartDate, setFilterStartDate] = useState('');
+  const [filterEndDate, setFilterEndDate] = useState('');
+  const [showFilters, setShowFilters] = useState(false);
   const [expandedRide, setExpandedRide] = useState(null);
+  const [showMap, setShowMap] = useState(null);
   const [cancelConfirm, setCancelConfirm] = useState(null);
   const [actionLoading, setActionLoading] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -48,73 +210,58 @@ export function AdminRides() {
   // Fetch rides and stats on mount
   useEffect(() => {
     loadRides();
+  }, [page, filterStatus, filterDriver, filterVehicleType, filterStartDate, filterEndDate]);
+
+  useEffect(() => {
     loadDriverStatistics();
-  }, [page, filterStatus]);
+    loadDriversList();
+  }, []);
 
   // Socket event listeners for real-time updates
   useEffect(() => {
     if (!socket) return;
 
     const handleRideRequest = (ride) => {
-      console.log('New ride request:', ride);
       setRides(prev => [ride, ...prev]);
     };
-
-    const handleRideAccepted = (ride) => {
-      console.log('Ride accepted:', ride);
-      updateRideInList(ride);
-    };
-
-    const handleRideStarted = (ride) => {
-      console.log('Ride started:', ride);
-      updateRideInList(ride);
-    };
-
-    const handleRideCompleted = (ride) => {
-      console.log('Ride completed:', ride);
-      updateRideInList(ride);
-    };
-
-    const handleRideCancelled = (ride) => {
-      console.log('Ride cancelled:', ride);
-      updateRideInList(ride);
-    };
+    const handleRideUpdate = (ride) => updateRideInList(ride);
 
     socket.on('ride:request', handleRideRequest);
-    socket.on('ride:accepted', handleRideAccepted);
-    socket.on('ride:started', handleRideStarted);
-    socket.on('ride:completed', handleRideCompleted);
-    socket.on('ride:cancelled', handleRideCancelled);
+    socket.on('ride:accepted', handleRideUpdate);
+    socket.on('ride:arrived', handleRideUpdate);
+    socket.on('ride:started', handleRideUpdate);
+    socket.on('ride:completed', handleRideUpdate);
+    socket.on('ride:cancelled', handleRideUpdate);
 
     return () => {
       socket.off('ride:request', handleRideRequest);
-      socket.off('ride:accepted', handleRideAccepted);
-      socket.off('ride:started', handleRideStarted);
-      socket.off('ride:completed', handleRideCompleted);
-      socket.off('ride:cancelled', handleRideCancelled);
+      socket.off('ride:accepted', handleRideUpdate);
+      socket.off('ride:arrived', handleRideUpdate);
+      socket.off('ride:started', handleRideUpdate);
+      socket.off('ride:completed', handleRideUpdate);
+      socket.off('ride:cancelled', handleRideUpdate);
     };
   }, [socket]);
 
   const loadRides = async () => {
     setLoading(true);
     try {
-      console.log('Fetching rides with pagination...');
       const filters = {
         status: filterStatus !== 'all' ? filterStatus : undefined,
+        driver: filterDriver || undefined,
+        vehicleType: filterVehicleType !== 'all' ? filterVehicleType : undefined,
+        startDate: filterStartDate || undefined,
+        endDate: filterEndDate || undefined,
         page,
         limit
       };
       const data = await rideService.getAll(filters);
-      console.log('Rides response:', data);
 
-      // Backend returns { success: true, count: X, total: Y, page: Z, pages: W, data: { rides: [...] } }
-      if (data && data.data && data.data.rides) {
-        console.log(`Setting ${data.data.rides.length} rides out of ${data.total} total`);
+      if (data?.data?.rides) {
         setRides(data.data.rides);
         setTotal(data.total);
         setPages(data.pages);
       } else {
-        console.warn('Unexpected rides data structure:', data);
         setRides([]);
         setTotal(0);
         setPages(0);
@@ -129,23 +276,28 @@ export function AdminRides() {
     }
   };
 
+  const loadDriversList = async () => {
+    try {
+      const data = await driverService.getAll();
+      if (data?.success && data.data?.drivers) {
+        setDrivers(data.data.drivers);
+      }
+    } catch (error) {
+      console.error('Failed to fetch drivers:', error);
+    }
+  };
+
   const loadDriverStatistics = async () => {
     setStatsLoading(true);
     try {
-      console.log('Fetching driver statistics...');
       const data = await driverService.getAllStatistics();
-      console.log('Driver statistics response:', data);
-
-      if (data && data.data && data.data.statistics) {
-        console.log(`Setting ${data.data.statistics.length} driver stats`);
+      if (data?.data?.statistics) {
         setDriverStats(data.data.statistics);
       } else {
-        console.warn('Unexpected data structure:', data);
         setDriverStats([]);
       }
     } catch (error) {
       console.error('Failed to fetch driver statistics:', error);
-      console.error('Error details:', error.message);
       setDriverStats([]);
     } finally {
       setStatsLoading(false);
@@ -166,15 +318,25 @@ export function AdminRides() {
 
   const handleFilterChange = (status) => {
     setFilterStatus(status);
-    setPage(1); // Reset to first page when filter changes
+    setPage(1);
   };
+
+  const clearFilters = () => {
+    setFilterDriver('');
+    setFilterVehicleType('all');
+    setFilterStartDate('');
+    setFilterEndDate('');
+    setPage(1);
+  };
+
+  const hasActiveFilters = filterDriver || filterVehicleType !== 'all' || filterStartDate || filterEndDate;
 
   const handleCancel = async (rideId) => {
     setActionLoading(rideId);
     try {
-      await rideService.cancel(rideId, 'Cancelled by admin');
+      await rideService.cancel(rideId, 'other', 'Cancelled by admin');
       setCancelConfirm(null);
-      loadRides(); // Refresh list
+      loadRides();
     } catch (error) {
       console.error('Failed to cancel ride:', error);
     } finally {
@@ -197,10 +359,17 @@ export function AdminRides() {
     const mins = Math.floor(seconds / 60);
     const hrs = Math.floor(mins / 60);
     const remainingMins = mins % 60;
-    if (hrs > 0) {
-      return `${hrs}h ${remainingMins}m`;
-    }
+    if (hrs > 0) return `${hrs}h ${remainingMins}m`;
     return `${mins}m`;
+  };
+
+  const getDriverName = (ride) => {
+    if (!ride.driver) return null;
+    const u = ride.driver.user;
+    if (u?.firstName) return `${u.firstName} ${u.lastName || ''}`.trim();
+    if (u?.name) return u.name;
+    if (u?.email) return u.email;
+    return 'Driver';
   };
 
   return (
@@ -211,20 +380,100 @@ export function AdminRides() {
           <h1 className="text-3xl font-bold tracking-tight">Taxi Rides</h1>
           <p className="text-muted-foreground mt-1">
             Monitor all ride requests and live status
-            <span className="ml-2 text-xs">
-              ({total} total rides)
-            </span>
+            <span className="ml-2 text-xs">({total} total rides)</span>
           </p>
         </div>
-        <Button onClick={loadRides} variant="outline" disabled={loading}>
-          {loading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
-          Refresh
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={() => setShowFilters(!showFilters)}
+            className={hasActiveFilters ? 'border-primary text-primary' : ''}
+          >
+            <Filter className="h-4 w-4 mr-2" />
+            Filters
+            {hasActiveFilters && <span className="ml-1 w-2 h-2 bg-primary rounded-full" />}
+          </Button>
+          <Button onClick={loadRides} variant="outline" disabled={loading}>
+            {loading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+            Refresh
+          </Button>
+        </div>
       </div>
 
-      {/* Filter Tabs */}
+      {/* Advanced Filters Panel */}
+      {showFilters && (
+        <Card>
+          <CardContent className="pt-6">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              {/* Driver Filter */}
+              <div>
+                <label className="block text-sm font-medium mb-1">Driver</label>
+                <select
+                  value={filterDriver}
+                  onChange={(e) => { setFilterDriver(e.target.value); setPage(1); }}
+                  className="w-full px-3 py-2 border rounded-lg text-sm bg-background"
+                >
+                  <option value="">All Drivers</option>
+                  {drivers.map(d => (
+                    <option key={d._id} value={d._id}>
+                      {d.user?.firstName} {d.user?.lastName} - {d.vehicle?.licensePlate}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Vehicle Type Filter */}
+              <div>
+                <label className="block text-sm font-medium mb-1">Vehicle Type</label>
+                <select
+                  value={filterVehicleType}
+                  onChange={(e) => { setFilterVehicleType(e.target.value); setPage(1); }}
+                  className="w-full px-3 py-2 border rounded-lg text-sm bg-background"
+                >
+                  <option value="all">All Types</option>
+                  {Object.entries(vehicleTypes).map(([key, label]) => (
+                    <option key={key} value={key}>{label}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Start Date */}
+              <div>
+                <label className="block text-sm font-medium mb-1">From Date</label>
+                <input
+                  type="date"
+                  value={filterStartDate}
+                  onChange={(e) => { setFilterStartDate(e.target.value); setPage(1); }}
+                  className="w-full px-3 py-2 border rounded-lg text-sm bg-background"
+                />
+              </div>
+
+              {/* End Date */}
+              <div>
+                <label className="block text-sm font-medium mb-1">To Date</label>
+                <input
+                  type="date"
+                  value={filterEndDate}
+                  onChange={(e) => { setFilterEndDate(e.target.value); setPage(1); }}
+                  className="w-full px-3 py-2 border rounded-lg text-sm bg-background"
+                />
+              </div>
+            </div>
+            {hasActiveFilters && (
+              <div className="mt-3 flex justify-end">
+                <Button variant="ghost" size="sm" onClick={clearFilters}>
+                  <X className="h-4 w-4 mr-1" />
+                  Clear Filters
+                </Button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Status Filter Tabs */}
       <div className="flex flex-wrap gap-2">
-        {['all', 'pending', 'accepted', 'in_progress', 'completed', 'cancelled'].map(status => (
+        {['all', 'pending', 'accepted', 'driver_arrived', 'in_progress', 'completed', 'cancelled'].map(status => (
           <button
             key={status}
             onClick={() => handleFilterChange(status)}
@@ -250,22 +499,27 @@ export function AdminRides() {
         ) : rides.length === 0 ? (
           <Card>
             <CardContent className="py-12 text-center text-muted-foreground">
-              {filterStatus === 'all'
-                ? 'No rides yet.'
-                : `No ${filterStatus} rides.`}
+              {hasActiveFilters
+                ? 'No rides match the current filters.'
+                : filterStatus === 'all'
+                  ? 'No rides yet.'
+                  : `No ${statusLabels[filterStatus]?.toLowerCase()} rides.`}
             </CardContent>
           </Card>
         ) : (
           rides.map(ride => {
             const rideId = ride._id || ride.id;
             const isLoading = actionLoading === rideId;
+            const isExpanded = expandedRide === rideId;
+            const isMapOpen = showMap === rideId;
+            const driverName = getDriverName(ride);
 
             return (
               <Card key={rideId} className="overflow-hidden">
                 <CardHeader className="pb-3">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
-                      <CardTitle className="text-lg font-mono text-sm">{rideId.slice(-8).toUpperCase()}</CardTitle>
+                      <CardTitle className="font-mono text-sm">{rideId.slice(-8).toUpperCase()}</CardTitle>
                       <span className={`px-2 py-1 text-xs font-medium rounded-full ${statusColors[ride.status]}`}>
                         {statusLabels[ride.status]}
                       </span>
@@ -273,6 +527,11 @@ export function AdminRides() {
                         <span className="flex items-center gap-1 text-xs text-purple-600">
                           <div className="w-2 h-2 bg-purple-600 rounded-full animate-pulse" />
                           Live
+                        </span>
+                      )}
+                      {driverName && (
+                        <span className="text-xs text-muted-foreground hidden sm:inline">
+                          {driverName}
                         </span>
                       )}
                     </div>
@@ -283,9 +542,17 @@ export function AdminRides() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => setExpandedRide(expandedRide === rideId ? null : rideId)}
+                        onClick={() => setShowMap(isMapOpen ? null : rideId)}
+                        title="Show route map"
                       >
-                        <ChevronDown className={`h-4 w-4 transition-transform ${expandedRide === rideId ? 'rotate-180' : ''}`} />
+                        <Map className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setExpandedRide(isExpanded ? null : rideId)}
+                      >
+                        <ChevronDown className={`h-4 w-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                       </Button>
                     </div>
                   </div>
@@ -295,21 +562,21 @@ export function AdminRides() {
                   {/* Quick Info */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                     <div className="flex items-start gap-2">
-                      <MapPin className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
+                      <MapPin className="h-4 w-4 text-green-600 mt-0.5 shrink-0" />
                       <div className="text-sm flex-1">
                         <p className="text-muted-foreground">Pickup</p>
                         <p className="font-medium truncate">{ride.pickup?.address || 'N/A'}</p>
                       </div>
                     </div>
                     <div className="flex items-start gap-2">
-                      <MapPin className="h-4 w-4 text-red-600 mt-0.5 flex-shrink-0" />
+                      <MapPin className="h-4 w-4 text-red-600 mt-0.5 shrink-0" />
                       <div className="text-sm flex-1">
                         <p className="text-muted-foreground">Dropoff</p>
                         <p className="font-medium truncate">{ride.dropoff?.address || 'N/A'}</p>
                       </div>
                     </div>
                     <div className="flex items-start gap-2">
-                      <Car className="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+                      <Car className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
                       <div className="text-sm">
                         <p className="text-muted-foreground">Vehicle Type</p>
                         <p className="font-medium">{vehicleTypes[ride.vehicleType] || ride.vehicleType}</p>
@@ -317,8 +584,44 @@ export function AdminRides() {
                     </div>
                   </div>
 
+                  {/* Stops (if any) */}
+                  {ride.stops && ride.stops.length > 0 && (
+                    <div className="mb-4 pl-6 space-y-1">
+                      {ride.stops.map((stop, i) => (
+                        <div key={i} className="flex items-center gap-2 text-sm">
+                          <MapPin className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                          <span className="text-muted-foreground">Stop {i + 1}:</span>
+                          <span className="truncate">{stop.address}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Route Map */}
+                  {isMapOpen && (
+                    <div className="mb-4 border rounded-lg overflow-hidden">
+                      <RideRouteMap ride={ride} />
+                      <div className="p-2 bg-secondary/30 flex items-center gap-4 text-xs">
+                        <div className="flex items-center gap-1">
+                          <div className="w-3 h-3 rounded-full bg-green-500 border-2 border-white shadow" />
+                          <span>Pickup</span>
+                        </div>
+                        {ride.stops?.length > 0 && (
+                          <div className="flex items-center gap-1">
+                            <div className="w-2.5 h-2.5 rounded-full bg-amber-500 border-2 border-white shadow" />
+                            <span>Stops ({ride.stops.length})</span>
+                          </div>
+                        )}
+                        <div className="flex items-center gap-1">
+                          <div className="w-3 h-3 rounded-full bg-red-500 border-2 border-white shadow" />
+                          <span>Dropoff</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Expanded Details */}
-                  {expandedRide === rideId && (
+                  {isExpanded && (
                     <div className="border-t pt-4 mt-4 space-y-4">
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {/* Passenger Info */}
@@ -355,9 +658,7 @@ export function AdminRides() {
                             <div className="space-y-2 text-sm">
                               <div className="flex items-center gap-2">
                                 <User className="h-4 w-4 text-muted-foreground" />
-                                <span>
-                                  {ride.driver.user?.name || ride.driver.user?.email || 'Driver'}
-                                </span>
+                                <span>{driverName}</span>
                               </div>
                               {ride.driver.phone && (
                                 <div className="flex items-center gap-2">
@@ -406,11 +707,11 @@ export function AdminRides() {
                           </div>
                           <div>
                             <p className="text-muted-foreground">Quote Price</p>
-                            <p className="font-medium">${ride.quote?.totalPrice?.toFixed(2) || '0.00'}</p>
+                            <p className="font-medium">{ride.quote?.totalPrice?.toFixed(2) || '0.00'} GEL</p>
                           </div>
                           <div>
                             <p className="text-muted-foreground">Final Fare</p>
-                            <p className="font-bold text-lg">${ride.fare?.toFixed(2) || (ride.quote?.totalPrice?.toFixed(2) || '0.00')}</p>
+                            <p className="font-bold text-lg">{ride.fare?.toFixed(2) || (ride.quote?.totalPrice?.toFixed(2) || '0.00')} GEL</p>
                           </div>
                         </div>
                         {ride.startTime && (
@@ -676,7 +977,7 @@ export function AdminRides() {
                         <td className="text-right py-3 px-4">
                           <div className="flex flex-col items-end">
                             <span className="font-bold text-green-600">
-                              ${driver.statistics.earnings.last24Hours.toFixed(2)}
+                              {driver.statistics.earnings.last24Hours.toFixed(2)} GEL
                             </span>
                             <span className="text-xs text-muted-foreground">
                               {driver.statistics.trips.last24Hours} trips
@@ -686,7 +987,7 @@ export function AdminRides() {
                         <td className="text-right py-3 px-4">
                           <div className="flex flex-col items-end">
                             <span className="font-bold text-green-600">
-                              ${driver.statistics.earnings.last7Days.toFixed(2)}
+                              {driver.statistics.earnings.last7Days.toFixed(2)} GEL
                             </span>
                             <span className="text-xs text-muted-foreground">
                               {driver.statistics.trips.last7Days} trips
@@ -696,7 +997,7 @@ export function AdminRides() {
                         <td className="text-right py-3 px-4">
                           <div className="flex flex-col items-end">
                             <span className="font-bold text-green-600">
-                              ${driver.statistics.earnings.last30Days.toFixed(2)}
+                              {driver.statistics.earnings.last30Days.toFixed(2)} GEL
                             </span>
                             <span className="text-xs text-muted-foreground">
                               {driver.statistics.trips.last30Days} trips
@@ -706,7 +1007,7 @@ export function AdminRides() {
                         <td className="text-right py-3 px-4">
                           <div className="flex flex-col items-end">
                             <span className="font-bold text-xl text-primary">
-                              ${driver.statistics.totalEarnings.toFixed(2)}
+                              {driver.statistics.totalEarnings.toFixed(2)} GEL
                             </span>
                             <div className="flex items-center gap-1 text-xs text-muted-foreground">
                               <Award className="h-3 w-3" />
