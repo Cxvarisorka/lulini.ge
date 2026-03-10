@@ -45,6 +45,7 @@
     "title": "Lulini მძღოლი",
     "goOnline": "ონლაინ",
     "goOffline": "ოფლაინ",
+    "cannotGoOfflineActiveRide": "აქტიური მგზავრობის დროს ოფლაინ რეჟიმში გადასვლა შეუძლებელია. გთხოვთ, ჯერ დაასრულოთ ან გააუქმოთ მგზავრობა.",
     "youAreOnline": "თქვენ ონლაინ ხართ",
     "youAreOffline": "თქვენ ოფლაინ ხართ",
     "waitingForRides": "მოგზაურობების მოლოდინი...",
@@ -71,6 +72,13 @@
     "duration": "ხანგრძლივობა",
     "estimatedFare": "სავარაუდო ფასი",
     "fare": "ფასი",
+    "commission": "საკომისიო",
+    "yourEarnings": "თქვენი შემოსავალი",
+    "paymentMethod_cash": "ნაღდი ანგარიშსწორება",
+    "paymentMethod_card": "ბარათით გადახდა",
+    "paymentMethod_saved_card": "ბარათით გადახდა",
+    "paymentMethod_apple_pay": "Apple Pay",
+    "paymentMethod_google_pay": "Google Pay",
     "active": "აქტიური მოგზაურობები",
     "myRides": "ჩემი მოგზაურობები",
     "activeTab": "აქტიური",
@@ -154,7 +162,9 @@
     "cancelledBy": "გააუქმა",
     "waitingFee": "მოლოდინის საფასური",
     "km": "კმ",
-    "min": "წთ"
+    "min": "წთ",
+    "tooFarFromPickup": "თქვენ {{distance}}მ-ით შორს ხართ აყვანის ადგილიდან. მიუახლოვდით ჩასვლის დასადასტურებლად.",
+    "tooFarFromDropoff": "თქვენ {{distance}}მ-ით შორს ხართ ჩასმის ადგილიდან. მიუახლოვდით მგზავრობის დასასრულებლად."
   },
   "earnings": {
     "title": "შემოსავალი",

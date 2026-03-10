@@ -16,6 +16,7 @@ import MapView from '../components/map/MapViewWrapper';
 import Marker from '../components/map/MarkerWrapper';
 import Polyline from '../components/map/PolylineWrapper';
 import { markerImages } from '../components/map/markerImages';
+import { mapStyle } from '../components/map/mapStyle';
 import { useLocation } from '../context/LocationContext';
 import { colors, shadows, radius, spacing, useTypography } from '../theme/colors';
 import {
@@ -272,6 +273,7 @@ export default function NavigationScreen({ navigation, route: navRoute }) {
       <MapView
         ref={mapRef}
         style={styles.map}
+        customMapStyle={mapStyle}
         initialRegion={{
           latitude: driverLocation?.latitude || destination.latitude,
           longitude: driverLocation?.longitude || destination.longitude,
@@ -298,7 +300,7 @@ export default function NavigationScreen({ navigation, route: navRoute }) {
         {driverLocation && (
           <Marker
             coordinate={{ latitude: driverLocation.latitude, longitude: driverLocation.longitude }}
-            image={markerImages.pickup}
+            image={markerImages.carAssigned}
             tracksViewChanges={false}
             anchor={{ x: 0.5, y: 0.5 }}
           />

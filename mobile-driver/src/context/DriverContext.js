@@ -118,24 +118,23 @@ export const DriverProvider = ({ children }) => {
   invalidateCacheRef.current = invalidateCache;
   const invalidateEarningsCacheRef = useRef(invalidateEarningsCache);
   invalidateEarningsCacheRef.current = invalidateEarningsCache;
+  const loadDriverStatsRef = useRef(loadDriverStats);
+  loadDriverStatsRef.current = loadDriverStats;
 
   // Listen for real-time updates from socket — only re-register when socket changes
   useEffect(() => {
     if (!socket) return;
 
-    // Handle ride completion event - update trips and earnings
+    // Handle ride completion event - refresh full stats from server
+    // (server computes time-windowed aggregates like last24Hours that can't be patched client-side)
     const handleRideCompleted = (data) => {
-      if (data.updatedStats) {
-        updateStats({
-          trips: data.updatedStats.totalTrips,
-          earnings: data.updatedStats.totalEarnings,
-        });
-      }
       if (data.rideId) {
         removeActiveRide(data.rideId);
       }
       invalidateCacheRef.current();
       invalidateEarningsCacheRef.current();
+      // Refresh stats from server to get accurate last24Hours/today/total breakdowns
+      loadDriverStatsRef.current();
     };
 
     // Handle ride review event - update rating

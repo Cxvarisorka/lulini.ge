@@ -11,6 +11,8 @@ import {
   Modal,
   ScrollView,
   Platform,
+  Animated,
+  PanResponder,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
@@ -18,15 +20,23 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import MapView from '../components/map/MapViewWrapper';
 import Marker from '../components/map/MarkerWrapper';
+import Polyline from '../components/map/PolylineWrapper';
 import { markerImages } from '../components/map/markerImages';
+import { mapStyle } from '../components/map/mapStyle';
 import { useDriver } from '../context/DriverContext';
 import { useLocation } from '../context/LocationContext';
 import { useSocket } from '../context/SocketContext';
 import { useAuth } from '../context/AuthContext';
+import { useMap } from '../context/MapContext';
 import { rideAPI } from '../services/api';
+import { getDirections } from '../services/googleMaps';
 import { colors, shadows, radius, spacing, useTypography } from '../theme/colors';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+
+// Bottom sheet snap points
+const COLLAPSED_HEIGHT = 76; // Just enough for the go online button
+const EXPANDED_HEIGHT = SCREEN_HEIGHT * 0.55;
 
 export default function HomeScreen({ navigation }) {
   const { t } = useTranslation();
@@ -34,16 +44,101 @@ export default function HomeScreen({ navigation }) {
   const mapRef = useRef(null);
   const hasFitted = useRef(false);
   const typography = useTypography();
-  const styles = useMemo(() => createStyles(typography), [typography]);
 
   const { user } = useAuth();
   const { isOnline, goOnline, goOffline, loading, stats, addActiveRide, activeRides } = useDriver();
   const { location } = useLocation();
-  const { newRideRequest, clearRideRequest, isConnected, fetchPendingRides, socket } = useSocket();
+  const { newRideRequest, clearRideRequest, isConnected, fetchPendingRides } = useSocket();
+  const { isBuiltinMap } = useMap();
 
   const [showRideRequest, setShowRideRequest] = useState(false);
   const [accepting, setAccepting] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(true);
+  const [routePolyline, setRoutePolyline] = useState([]);
 
+  // Animated value for bottom sheet position (0 = collapsed, 1 = expanded)
+  const sheetAnim = useRef(new Animated.Value(1)).current;
+
+  // Derive actual heights with safe area
+  const bottomPadding = insets.bottom || 20;
+  const collapsedH = COLLAPSED_HEIGHT + bottomPadding;
+  const expandedH = EXPANDED_HEIGHT + bottomPadding;
+
+  const styles = useMemo(() => createStyles(typography), [typography]);
+
+  // Animate sheet to target
+  const animateSheet = useCallback((toExpanded) => {
+    setIsExpanded(toExpanded);
+    Animated.spring(sheetAnim, {
+      toValue: toExpanded ? 1 : 0,
+      useNativeDriver: false,
+      damping: 20,
+      stiffness: 200,
+      mass: 0.8,
+    }).start();
+  }, [sheetAnim]);
+
+  const panRef = useRef(null);
+  const isExpandedRef = useRef(isExpanded);
+  isExpandedRef.current = isExpanded;
+
+  const createPanResponder = useCallback(() => {
+    return PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, gs) => {
+        return Math.abs(gs.dy) > 8 && Math.abs(gs.dy) > Math.abs(gs.dx) * 1.5;
+      },
+      onPanResponderMove: (_, gs) => {
+        const range = expandedH - collapsedH;
+        const currentVal = isExpandedRef.current ? 1 : 0;
+        const normalizedDy = -gs.dy / range;
+        const newVal = Math.max(0, Math.min(1, currentVal + normalizedDy));
+        sheetAnim.setValue(newVal);
+      },
+      onPanResponderRelease: (_, gs) => {
+        if (Math.abs(gs.vy) > 0.5) {
+          animateSheet(gs.vy < 0);
+        } else {
+          const threshold = 50;
+          if (isExpandedRef.current) {
+            animateSheet(gs.dy < threshold);
+          } else {
+            animateSheet(gs.dy < -threshold);
+          }
+        }
+      },
+    });
+  }, [expandedH, collapsedH, sheetAnim, animateSheet]);
+
+  if (!panRef.current) {
+    panRef.current = createPanResponder();
+  }
+
+  // Update pan responder ref
+  useEffect(() => {
+    panRef.current = createPanResponder();
+  }, [createPanResponder]);
+
+  // Interpolated sheet height
+  const sheetHeight = sheetAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [collapsedH, expandedH],
+  });
+
+  // Content opacity (hide stats/actions when collapsed)
+  const contentOpacity = sheetAnim.interpolate({
+    inputRange: [0, 0.4, 1],
+    outputRange: [0, 0, 1],
+  });
+
+  // Collapsed content opacity (show go online btn when collapsed)
+  const collapsedOpacity = sheetAnim.interpolate({
+    inputRange: [0, 0.3],
+    outputRange: [1, 0],
+    extrapolate: 'clamp',
+  });
+
+  // My location button opacity - visible when collapsed
   useEffect(() => {
     if (newRideRequest) {
       setShowRideRequest(true);
@@ -76,6 +171,46 @@ export default function HomeScreen({ navigation }) {
     }
   }, [activeRide, location]);
 
+  // Fetch route polyline for built-in navigation overlay on HomeScreen
+  // Only refetch when ride status/ID changes — not on every GPS tick (directions are cached anyway)
+  const routeFetchedForRef = useRef(null); // "rideId:status"
+  useEffect(() => {
+    if (!isBuiltinMap || !activeRide || !location) {
+      setRoutePolyline([]);
+      routeFetchedForRef.current = null;
+      return;
+    }
+    const key = `${activeRide._id}:${activeRide.status}`;
+    if (routeFetchedForRef.current === key) return;
+    routeFetchedForRef.current = key;
+
+    let mounted = true;
+    (async () => {
+      try {
+        // Determine target: pickup when accepted/driver_arrived, dropoff when in_progress
+        let target = null;
+        if ((activeRide.status === 'accepted' || activeRide.status === 'driver_arrived') && activeRide.pickup?.lat) {
+          target = { latitude: activeRide.pickup.lat, longitude: activeRide.pickup.lng };
+        } else if (activeRide.status === 'in_progress' && activeRide.dropoff?.lat) {
+          target = { latitude: activeRide.dropoff.lat, longitude: activeRide.dropoff.lng };
+        }
+        if (!target) return;
+        const result = await getDirections(
+          { latitude: location.latitude, longitude: location.longitude },
+          target,
+        );
+        if (result?.polyline && mounted) {
+          const coords = result.polyline.map(p => ({
+            latitude: Array.isArray(p) ? p[0] : p.latitude,
+            longitude: Array.isArray(p) ? p[1] : p.longitude,
+          }));
+          setRoutePolyline(coords);
+        }
+      } catch {}
+    })();
+    return () => { mounted = false; };
+  }, [isBuiltinMap, activeRide?.status, activeRide?._id, location]);
+
   // [H6 FIX] Prevent double-tap race condition with toggling ref
   const togglingRef = useRef(false);
   const handleToggleOnline = async () => {
@@ -83,6 +218,10 @@ export default function HomeScreen({ navigation }) {
     togglingRef.current = true;
     try {
       if (isOnline) {
+        if (activeRides && activeRides.length > 0) {
+          Alert.alert(t('common.error'), t('home.cannotGoOfflineActiveRide'));
+          return;
+        }
         const result = await goOffline();
         if (!result.success) {
           Alert.alert(t('common.error'), result.message);
@@ -111,10 +250,17 @@ export default function HomeScreen({ navigation }) {
     try {
       const response = await rideAPI.acceptRide(newRideRequest._id);
       if (response.data.success) {
-        addActiveRide(response.data.data.ride);
+        const acceptedRide = response.data.data.ride;
+        addActiveRide(acceptedRide);
         setShowRideRequest(false);
         clearRideRequest();
-        navigation.navigate('RideDetail', { rideId: response.data.data.ride._id });
+        if (isBuiltinMap) {
+          // Stay on HomeScreen — polyline will appear via the route effect
+          hasFitted.current = false; // Force re-fit to show route
+          animateSheet(false); // Collapse bottom sheet to show more map
+        } else {
+          navigation.navigate('RideDetail', { rideId: acceptedRide._id });
+        }
       }
     } catch (error) {
       const serverMessage = error.response?.data?.message;
@@ -134,6 +280,17 @@ export default function HomeScreen({ navigation }) {
     clearRideRequest();
   };
 
+  const handleMyLocation = useCallback(() => {
+    if (location && mapRef.current) {
+      mapRef.current.animateToRegion({
+        latitude: location.latitude,
+        longitude: location.longitude,
+        latitudeDelta: 0.01,
+        longitudeDelta: 0.01,
+      }, 400);
+    }
+  }, [location]);
+
   // Fallback region (Georgia center) used only as initialRegion
   const initialMapRegion = useRef({
     latitude: 42.2679,
@@ -143,10 +300,21 @@ export default function HomeScreen({ navigation }) {
   }).current;
 
   // Animate to driver's actual location once GPS resolves
-  const hasAnimatedToLocation = useRef(false);
+  // Track what we animated to — re-animate if we first got DEFAULT_LOCATION then real GPS
+  const animatedToLocationRef = useRef(null); // null | 'default' | 'real'
   useEffect(() => {
-    if (location && mapRef.current && !hasAnimatedToLocation.current) {
-      hasAnimatedToLocation.current = true;
+    if (!location || !mapRef.current) return;
+
+    const isDefault =
+      location.latitude === 41.7151 && location.longitude === 44.8271;
+
+    // Skip if we already animated to real GPS
+    if (animatedToLocationRef.current === 'real') return;
+
+    // If we got default before and now have real GPS, re-animate
+    // If first location is real, animate once
+    if (!isDefault || !animatedToLocationRef.current) {
+      animatedToLocationRef.current = isDefault ? 'default' : 'real';
       mapRef.current.animateToRegion({
         latitude: location.latitude,
         longitude: location.longitude,
@@ -183,126 +351,182 @@ export default function HomeScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
-      {/* Map */}
-      <View style={styles.mapContainer}>
-        <MapView
-          ref={mapRef}
-          style={styles.map}
-          initialRegion={initialMapRegion}
-          showsUserLocation={false}
-          showsMyLocationButton={false}
-          showsCompass={false}
-          toolbarEnabled={false}
-        >
-          {/* Driver location marker */}
-          {location && (
-            <Marker
-              coordinate={{ latitude: location.latitude, longitude: location.longitude }}
-              image={markerImages.pickup}
-              tracksViewChanges={false}
-              anchor={{ x: 0.5, y: 0.5 }}
-            />
-          )}
-          {/* Active ride markers */}
-          {activeRide?.pickup?.lat && (
-            <Marker
-              coordinate={{ latitude: activeRide.pickup.lat, longitude: activeRide.pickup.lng }}
-              image={markerImages.pickup}
-              tracksViewChanges={false}
-              anchor={{ x: 0.5, y: 1 }}
-            />
-          )}
-          {activeRide?.stops?.map((stop, i) => stop.lat && (
-            <Marker
-              key={`stop-${i}`}
-              coordinate={{ latitude: stop.lat, longitude: stop.lng }}
-              image={markerImages.stopSmall[Math.min(i + 1, 9)]}
-              tracksViewChanges={false}
-              anchor={{ x: 0.5, y: 1 }}
-            />
-          ))}
-          {activeRide?.dropoff?.lat && (
-            <Marker
-              coordinate={{ latitude: activeRide.dropoff.lat, longitude: activeRide.dropoff.lng }}
-              image={markerImages.dropoff}
-              tracksViewChanges={false}
-              anchor={{ x: 0.5, y: 1 }}
-            />
-          )}
-        </MapView>
+      {/* Full-screen Map */}
+      <MapView
+        ref={mapRef}
+        style={StyleSheet.absoluteFill}
+        customMapStyle={mapStyle}
+        initialRegion={initialMapRegion}
+        showsUserLocation={false}
+        showsMyLocationButton={false}
+        showsCompass={false}
+        toolbarEnabled={false}
+      >
+        {/* Driver location marker */}
+        {location && (
+          <Marker
+            coordinate={{ latitude: location.latitude, longitude: location.longitude }}
+            image={activeRide ? markerImages.carAssigned : markerImages.car}
+            tracksViewChanges={false}
+            anchor={{ x: 0.5, y: 0.5 }}
+          />
+        )}
+        {/* Active ride markers */}
+        {activeRide?.pickup?.lat && (
+          <Marker
+            coordinate={{ latitude: activeRide.pickup.lat, longitude: activeRide.pickup.lng }}
+            image={markerImages.pickup}
+            tracksViewChanges={false}
+            anchor={{ x: 0.5, y: 1 }}
+          />
+        )}
+        {activeRide?.stops?.map((stop, i) => stop.lat && (
+          <Marker
+            key={`stop-${i}`}
+            coordinate={{ latitude: stop.lat, longitude: stop.lng }}
+            image={markerImages.stopSmall[Math.min(i + 1, 9)]}
+            tracksViewChanges={false}
+            anchor={{ x: 0.5, y: 1 }}
+          />
+        ))}
+        {activeRide?.dropoff?.lat && (
+          <Marker
+            coordinate={{ latitude: activeRide.dropoff.lat, longitude: activeRide.dropoff.lng }}
+            image={markerImages.dropoff}
+            tracksViewChanges={false}
+            anchor={{ x: 0.5, y: 1 }}
+          />
+        )}
+        {/* Route polyline for built-in navigation */}
+        {routePolyline.length > 1 && (
+          <Polyline
+            coordinates={routePolyline}
+            strokeColor={colors.primary}
+            strokeWidth={5}
+            lineCap="round"
+            lineJoin="round"
+          />
+        )}
+      </MapView>
 
-        {/* Top Header */}
-        <View style={[styles.headerOverlay, { paddingTop: insets.top + spacing.sm }]}>
-          <View style={styles.welcomeSection}>
-            <TouchableOpacity
-              style={styles.settingsButton}
-              onPress={() => navigation.navigate('Settings')}
-              accessibilityLabel={t('settings.title')}
-              accessibilityRole="button"
-            >
-              <Ionicons name="settings-outline" size={24} color={colors.foreground} />
-            </TouchableOpacity>
-            <View style={styles.welcomeContent}>
-              <Text style={styles.greeting} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
-                {t('home.greeting') || 'Hello'}, {user?.firstName || 'Driver'}
+      {/* Top Header Overlay */}
+      <View style={[styles.headerOverlay, { paddingTop: insets.top + spacing.sm }]} pointerEvents="box-none">
+        <View style={styles.welcomeSection}>
+          <TouchableOpacity
+            style={styles.settingsButton}
+            onPress={() => navigation.navigate('Settings')}
+            accessibilityLabel={t('settings.title')}
+            accessibilityRole="button"
+          >
+            <Ionicons name="settings-outline" size={24} color={colors.foreground} />
+          </TouchableOpacity>
+          <View style={styles.welcomeContent}>
+            <Text style={styles.greeting} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+              {t('home.greeting') || 'Hello'}, {user?.firstName || 'Driver'}
+            </Text>
+            <View style={styles.statusRow}>
+              <View style={[styles.statusDot, { backgroundColor: isOnline ? colors.online : colors.offline }]} />
+              <Text style={styles.statusText} numberOfLines={1}>
+                {isOnline ? t('home.youAreOnline') : t('home.youAreOffline')}
               </Text>
-              <View style={styles.statusRow}>
-                <View style={[styles.statusDot, { backgroundColor: isOnline ? colors.online : colors.offline }]} />
-                <Text style={styles.statusText} numberOfLines={1}>
-                  {isOnline ? t('home.youAreOnline') : t('home.youAreOffline')}
-                </Text>
-              </View>
-            </View>
-            <View
-              style={[styles.connectionBadge, { backgroundColor: isConnected ? '#dcfce7' : '#fee2e2' }]}
-              accessibilityLabel={isConnected ? t('connection.connected') : t('connection.reconnecting')}
-              accessibilityRole="image"
-            >
-              <Ionicons
-                name={isConnected ? 'wifi' : 'wifi-outline'}
-                size={20}
-                color={isConnected ? colors.success : colors.destructive}
-              />
             </View>
           </View>
-          {__DEV__ && (
-            <View style={styles.debugBanner}>
-              <View style={[styles.debugDot, { backgroundColor: isConnected ? colors.success : colors.destructive }]} />
-              <Text style={styles.debugText}>
-                Socket: {isConnected ? 'Connected' : 'Disconnected'}
-              </Text>
-            </View>
-          )}
+          <View
+            style={[styles.connectionBadge, { backgroundColor: isConnected ? '#dcfce7' : '#fee2e2' }]}
+            accessibilityLabel={isConnected ? t('connection.connected') : t('connection.reconnecting')}
+            accessibilityRole="image"
+          >
+            <Ionicons
+              name={isConnected ? 'wifi' : 'wifi-outline'}
+              size={20}
+              color={isConnected ? colors.success : colors.destructive}
+            />
+          </View>
         </View>
+        {__DEV__ && (
+          <View style={styles.debugBanner}>
+            <View style={[styles.debugDot, { backgroundColor: isConnected ? colors.success : colors.destructive }]} />
+            <Text style={styles.debugText}>
+              Socket: {isConnected ? 'Connected' : 'Disconnected'}
+            </Text>
+          </View>
+        )}
       </View>
 
-      {/* Bottom Panel */}
-      <View style={styles.bottomPanel}>
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={[styles.bottomContent, { paddingBottom: insets.bottom + spacing['3xl'] }]}
+      {/* Active ride banner — built-in navigation: tap to view ride details */}
+      {isBuiltinMap && activeRide && (
+        <TouchableOpacity
+          style={[styles.rideDetailBanner, { top: insets.top + 80 }]}
+          onPress={() => navigation.navigate('RideDetail', { rideId: activeRide._id })}
+          activeOpacity={0.85}
         >
-          {/* Quick Stats */}
-          <View style={styles.statsSection}>
-            <Text style={styles.sectionTitle} numberOfLines={1}>{t('home.todayStats') || 'TODAY\'S STATS'}</Text>
-            <View style={styles.statsGrid}>
-              {quickStats.map((stat) => (
-                <View key={stat.id} style={styles.statCard}>
-                  <View style={[styles.statIcon, { backgroundColor: `${stat.color}15` }]}>
-                    <Ionicons name={stat.icon} size={22} color={stat.color} />
-                  </View>
-                  <Text style={styles.statValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{stat.value}</Text>
-                  <Text style={styles.statLabel} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.8}>{stat.label}</Text>
-                </View>
-              ))}
-            </View>
+          <View style={styles.rideDetailBannerContent}>
+            <Ionicons
+              name={activeRide.status === 'in_progress' ? 'car' : 'navigate'}
+              size={20}
+              color={colors.primaryForeground}
+            />
+            <Text style={styles.rideDetailBannerText} numberOfLines={1}>
+              {activeRide.status === 'in_progress'
+                ? (activeRide.dropoff?.address || t('rides.dropoff'))
+                : (activeRide.pickup?.address || t('rides.pickup'))}
+            </Text>
+            <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.7)" />
           </View>
+        </TouchableOpacity>
+      )}
 
-          {/* Toggle Button */}
+      {/* My Location FAB - shows above the sheet */}
+      <Animated.View
+        style={[
+          styles.myLocationFab,
+          {
+            bottom: sheetAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [collapsedH + spacing.md, expandedH + spacing.md],
+            }),
+          },
+        ]}
+        pointerEvents="box-none"
+      >
+        <TouchableOpacity
+          style={styles.fabButton}
+          onPress={handleMyLocation}
+          activeOpacity={0.8}
+          accessibilityLabel={t('home.myLocation') || 'My location'}
+          accessibilityRole="button"
+        >
+          <Ionicons name="navigate" size={22} color={colors.primary} />
+        </TouchableOpacity>
+      </Animated.View>
+
+      {/* Bottom Sheet */}
+      <Animated.View
+        style={[
+          styles.bottomSheet,
+          { height: sheetHeight },
+        ]}
+      >
+        {/* Drag Handle */}
+        <View {...panRef.current.panHandlers} style={styles.dragHandleArea}>
+          <TouchableOpacity
+            activeOpacity={0.9}
+            onPress={() => animateSheet(!isExpanded)}
+            style={styles.dragHandleTouchable}
+          >
+            <View style={styles.dragHandle} />
+          </TouchableOpacity>
+        </View>
+
+        {/* Collapsed content - Go Online button + status */}
+        <Animated.View
+          style={[styles.collapsedContent, { opacity: collapsedOpacity }]}
+          pointerEvents={isExpanded ? 'none' : 'auto'}
+        >
           <Pressable
             style={({ pressed }) => [
-              styles.toggleCard,
-              isOnline && styles.toggleCardOnline,
+              styles.collapsedToggle,
+              isOnline && styles.collapsedToggleOnline,
               loading && styles.toggleCardDisabled,
               Platform.OS === 'ios' && pressed && { opacity: 0.9 },
             ]}
@@ -311,67 +535,128 @@ export default function HomeScreen({ navigation }) {
             android_ripple={{ color: 'rgba(255,255,255,0.25)', borderless: false }}
             accessibilityRole="button"
             accessibilityLabel={isOnline ? t('home.goOffline') : t('home.goOnline')}
-            accessibilityState={{ disabled: loading }}
           >
             {loading ? (
-              <View style={styles.toggleContent}>
-                <ActivityIndicator color={colors.primaryForeground} size="large" />
-                <Text style={styles.toggleText}>{t('common.loading')}</Text>
-              </View>
+              <ActivityIndicator color={colors.primaryForeground} size="small" />
             ) : (
-              <View style={styles.toggleContent}>
-                <View style={styles.toggleIconBadge}>
+              <>
+                <View style={styles.collapsedToggleIcon}>
                   <Ionicons
                     name={isOnline ? 'pause' : 'play'}
-                    size={28}
+                    size={22}
                     color={colors.primaryForeground}
                   />
                 </View>
-                <View style={styles.toggleTextContainer}>
-                  <Text style={styles.toggleTitle} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
-                    {isOnline ? t('home.goOffline') : t('home.goOnline')}
-                  </Text>
-                  <Text style={styles.toggleSubtitle} numberOfLines={1}>
-                    {isOnline ? t('home.waitingForRides') : t('home.noActiveRides')}
-                  </Text>
-                </View>
-                <Ionicons name="chevron-forward" size={24} color="rgba(255,255,255,0.7)" />
-              </View>
+                <Text style={styles.collapsedToggleText} numberOfLines={1}>
+                  {isOnline ? t('home.goOffline') : t('home.goOnline')}
+                </Text>
+              </>
             )}
           </Pressable>
+        </Animated.View>
 
-          {/* Quick Actions */}
-          <View style={styles.actionsSection}>
-            <TouchableOpacity
-              style={styles.actionCard}
-              onPress={() => navigation.navigate('Rides')}
-            >
-              <View style={styles.actionIcon}>
-                <Ionicons name="car" size={22} color={colors.foreground} />
+        {/* Expanded content */}
+        <Animated.View
+          style={[styles.expandedContent, { opacity: contentOpacity }]}
+          pointerEvents={isExpanded ? 'auto' : 'none'}
+        >
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={[styles.bottomContent, { paddingBottom: bottomPadding + spacing.md }]}
+            scrollEnabled={isExpanded}
+            nestedScrollEnabled
+          >
+            {/* Quick Stats */}
+            <View style={styles.statsSection}>
+              <Text style={styles.sectionTitle} numberOfLines={1}>{t('home.todayStats') || 'TODAY\'S STATS'}</Text>
+              <View style={styles.statsGrid}>
+                {quickStats.map((stat) => (
+                  <View key={stat.id} style={styles.statCard}>
+                    <View style={[styles.statIcon, { backgroundColor: `${stat.color}15` }]}>
+                      <Ionicons name={stat.icon} size={22} color={stat.color} />
+                    </View>
+                    <Text style={styles.statValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{stat.value}</Text>
+                    <Text style={styles.statLabel} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.8}>{stat.label}</Text>
+                  </View>
+                ))}
               </View>
-              <View style={styles.actionContent}>
-                <Text style={styles.actionTitle} numberOfLines={1}>{t('rides.myRides')}</Text>
-                <Text style={styles.actionSubtitle} numberOfLines={1}>{t('rides.viewAll') || 'View all rides'}</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={colors.mutedForeground} />
-            </TouchableOpacity>
+            </View>
 
-            <TouchableOpacity
-              style={styles.actionCard}
-              onPress={() => navigation.navigate('Earnings')}
+            {/* Toggle Button */}
+            <Pressable
+              style={({ pressed }) => [
+                styles.toggleCard,
+                isOnline && styles.toggleCardOnline,
+                loading && styles.toggleCardDisabled,
+                Platform.OS === 'ios' && pressed && { opacity: 0.9 },
+              ]}
+              onPress={handleToggleOnline}
+              disabled={loading}
+              android_ripple={{ color: 'rgba(255,255,255,0.25)', borderless: false }}
+              accessibilityRole="button"
+              accessibilityLabel={isOnline ? t('home.goOffline') : t('home.goOnline')}
+              accessibilityState={{ disabled: loading }}
             >
-              <View style={styles.actionIcon}>
-                <Ionicons name="trending-up" size={22} color={colors.foreground} />
-              </View>
-              <View style={styles.actionContent}>
-                <Text style={styles.actionTitle} numberOfLines={1}>{t('earnings.title')}</Text>
-                <Text style={styles.actionSubtitle} numberOfLines={1}>{t('earnings.viewDetails') || 'View details'}</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={colors.mutedForeground} />
-            </TouchableOpacity>
-          </View>
-        </ScrollView>
-      </View>
+              {loading ? (
+                <View style={styles.toggleContent}>
+                  <ActivityIndicator color={colors.primaryForeground} size="large" />
+                  <Text style={styles.toggleText}>{t('common.loading')}</Text>
+                </View>
+              ) : (
+                <View style={styles.toggleContent}>
+                  <View style={styles.toggleIconBadge}>
+                    <Ionicons
+                      name={isOnline ? 'pause' : 'play'}
+                      size={28}
+                      color={colors.primaryForeground}
+                    />
+                  </View>
+                  <View style={styles.toggleTextContainer}>
+                    <Text style={styles.toggleTitle} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+                      {isOnline ? t('home.goOffline') : t('home.goOnline')}
+                    </Text>
+                    <Text style={styles.toggleSubtitle} numberOfLines={1}>
+                      {isOnline ? t('home.waitingForRides') : t('home.noActiveRides')}
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={24} color="rgba(255,255,255,0.7)" />
+                </View>
+              )}
+            </Pressable>
+
+            {/* Quick Actions */}
+            <View style={styles.actionsSection}>
+              <TouchableOpacity
+                style={styles.actionCard}
+                onPress={() => navigation.navigate('Rides')}
+              >
+                <View style={styles.actionIcon}>
+                  <Ionicons name="car" size={22} color={colors.foreground} />
+                </View>
+                <View style={styles.actionContent}>
+                  <Text style={styles.actionTitle} numberOfLines={1}>{t('rides.myRides')}</Text>
+                  <Text style={styles.actionSubtitle} numberOfLines={1}>{t('rides.viewAll') || 'View all rides'}</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color={colors.mutedForeground} />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.actionCard}
+                onPress={() => navigation.navigate('Earnings')}
+              >
+                <View style={styles.actionIcon}>
+                  <Ionicons name="trending-up" size={22} color={colors.foreground} />
+                </View>
+                <View style={styles.actionContent}>
+                  <Text style={styles.actionTitle} numberOfLines={1}>{t('earnings.title')}</Text>
+                  <Text style={styles.actionSubtitle} numberOfLines={1}>{t('earnings.viewDetails') || 'View details'}</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color={colors.mutedForeground} />
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </Animated.View>
+      </Animated.View>
 
       {/* New Ride Request Modal */}
       <Modal
@@ -382,7 +667,7 @@ export default function HomeScreen({ navigation }) {
       >
         <View style={styles.modalOverlay}>
           <View style={[styles.rideRequestModal, { paddingBottom: insets.bottom + spacing['3xl'] }]}>
-            <View style={styles.dragHandle} />
+            <View style={styles.modalDragHandle} />
             <View style={styles.modalHeader}>
               <View style={styles.modalIconBadge}>
                 <Ionicons name="car" size={28} color={colors.primaryForeground} />
@@ -429,6 +714,18 @@ export default function HomeScreen({ navigation }) {
                   </View>
                 </View>
 
+                {/* Payment Method */}
+                <View style={styles.paymentMethodRow}>
+                  <Ionicons
+                    name={newRideRequest.paymentMethod === 'cash' ? 'cash-outline' : 'card-outline'}
+                    size={18}
+                    color={colors.mutedForeground}
+                  />
+                  <Text style={styles.paymentMethodText} numberOfLines={1}>
+                    {t(`rides.paymentMethod_${newRideRequest.paymentMethod || 'cash'}`)}
+                  </Text>
+                </View>
+
                 <View style={styles.rideInfoGrid}>
                   <View style={styles.rideInfoItem}>
                     <Text style={styles.rideInfoLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{t('rides.distance')}</Text>
@@ -438,9 +735,22 @@ export default function HomeScreen({ navigation }) {
                   </View>
                   <View style={styles.rideInfoItem}>
                     <Text style={styles.rideInfoLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{t('rides.estimatedFare')}</Text>
-                    <Text style={[styles.rideInfoValue, styles.fareHighlight]} numberOfLines={1}>
+                    <Text style={styles.rideInfoValue} numberOfLines={1}>
                       {newRideRequest.quote?.totalPrice?.toFixed(2) || '0.00'} ₾
                     </Text>
+                  </View>
+                </View>
+
+                {/* Earnings Breakdown */}
+                <View style={styles.earningsBreakdown}>
+                  <View style={styles.earningsRow}>
+                    <Text style={styles.earningsLabel}>{t('rides.commission')} ({newRideRequest.commissionPercent || 0}%)</Text>
+                    <Text style={styles.earningsCommission}>-{(newRideRequest.commissionAmount || 0).toFixed(2)} ₾</Text>
+                  </View>
+                  <View style={styles.earningsDivider} />
+                  <View style={styles.earningsRow}>
+                    <Text style={styles.yourEarningsLabel}>{t('rides.yourEarnings')}</Text>
+                    <Text style={styles.yourEarningsValue}>{(newRideRequest.driverEarnings || 0).toFixed(2)} ₾</Text>
                   </View>
                 </View>
               </View>
@@ -488,19 +798,14 @@ const createStyles = (typography) => StyleSheet.create({
     flex: 1,
     backgroundColor: colors.muted,
   },
-  mapContainer: {
-    height: Math.max(SCREEN_HEIGHT * 0.35, 240),
-    minHeight: 240,
-  },
-  map: {
-    flex: 1,
-  },
+  // Header
   headerOverlay: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     paddingHorizontal: spacing.lg,
+    zIndex: 10,
   },
   welcomeSection: {
     flexDirection: 'row',
@@ -572,17 +877,120 @@ const createStyles = (typography) => StyleSheet.create({
     color: '#fff',
     fontFamily: 'monospace',
   },
-  bottomPanel: {
+
+  // Ride detail banner (built-in nav)
+  rideDetailBanner: {
+    position: 'absolute',
+    left: spacing.lg,
+    right: spacing.lg,
+    zIndex: 10,
+  },
+  rideDetailBannerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    borderRadius: radius.lg,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    gap: spacing.sm,
+    ...shadows.md,
+  },
+  rideDetailBannerText: {
+    ...typography.bodySmall,
+    fontWeight: '600',
+    color: colors.primaryForeground,
     flex: 1,
-    backgroundColor: colors.muted,
+  },
+
+  // My Location FAB
+  myLocationFab: {
+    position: 'absolute',
+    right: spacing.lg,
+    zIndex: 5,
+  },
+  fabButton: {
+    width: 48,
+    height: 48,
+    borderRadius: radius.full,
+    backgroundColor: colors.background,
+    justifyContent: 'center',
+    alignItems: 'center',
+    ...shadows.md,
+  },
+
+  // Bottom Sheet
+  bottomSheet: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: colors.background,
     borderTopLeftRadius: radius['2xl'],
     borderTopRightRadius: radius['2xl'],
-    marginTop: -radius['2xl'],
     ...shadows.lg,
+    overflow: 'hidden',
+  },
+  dragHandleArea: {
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.xs,
+    zIndex: 10,
+  },
+  dragHandleTouchable: {
+    alignItems: 'center',
+    paddingVertical: spacing.xs,
+  },
+  dragHandle: {
+    width: 36,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: colors.border,
+  },
+
+  // Collapsed view
+  collapsedContent: {
+    position: 'absolute',
+    top: 28,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.xs,
+  },
+  collapsedToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primary,
+    borderRadius: radius.lg,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.xl,
+    gap: spacing.sm,
+    ...shadows.md,
+  },
+  collapsedToggleOnline: {
+    backgroundColor: colors.success,
+  },
+  collapsedToggleIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.md,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  collapsedToggleText: {
+    ...typography.bodyMedium,
+    fontWeight: '700',
+    color: colors.primaryForeground,
+  },
+
+  // Expanded view
+  expandedContent: {
+    flex: 1,
   },
   bottomContent: {
     padding: spacing.lg,
-    paddingBottom: spacing['3xl'],
+    paddingTop: spacing.xs,
   },
   statsSection: {
     marginBottom: spacing.xl,
@@ -600,11 +1008,10 @@ const createStyles = (typography) => StyleSheet.create({
   },
   statCard: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: colors.muted,
     borderRadius: radius.lg,
     padding: spacing.md,
     alignItems: 'center',
-    ...shadows.sm,
   },
   statIcon: {
     width: 44,
@@ -676,16 +1083,15 @@ const createStyles = (typography) => StyleSheet.create({
   actionCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.background,
+    backgroundColor: colors.muted,
     borderRadius: radius.lg,
     padding: spacing.lg,
-    ...shadows.sm,
   },
   actionIcon: {
     width: 44,
     height: 44,
     borderRadius: radius.md,
-    backgroundColor: colors.muted,
+    backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: spacing.md,
@@ -703,6 +1109,8 @@ const createStyles = (typography) => StyleSheet.create({
     color: colors.mutedForeground,
     marginTop: 2,
   },
+
+  // Modal styles
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -715,7 +1123,7 @@ const createStyles = (typography) => StyleSheet.create({
     padding: spacing.xl,
     paddingBottom: spacing['3xl'],
   },
-  dragHandle: {
+  modalDragHandle: {
     width: 36,
     height: 5,
     borderRadius: 2.5,
@@ -806,9 +1214,55 @@ const createStyles = (typography) => StyleSheet.create({
     fontWeight: '600',
     color: colors.foreground,
   },
-  fareHighlight: {
-    color: colors.success,
+  paymentMethodRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    backgroundColor: colors.muted,
+    borderRadius: radius.md,
+    marginBottom: spacing.sm,
+  },
+  paymentMethodText: {
+    ...typography.bodySmall,
+    color: colors.mutedForeground,
+    fontWeight: '500',
+  },
+  earningsBreakdown: {
+    marginTop: spacing.sm,
+    backgroundColor: colors.muted,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+  },
+  earningsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  earningsLabel: {
+    ...typography.captionSmall,
+    color: colors.mutedForeground,
+  },
+  earningsCommission: {
+    ...typography.bodySmall,
+    color: colors.destructive,
+    fontWeight: '500',
+  },
+  earningsDivider: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginVertical: spacing.xs,
+  },
+  yourEarningsLabel: {
+    ...typography.bodySmall,
+    fontWeight: '600',
+    color: colors.foreground,
+  },
+  yourEarningsValue: {
+    ...typography.bodyMedium,
     fontWeight: '700',
+    color: colors.success,
   },
   modalButtons: {
     flexDirection: 'row',

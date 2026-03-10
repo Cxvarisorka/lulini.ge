@@ -45,6 +45,7 @@
     "title": "Lulini Driver",
     "goOnline": "Go Online",
     "goOffline": "Go Offline",
+    "cannotGoOfflineActiveRide": "You cannot go offline while you have an active ride. Please complete or cancel the ride first.",
     "youAreOnline": "You're Online",
     "youAreOffline": "You're Offline",
     "waitingForRides": "Waiting for ride requests...",
@@ -71,6 +72,13 @@
     "duration": "Duration",
     "estimatedFare": "Estimated Fare",
     "fare": "Fare",
+    "commission": "Commission",
+    "yourEarnings": "Your Earnings",
+    "paymentMethod_cash": "Cash Payment",
+    "paymentMethod_card": "Card Payment",
+    "paymentMethod_saved_card": "Card Payment",
+    "paymentMethod_apple_pay": "Apple Pay",
+    "paymentMethod_google_pay": "Google Pay",
     "active": "Active Rides",
     "myRides": "My Rides",
     "activeTab": "Active",
@@ -154,7 +162,9 @@
     "cancelledBy": "Cancelled by",
     "waitingFee": "Waiting Fee",
     "km": "km",
-    "min": "min"
+    "min": "min",
+    "tooFarFromPickup": "You are {{distance}}m from the pickup. Get closer to confirm arrival.",
+    "tooFarFromDropoff": "You are {{distance}}m from the dropoff. Get closer to complete the ride."
   },
   "earnings": {
     "title": "Earnings",

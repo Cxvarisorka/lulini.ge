@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import {
   View,
   Text,
+  Image,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
@@ -97,9 +98,13 @@ export default function ProfileScreen({ navigation }) {
         {/* Profile Header */}
         <View style={[styles.header, { paddingTop: insets.top + spacing.xl }]}>
           <View style={styles.avatarContainer}>
-            <View style={styles.avatarPlaceholder}>
-              <Text style={styles.avatarText}>{getInitials()}</Text>
-            </View>
+            {user?.profileImage ? (
+              <Image source={{ uri: user.profileImage }} style={styles.avatarImage} />
+            ) : (
+              <View style={styles.avatarPlaceholder}>
+                <Text style={styles.avatarText}>{getInitials()}</Text>
+              </View>
+            )}
             <View style={styles.onlineBadge}>
               <Ionicons name="checkmark" size={12} color={colors.primaryForeground} />
             </View>
@@ -240,6 +245,11 @@ const createStyles = (typography) => StyleSheet.create({
   avatarContainer: {
     position: 'relative',
     marginBottom: spacing.lg,
+  },
+  avatarImage: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
   },
   avatarPlaceholder: {
     width: 100,

@@ -6,6 +6,7 @@ export default {
     orientation: 'portrait',
     icon: './assets/icon.png',
     userInterfaceStyle: 'light',
+    owner: "cxvari",
     // newArchEnabled requires development build, disable for Expo Go
     // newArchEnabled: true,
     scheme: 'lulini-driver',
@@ -18,7 +19,7 @@ export default {
       policy: 'appVersion',
     },
     updates: {
-      url: 'https://u.expo.dev/d95167ad-aa6e-4509-9721-4eb2cc99c70c',
+      url: 'https://u.expo.dev/87195f65-8a3e-4340-8844-5a2d547a66e2',
       fallbackToCacheTimeout: 0,
       enabled: true,
     },
@@ -38,9 +39,9 @@ export default {
       // Only configure Google Maps SDK on iOS if a valid API key is provided.
       // An empty key causes the Google Maps iOS SDK to crash during
       // [GMSServices provideAPIKey:] in AppDelegate.
-      ...(process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ? {
+      ...(process.env.GOOGLE_MAPS_API_KEY ? {
         config: {
-          googleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY
+          googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY
         }
       } : {})
     },
@@ -51,6 +52,11 @@ export default {
       },
       edgeToEdgeEnabled: true,
       package: 'com.lulini.driver',
+      config: {
+        googleMaps: {
+          apiKey: process.env.GOOGLE_MAPS_API_KEY || ""
+        }
+      },
       permissions: [
         'ACCESS_COARSE_LOCATION',
         'ACCESS_FINE_LOCATION',
@@ -89,7 +95,7 @@ export default {
     ],
     extra: {
       eas: {
-        projectId: 'd95167ad-aa6e-4509-9721-4eb2cc99c70c'
+        projectId: '87195f65-8a3e-4340-8844-5a2d547a66e2'
       }
     }
   }

@@ -14,6 +14,7 @@ import MapView from '../components/map/MapViewWrapper';
 import Marker from '../components/map/MarkerWrapper';
 import Polyline from '../components/map/PolylineWrapper';
 import { markerImages } from '../components/map/markerImages';
+import { mapStyle } from '../components/map/mapStyle';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -25,6 +26,9 @@ import { useSocket } from '../context/SocketContext';
 import { useMap } from '../context/MapContext';
 import { useLocation } from '../context/LocationContext';
 import { colors, shadows, radius, useTypography } from '../theme/colors';
+import { haversineKm } from '../utils/distance';
+
+const PROXIMITY_THRESHOLD_KM = 0.5; // 500m — must be within this to click arrival/complete buttons
 
 const STATUS_COLORS = {
   pending: colors.status.pending,
@@ -53,6 +57,7 @@ export default function RideDetailScreen({ navigation, route }) {
   const [waitingTimeLeft, setWaitingTimeLeft] = useState(null);
   const [waitingFee, setWaitingFee] = useState(0);
   const [polylineCoords, setPolylineCoords] = useState([]);
+  const [distanceToTarget, setDistanceToTarget] = useState(null); // km
   const cancelledHandledRef = useRef(false);
   const mapRef = useRef(null);
   const hasFitted = useRef(false);
@@ -87,6 +92,7 @@ export default function RideDetailScreen({ navigation, route }) {
   const fitMapToMarkers = useCallback(() => {
     if (hasFitted.current || !mapRef.current || !ride) return;
     const coords = [];
+    if (location) coords.push({ latitude: location.latitude, longitude: location.longitude });
     if (ride.pickup?.lat) coords.push({ latitude: ride.pickup.lat, longitude: ride.pickup.lng });
     if (ride.dropoff?.lat) coords.push({ latitude: ride.dropoff.lat, longitude: ride.dropoff.lng });
     ride.stops?.forEach(s => {
@@ -99,7 +105,7 @@ export default function RideDetailScreen({ navigation, route }) {
         animated: false,
       });
     }
-  }, [ride]);
+  }, [ride, location]);
 
   // Listen for passenger cancelling this ride
   useEffect(() => {
@@ -146,6 +152,29 @@ export default function RideDetailScreen({ navigation, route }) {
     const interval = setInterval(updateWaitingTime, 1000);
     return () => clearInterval(interval);
   }, [ride?.status, ride?.waitingExpiresAt, ride?.arrivalTime]);
+
+  // Calculate distance to target (pickup for accepted, dropoff for in_progress)
+  useEffect(() => {
+    if (!ride || !location) {
+      setDistanceToTarget(null);
+      return;
+    }
+    let target = null;
+    if (ride.status === 'accepted' && ride.pickup?.lat) {
+      target = ride.pickup;
+    } else if (ride.status === 'in_progress' && ride.dropoff?.lat) {
+      target = ride.dropoff;
+    }
+    if (!target) {
+      setDistanceToTarget(null);
+      return;
+    }
+    const dist = haversineKm(location.latitude, location.longitude, target.lat, target.lng);
+    setDistanceToTarget(dist);
+  }, [ride?.status, ride?.pickup?.lat, ride?.dropoff?.lat, location?.latitude, location?.longitude]);
+
+  const isNearTarget = distanceToTarget !== null && distanceToTarget <= PROXIMITY_THRESHOLD_KM;
+  const distanceMeters = distanceToTarget !== null ? Math.round(distanceToTarget * 1000) : null;
 
   const loadRideDetails = async () => {
     try {
@@ -294,6 +323,7 @@ export default function RideDetailScreen({ navigation, route }) {
           <MapView
             ref={mapRef}
             style={styles.map}
+            customMapStyle={mapStyle}
             initialRegion={initialRegion}
             onMapReady={fitMapToMarkers}
             onLayout={fitMapToMarkers}
@@ -302,6 +332,17 @@ export default function RideDetailScreen({ navigation, route }) {
             pitchEnabled={false}
             rotateEnabled={false}
           >
+            {/* Driver location */}
+            {location && !isReadOnly && (
+              <Marker
+                id="driver"
+                coordinate={{ latitude: location.latitude, longitude: location.longitude }}
+                image={markerImages.carAssigned}
+                anchor={{ x: 0.5, y: 0.5 }}
+                tracksViewChanges={false}
+                zIndex={11}
+              />
+            )}
             {ride.pickup?.lat && (
               <Marker
                 id="pickup"
@@ -621,23 +662,30 @@ export default function RideDetailScreen({ navigation, route }) {
         {!isReadOnly && (
           <View style={styles.actionButtons}>
             {ride.status === 'accepted' && (
-              <TouchableOpacity
-                style={[styles.actionButton, styles.arrivedButton]}
-                onPress={handleNotifyArrival}
-                disabled={actionLoading}
-                accessibilityRole="button"
-                accessibilityLabel={t('rides.imHere')}
-                accessibilityState={{ disabled: actionLoading }}
-              >
-                {actionLoading ? (
-                  <ActivityIndicator color={colors.background} />
-                ) : (
-                  <>
-                    <Ionicons name="location-sharp" size={20} color={colors.background} />
-                    <Text style={styles.actionButtonText}>{t('rides.imHere')}</Text>
-                  </>
+              <>
+                <TouchableOpacity
+                  style={[styles.actionButton, styles.arrivedButton, !isNearTarget && styles.actionButtonDisabled]}
+                  onPress={handleNotifyArrival}
+                  disabled={actionLoading || !isNearTarget}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('rides.imHere')}
+                  accessibilityState={{ disabled: actionLoading || !isNearTarget }}
+                >
+                  {actionLoading ? (
+                    <ActivityIndicator color={colors.background} />
+                  ) : (
+                    <>
+                      <Ionicons name="location-sharp" size={20} color={colors.background} />
+                      <Text style={styles.actionButtonText}>{t('rides.imHere')}</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+                {!isNearTarget && distanceMeters !== null && (
+                  <Text style={styles.proximityHint}>
+                    {t('rides.tooFarFromPickup', { distance: distanceMeters })}
+                  </Text>
                 )}
-              </TouchableOpacity>
+              </>
             )}
             {ride.status === 'driver_arrived' && (
               <TouchableOpacity
@@ -659,23 +707,30 @@ export default function RideDetailScreen({ navigation, route }) {
               </TouchableOpacity>
             )}
             {ride.status === 'in_progress' && (
-              <TouchableOpacity
-                style={[styles.actionButton, styles.completeButton]}
-                onPress={handleCompleteRide}
-                disabled={actionLoading}
-                accessibilityRole="button"
-                accessibilityLabel={t('rides.completeRide')}
-                accessibilityState={{ disabled: actionLoading }}
-              >
-                {actionLoading ? (
-                  <ActivityIndicator color={colors.background} />
-                ) : (
-                  <>
-                    <Ionicons name="checkmark" size={20} color={colors.background} />
-                    <Text style={styles.actionButtonText}>{t('rides.completeRide')}</Text>
-                  </>
+              <>
+                <TouchableOpacity
+                  style={[styles.actionButton, styles.completeButton, !isNearTarget && styles.actionButtonDisabled]}
+                  onPress={handleCompleteRide}
+                  disabled={actionLoading || !isNearTarget}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('rides.completeRide')}
+                  accessibilityState={{ disabled: actionLoading || !isNearTarget }}
+                >
+                  {actionLoading ? (
+                    <ActivityIndicator color={colors.background} />
+                  ) : (
+                    <>
+                      <Ionicons name="checkmark" size={20} color={colors.background} />
+                      <Text style={styles.actionButtonText}>{t('rides.completeRide')}</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+                {!isNearTarget && distanceMeters !== null && (
+                  <Text style={styles.proximityHint}>
+                    {t('rides.tooFarFromDropoff', { distance: distanceMeters })}
+                  </Text>
                 )}
-              </TouchableOpacity>
+              </>
             )}
           </View>
         )}
@@ -1082,5 +1137,15 @@ const createStyles = (typography) => StyleSheet.create({
     ...typography.button,
     color: colors.background,
     marginLeft: 8,
+  },
+  actionButtonDisabled: {
+    opacity: 0.4,
+  },
+  proximityHint: {
+    ...typography.captionSmall,
+    color: colors.mutedForeground,
+    textAlign: 'center',
+    marginTop: -4,
+    marginBottom: 12,
   },
 });

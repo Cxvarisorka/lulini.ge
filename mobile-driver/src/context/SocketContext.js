@@ -65,7 +65,7 @@ export const SocketProvider = ({ children }) => {
   useEffect(() => {
     if (isAuthenticated && userId) {
       // Skip reconnection if userId hasn't actually changed
-      if (userIdRef.current === userId && socketRef.current?.connected) {
+      if (userIdRef.current === userId && socketRef.current) {
         return;
       }
       userIdRef.current = userId;
@@ -176,6 +176,7 @@ export const SocketProvider = ({ children }) => {
 
       // [C2 FIX] Don't fall back to stale closure token
       const socketInstance = io(SOCKET_URL, {
+        query: { appType: 'driver' },
         auth: async (cb) => {
           // Use a function so reconnections always get a fresh token
           const freshToken = await SecureStore.getItemAsync('token');
@@ -277,9 +278,23 @@ export const SocketProvider = ({ children }) => {
         } else {
           notifiedRideIdsRef.current.clear();
         }
-        // Clear ride request modal if it matches (or if no ID to compare)
+        // Clear ride request modal if it matches (or if no ID to compare) and notify driver
         setNewRideRequest((current) => {
-          if (!current || !rideId || current._id === rideId) return null;
+          if (!current || !rideId || current._id === rideId) {
+            if (current) {
+              // Show notification so driver knows the ride was cancelled
+              Notifications.scheduleNotificationAsync({
+                content: {
+                  title: 'Ride Cancelled',
+                  body: 'The passenger cancelled the ride request.',
+                  data: { rideId: rideId || current?._id, type: 'ride_cancelled', _local: true },
+                  sound: true,
+                },
+                trigger: null,
+              }).catch(() => {});
+            }
+            return null;
+          }
           return current;
         });
       });
@@ -287,9 +302,19 @@ export const SocketProvider = ({ children }) => {
       // Listen for ride unavailable (accepted by another driver or cancelled by user)
       socketInstance.on('ride:unavailable', (data) => {
         notifiedRideIdsRef.current.delete(data.rideId);
-        // Clear the ride request if it matches
+        // Clear the ride request if it matches and notify the driver
         setNewRideRequest((current) => {
           if (current && current._id === data.rideId) {
+            // Show notification so driver knows the ride is no longer available
+            Notifications.scheduleNotificationAsync({
+              content: {
+                title: 'Ride Unavailable',
+                body: 'The ride request is no longer available.',
+                data: { rideId: data.rideId, type: 'ride_unavailable', _local: true },
+                sound: true,
+              },
+              trigger: null,
+            }).catch(() => {});
             return null;
           }
           return current;

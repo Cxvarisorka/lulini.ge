@@ -6,6 +6,8 @@
  * Metro automatically selects the right density variant.
  */
 export const markerImages = {
+  car: require('../../../assets/markers/marker-car.png'),
+  carAssigned: require('../../../assets/markers/marker-car-assigned.png'),
   pickup: require('../../../assets/markers/marker-pickup.png'),
   dropoff: require('../../../assets/markers/marker-dropoff.png'),
   stopSmall: [
