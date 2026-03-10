@@ -5,6 +5,10 @@ const Settings = require('../models/settings.model');
 const AppError = require('../utils/AppError');
 const catchAsync = require('../utils/catchAsync');
 const pushService = require('../services/pushNotification.service');
+const { haversineKm } = require('../utils/distance');
+
+// Proximity threshold: driver must be within this distance to confirm arrival/completion
+const ARRIVAL_PROXIMITY_KM = 0.5; // 500 meters
 
 // ── Vehicle type hierarchy ──
 // Higher-tier drivers can serve lower-tier ride requests:
@@ -151,9 +155,12 @@ const createRide = catchAsync(async (req, res, next) => {
             // Road distance is typically 1.2-1.8x straight-line; use 2.5x as generous upper bound
             const maxRoadDist = straightLineDist * 2.5;
 
-            // Use dynamic pricing config for validation bounds
-            const minFare = Math.max(pricingConfig.basePrice * 0.5, 1);
-            const maxFare = pricingConfig.basePrice + (maxRoadDist * pricingConfig.kmPrice * 4);
+            // Use per-category pricing config for validation bounds
+            const catPricing = pricingConfig.categories?.[vehicleType] || pricingConfig.categories?.economy;
+            const catBase = catPricing?.basePrice ?? 5;
+            const catKm = catPricing?.kmPrice ?? 1.5;
+            const minFare = Math.max(catBase * 0.5, 1);
+            const maxFare = catBase + (maxRoadDist * catKm * 4);
 
             if (price < minFare) {
                 return next(new AppError('Quote price is below minimum fare', 400));
@@ -220,7 +227,15 @@ const createRide = catchAsync(async (req, res, next) => {
         for (const type of eligibleTypes) {
             broadcast = broadcast.to(`drivers:${type}`);
         }
-        broadcast.emit('ride:request', ride);
+        // Attach commission info so drivers see their earnings breakdown
+        const rideData = ride.toObject();
+        const commissionPercent = pricingConfig.commissionPercent || 15;
+        const totalPrice = rideData.quote?.totalPrice || 0;
+        const commissionAmount = Math.round(totalPrice * (commissionPercent / 100) * 100) / 100;
+        rideData.commissionPercent = commissionPercent;
+        rideData.commissionAmount = commissionAmount;
+        rideData.driverEarnings = Math.round((totalPrice - commissionAmount) * 100) / 100;
+        broadcast.emit('ride:request', rideData);
     }
 
     const responseBody = {
@@ -260,6 +275,137 @@ const createRide = catchAsync(async (req, res, next) => {
             }
         } catch (err) {
             console.error('Push error (createRide):', err.message);
+        }
+    });
+});
+
+// @desc    Create a ride request on behalf of a caller (admin/dispatcher)
+// @route   POST /api/rides/admin
+// @access  Private/Admin
+const adminCreateRide = catchAsync(async (req, res, next) => {
+    const {
+        pickup,
+        dropoff,
+        stops,
+        vehicleType,
+        passengerName,
+        passengerPhone,
+        notes,
+        price,
+        routeInfo
+    } = req.body;
+
+    if (!pickup || !dropoff || !vehicleType || !passengerName) {
+        return next(new AppError('Pickup, dropoff, vehicle type, and passenger name are required', 400));
+    }
+
+    if (!price || price <= 0) {
+        return next(new AppError('Price is required', 400));
+    }
+
+    // Use real route info from Google Directions API if provided, otherwise estimate
+    let distance, distanceText, duration, durationText;
+    if (routeInfo && routeInfo.distance) {
+        distance = Math.round(routeInfo.distance * 1000); // km to meters
+        distanceText = routeInfo.distanceText;
+        duration = routeInfo.duration * 60; // minutes to seconds
+        durationText = routeInfo.durationText;
+    } else {
+        const R = 6371;
+        const dLat = ((dropoff.lat - pickup.lat) * Math.PI) / 180;
+        const dLon = ((dropoff.lng - pickup.lng) * Math.PI) / 180;
+        const a = Math.sin(dLat / 2) ** 2 +
+            Math.cos((pickup.lat * Math.PI) / 180) * Math.cos((dropoff.lat * Math.PI) / 180) *
+            Math.sin(dLon / 2) ** 2;
+        const straightLineDist = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        distance = Math.round(straightLineDist * 1.4 * 1000);
+        distanceText = `${(distance / 1000).toFixed(1)} km`;
+        duration = Math.round(distance / 500 * 60);
+        durationText = `${Math.round(distance / 500)} min`;
+    }
+
+    const quote = {
+        distance,
+        distanceText,
+        duration,
+        durationText,
+        basePrice: price,
+        totalPrice: price
+    };
+
+    const validStops = Array.isArray(stops)
+        ? stops.filter(s => s && s.lat && s.lng && s.address).slice(0, 2)
+        : [];
+
+    const RIDE_EXPIRATION_MINUTES = 60;
+    const expiresAt = new Date(Date.now() + RIDE_EXPIRATION_MINUTES * 60 * 1000);
+
+    const ride = await Ride.create({
+        user: req.user.id,
+        pickup,
+        dropoff,
+        stops: validStops,
+        vehicleType,
+        quote,
+        passengerName,
+        passengerPhone: passengerPhone || '',
+        paymentMethod: 'cash',
+        notes: notes || null,
+        status: 'pending',
+        expiresAt,
+        createdByAdmin: true
+    });
+
+    await ride.populate('user', 'firstName lastName email phone');
+
+    // Broadcast to eligible driver rooms
+    const io = req.app.get('io');
+    if (io) {
+        const eligibleTypes = getEligibleDriverTypes(vehicleType);
+        let broadcast = io.to('admin');
+        for (const type of eligibleTypes) {
+            broadcast = broadcast.to(`drivers:${type}`);
+        }
+        // Attach commission info so drivers see their earnings breakdown
+        const rideData = ride.toObject();
+        const pricingConfig = await Settings.getPricing();
+        const commissionPercent = pricingConfig.commissionPercent || 15;
+        const totalPrice = rideData.quote?.totalPrice || 0;
+        const commissionAmount = Math.round(totalPrice * (commissionPercent / 100) * 100) / 100;
+        rideData.commissionPercent = commissionPercent;
+        rideData.commissionAmount = commissionAmount;
+        rideData.driverEarnings = Math.round((totalPrice - commissionAmount) * 100) / 100;
+        broadcast.emit('ride:request', rideData);
+    }
+
+    res.status(201).json({
+        success: true,
+        message: 'Ride created by admin',
+        data: { ride }
+    });
+
+    // Fire-and-forget push notifications
+    setImmediate(async () => {
+        try {
+            const onlineDrivers = await Driver.find({
+                status: 'online',
+                isActive: true,
+                isApproved: true,
+                'vehicle.type': { $in: getEligibleDriverTypes(vehicleType) }
+            }).select('user').lean();
+
+            const driverUserIds = onlineDrivers.map(d => d.user.toString());
+            if (driverUserIds.length > 0) {
+                await pushService.sendToUsers(
+                    driverUserIds,
+                    'ride_request_title',
+                    'ride_request_body',
+                    { rideId: ride._id.toString(), channelId: 'ride-requests' },
+                    { address: pickup?.address || '' }
+                );
+            }
+        } catch (err) {
+            console.error('Push error (adminCreateRide):', err.message);
         }
     });
 });
@@ -318,7 +464,7 @@ const acceptRide = catchAsync(async (req, res, next) => {
             path: 'driver',
             populate: {
                 path: 'user',
-                select: 'firstName lastName fullName phone'
+                select: 'firstName lastName fullName phone profileImage'
             }
         });
 
@@ -328,23 +474,25 @@ const acceptRide = catchAsync(async (req, res, next) => {
         // Notify user + admin (chained .to() deduplicates if socket is in both rooms)
         io.to(`user:${ride.user}`).to('admin').emit('ride:accepted', populatedRide);
 
-        // Broadcast ride:unavailable to ALL connected drivers via shared room.
+        // Broadcast ride:unavailable to ALL connected drivers EXCEPT the one who accepted.
         // This replaces the expensive Driver.find() query that scanned the full collection.
-        // The accepting driver's client ignores this since they already have the ride.
-        io.to('drivers:all').emit('ride:unavailable', { rideId: ride._id });
+        io.to('drivers:all').except(`driver:${req.user.id}`).emit('ride:unavailable', { rideId: ride._id });
     }
 
     // Push notification to passenger (only if they have no active socket)
-    const driverName = populatedRide.driver?.user
-        ? `${populatedRide.driver.user.firstName || ''} ${populatedRide.driver.user.lastName || ''}`.trim()
-        : '';
-    pushIfOffline(
-        io, ride.user.toString(),
-        'ride_accepted_title',
-        'ride_accepted_body',
-        { rideId: ride._id.toString() },
-        { driverName }
-    ).catch(err => console.error('Push error (acceptRide):', err.message));
+    // Skip for admin-created rides (ride.user = admin, not a real passenger)
+    if (!ride.createdByAdmin) {
+        const driverName = populatedRide.driver?.user
+            ? `${populatedRide.driver.user.firstName || ''} ${populatedRide.driver.user.lastName || ''}`.trim()
+            : '';
+        pushIfOffline(
+            io, ride.user.toString(),
+            'ride_accepted_title',
+            'ride_accepted_body',
+            { rideId: ride._id.toString() },
+            { driverName }
+        ).catch(err => console.error('Push error (acceptRide):', err.message));
+    }
 
     res.json({
         success: true,
@@ -361,6 +509,20 @@ const notifyArrival = catchAsync(async (req, res, next) => {
     const driver = await Driver.findOne({ user: req.user.id });
     if (!driver) {
         return next(new AppError('Driver profile not found', 404));
+    }
+
+    // Proximity check: driver must be near pickup location
+    const rideForCheck = await Ride.findOne({ _id: req.params.id, driver: driver._id }).select('pickup').lean();
+    if (rideForCheck && rideForCheck.pickup && driver.location && driver.location.coordinates) {
+        const [driverLng, driverLat] = driver.location.coordinates;
+        const distKm = haversineKm(driverLat, driverLng, rideForCheck.pickup.lat, rideForCheck.pickup.lng);
+        if (distKm > ARRIVAL_PROXIMITY_KM) {
+            const distMeters = Math.round(distKm * 1000);
+            return next(new AppError(
+                `You are ${distMeters}m from the pickup location. Please get closer (within ${ARRIVAL_PROXIMITY_KM * 1000}m) before confirming arrival.`,
+                400
+            ));
+        }
     }
 
     // Atomic update: only transitions accepted → driver_arrived for the assigned driver
@@ -400,7 +562,7 @@ const notifyArrival = catchAsync(async (req, res, next) => {
             path: 'driver',
             populate: {
                 path: 'user',
-                select: 'firstName lastName fullName phone'
+                select: 'firstName lastName fullName phone profileImage'
             }
         });
 
@@ -411,12 +573,15 @@ const notifyArrival = catchAsync(async (req, res, next) => {
     }
 
     // Push notification to passenger (only if they have no active socket)
-    pushIfOffline(
-        io, ride.user.toString(),
-        'ride_arrived_title',
-        'ride_arrived_body',
-        { rideId: ride._id.toString() }
-    ).catch(err => console.error('Push error (notifyArrival):', err.message));
+    // Skip for admin-created rides (ride.user = admin, not a real passenger)
+    if (!ride.createdByAdmin) {
+        pushIfOffline(
+            io, ride.user.toString(),
+            'ride_arrived_title',
+            'ride_arrived_body',
+            { rideId: ride._id.toString() }
+        ).catch(err => console.error('Push error (notifyArrival):', err.message));
+    }
 
     res.json({
         success: true,
@@ -493,7 +658,7 @@ const startRide = catchAsync(async (req, res, next) => {
             path: 'driver',
             populate: {
                 path: 'user',
-                select: 'firstName lastName fullName phone'
+                select: 'firstName lastName fullName phone profileImage'
             }
         });
 
@@ -504,12 +669,15 @@ const startRide = catchAsync(async (req, res, next) => {
     }
 
     // Push notification to passenger (only if they have no active socket)
-    pushIfOffline(
-        io, ride.user.toString(),
-        'ride_started_title',
-        'ride_started_body',
-        { rideId: ride._id.toString() }
-    ).catch(err => console.error('Push error (startRide):', err.message));
+    // Skip for admin-created rides (ride.user = admin, not a real passenger)
+    if (!ride.createdByAdmin) {
+        pushIfOffline(
+            io, ride.user.toString(),
+            'ride_started_title',
+            'ride_started_body',
+            { rideId: ride._id.toString() }
+        ).catch(err => console.error('Push error (startRide):', err.message));
+    }
 
     res.json({
         success: true,
@@ -528,6 +696,20 @@ const completeRide = catchAsync(async (req, res, next) => {
     const driver = await Driver.findOne({ user: req.user.id });
     if (!driver) {
         return next(new AppError('Driver profile not found', 404));
+    }
+
+    // Proximity check: driver must be near dropoff location
+    const rideForCheck = await Ride.findOne({ _id: req.params.id, driver: driver._id }).select('dropoff').lean();
+    if (rideForCheck && rideForCheck.dropoff && driver.location && driver.location.coordinates) {
+        const [driverLng, driverLat] = driver.location.coordinates;
+        const distKm = haversineKm(driverLat, driverLng, rideForCheck.dropoff.lat, rideForCheck.dropoff.lng);
+        if (distKm > ARRIVAL_PROXIMITY_KM) {
+            const distMeters = Math.round(distKm * 1000);
+            return next(new AppError(
+                `You are ${distMeters}m from the dropoff location. Please get closer (within ${ARRIVAL_PROXIMITY_KM * 1000}m) before completing the ride.`,
+                400
+            ));
+        }
     }
 
     // Pre-read the ride for fare validation (needs quote data before atomic update)
@@ -605,7 +787,7 @@ const completeRide = catchAsync(async (req, res, next) => {
             path: 'driver',
             populate: {
                 path: 'user',
-                select: 'firstName lastName fullName phone'
+                select: 'firstName lastName fullName phone profileImage'
             }
         });
 
@@ -634,13 +816,16 @@ const completeRide = catchAsync(async (req, res, next) => {
     }
 
     // Push notification to passenger (only if they have no active socket)
-    pushIfOffline(
-        io, ride.user.toString(),
-        'ride_completed_title',
-        'ride_completed_body',
-        { rideId: ride._id.toString() },
-        { fare: String(finalFare) }
-    ).catch(err => console.error('Push error (completeRide/passenger):', err.message));
+    // Skip for admin-created rides (ride.user = admin, not a real passenger)
+    if (!ride.createdByAdmin) {
+        pushIfOffline(
+            io, ride.user.toString(),
+            'ride_completed_title',
+            'ride_completed_body',
+            { rideId: ride._id.toString() },
+            { fare: String(finalFare) }
+        ).catch(err => console.error('Push error (completeRide/passenger):', err.message));
+    }
 
     // Push notification to driver
     pushService.sendToUser(
@@ -762,7 +947,7 @@ const cancelRide = catchAsync(async (req, res, next) => {
             path: 'driver',
             populate: {
                 path: 'user',
-                select: 'firstName lastName fullName phone'
+                select: 'firstName lastName fullName phone profileImage'
             }
         });
 
@@ -777,14 +962,15 @@ const cancelRide = catchAsync(async (req, res, next) => {
             io.to(`driver:${populatedRide.driver.user._id}`).emit('ride:cancelled', populatedRide);
         }
 
-        // If ride was pending, broadcast unavailable to all drivers via room (no DB query)
+        // If ride was pending, notify all drivers so they can clear the request modal
         if (wasPending && hadNoDriver) {
-            io.to('drivers:all').emit('ride:unavailable', { rideId: cancelledRide._id });
+            io.to('drivers:all').emit('ride:cancelled', populatedRide);
         }
     }
 
     // Push notification to passenger (only if cancelled by someone else AND no active socket)
-    if (cancelledBy !== 'user') {
+    // Skip for admin-created rides (ride.user = admin, not a real passenger)
+    if (cancelledBy !== 'user' && !cancelledRide.createdByAdmin) {
         pushIfOffline(
             io, cancelledRide.user.toString(),
             'ride_cancelled_title',
@@ -829,7 +1015,7 @@ const getMyRides = catchAsync(async (req, res, next) => {
                 path: 'driver',
                 populate: {
                     path: 'user',
-                    select: 'firstName lastName fullName phone'
+                    select: 'firstName lastName fullName phone profileImage'
                 }
             })
             .sort({ createdAt: -1 })
@@ -895,7 +1081,7 @@ const getRide = catchAsync(async (req, res, next) => {
             path: 'driver',
             populate: {
                 path: 'user',
-                select: 'firstName lastName fullName phone'
+                select: 'firstName lastName fullName phone profileImage'
             }
         });
 
@@ -952,10 +1138,23 @@ const getAvailableRides = catchAsync(async (req, res, next) => {
         .sort({ createdAt: -1 })
         .read('secondaryPreferred');
 
+    // Attach commission info so drivers see earnings breakdown (same as socket broadcast)
+    const pricingConfig = await Settings.getPricing();
+    const commissionPercent = pricingConfig.commissionPercent || 15;
+    const ridesWithCommission = availableRides.map(ride => {
+        const rideData = ride.toObject();
+        const totalPrice = rideData.quote?.totalPrice || 0;
+        const commissionAmount = Math.round(totalPrice * (commissionPercent / 100) * 100) / 100;
+        rideData.commissionPercent = commissionPercent;
+        rideData.commissionAmount = commissionAmount;
+        rideData.driverEarnings = Math.round((totalPrice - commissionAmount) * 100) / 100;
+        return rideData;
+    });
+
     res.json({
         success: true,
-        count: availableRides.length,
-        data: { rides: availableRides }
+        count: ridesWithCommission.length,
+        data: { rides: ridesWithCommission }
     });
 });
 
@@ -963,14 +1162,20 @@ const getAvailableRides = catchAsync(async (req, res, next) => {
 // @route   GET /api/rides
 // @access  Private/Admin
 const getAllRides = catchAsync(async (req, res, next) => {
-    const { status, startDate, endDate, page = 1, limit = 10 } = req.query;
+    const { status, startDate, endDate, driver, vehicleType, page = 1, limit = 10 } = req.query;
 
     const query = {};
     if (status && status !== 'all') query.status = status;
+    if (driver) query.driver = driver;
+    if (vehicleType && vehicleType !== 'all') query.vehicleType = vehicleType;
     if (startDate || endDate) {
         query.createdAt = {};
         if (startDate) query.createdAt.$gte = new Date(startDate);
-        if (endDate) query.createdAt.$lte = new Date(endDate);
+        if (endDate) {
+            const end = new Date(endDate);
+            end.setHours(23, 59, 59, 999);
+            query.createdAt.$lte = end;
+        }
     }
 
     // Convert to numbers with bounds (prevent unbounded queries)
@@ -987,7 +1192,7 @@ const getAllRides = catchAsync(async (req, res, next) => {
             path: 'driver',
             populate: {
                 path: 'user',
-                select: 'firstName lastName fullName phone'
+                select: 'firstName lastName fullName phone profileImage'
             }
         })
         .sort({ createdAt: -1 })
@@ -1064,7 +1269,7 @@ const reviewDriver = catchAsync(async (req, res, next) => {
             path: 'driver',
             populate: {
                 path: 'user',
-                select: 'firstName lastName fullName phone'
+                select: 'firstName lastName fullName phone profileImage'
             }
         });
 
@@ -1270,6 +1475,7 @@ const expireWaitingRides = async (io) => {
 
 module.exports = {
     createRide,
+    adminCreateRide,
     acceptRide,
     notifyArrival,
     startRide,

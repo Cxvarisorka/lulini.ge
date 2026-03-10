@@ -1,9 +1,77 @@
+const mongoose = require('mongoose');
 const Driver = require('../models/driver.model');
 const User = require('../models/user.model');
 const Ride = require('../models/ride.model');
+const DriverActivity = require('../models/driverActivity.model');
 const AppError = require('../utils/AppError');
 const catchAsync = require('../utils/catchAsync');
 const { haversineKm } = require('../utils/distance');
+const pushService = require('../services/pushNotification.service');
+
+// Proximity thresholds (km)
+const APPROACH_NOTIFY_KM = 0.5;  // 500m — notify passenger that driver is approaching
+
+// Push-if-offline helper (mirrors ride.controller pattern)
+async function pushIfOffline(io, userId, titleKey, bodyKey, data = {}, params = {}) {
+    try {
+        const sockets = await io.in(`user:${userId}`).fetchSockets();
+        if (sockets.length === 0) {
+            await pushService.sendToUser(userId, titleKey, bodyKey, data, params);
+        }
+    } catch (err) {
+        console.error('Push error (proximity):', err.message);
+    }
+}
+
+/**
+ * Check driver proximity to pickup/dropoff and emit approach events.
+ * Called after every location update when driver has an active ride.
+ */
+async function checkProximityAndNotify(io, driverLat, driverLng, ride) {
+    // Approaching pickup (status: accepted)
+    if (ride.status === 'accepted' && !ride.pickupApproachNotified && ride.pickup) {
+        const distToPickup = haversineKm(driverLat, driverLng, ride.pickup.lat, ride.pickup.lng);
+        if (distToPickup <= APPROACH_NOTIFY_KM) {
+            await Ride.updateOne({ _id: ride._id }, { $set: { pickupApproachNotified: true } });
+            const etaMinutes = Math.max(1, Math.round((distToPickup / 30) * 60));
+            io.to(`user:${ride.user}`).emit('ride:driverApproaching', {
+                rideId: ride._id,
+                type: 'pickup',
+                distanceKm: Math.round(distToPickup * 1000) / 1000,
+                etaMinutes,
+            });
+            pushIfOffline(
+                io, ride.user.toString(),
+                'driver_approaching_pickup_title',
+                'driver_approaching_pickup_body',
+                { rideId: ride._id.toString() },
+                { minutes: String(etaMinutes) }
+            );
+        }
+    }
+
+    // Approaching dropoff (status: in_progress)
+    if (ride.status === 'in_progress' && !ride.dropoffApproachNotified && ride.dropoff) {
+        const distToDropoff = haversineKm(driverLat, driverLng, ride.dropoff.lat, ride.dropoff.lng);
+        if (distToDropoff <= APPROACH_NOTIFY_KM) {
+            await Ride.updateOne({ _id: ride._id }, { $set: { dropoffApproachNotified: true } });
+            const etaMinutes = Math.max(1, Math.round((distToDropoff / 30) * 60));
+            io.to(`user:${ride.user}`).emit('ride:driverApproaching', {
+                rideId: ride._id,
+                type: 'dropoff',
+                distanceKm: Math.round(distToDropoff * 1000) / 1000,
+                etaMinutes,
+            });
+            pushIfOffline(
+                io, ride.user.toString(),
+                'driver_approaching_dropoff_title',
+                'driver_approaching_dropoff_body',
+                { rideId: ride._id.toString() },
+                { minutes: String(etaMinutes) }
+            );
+        }
+    }
+}
 
 // @desc    Create new driver
 // @route   POST /api/drivers
@@ -50,7 +118,7 @@ const createDriver = catchAsync(async (req, res, next) => {
             isApproved: true
         });
 
-        const populatedDriver = await Driver.findById(driver._id).populate('user', 'firstName lastName email');
+        const populatedDriver = await Driver.findById(driver._id).populate('user', 'firstName lastName email profileImage');
 
         res.status(201).json({
             success: true,
@@ -80,7 +148,7 @@ const getAllDrivers = catchAsync(async (req, res, next) => {
     if (isApproved !== undefined) query.isApproved = isApproved === 'true';
 
     const drivers = await Driver.find(query)
-        .populate('user', 'firstName lastName email phone')
+        .populate('user', 'firstName lastName email phone profileImage')
         .sort({ createdAt: -1 });
 
     res.json({
@@ -95,7 +163,7 @@ const getAllDrivers = catchAsync(async (req, res, next) => {
 // @access  Private/Admin
 const getDriver = catchAsync(async (req, res, next) => {
     const driver = await Driver.findById(req.params.id)
-        .populate('user', 'firstName lastName email phone');
+        .populate('user', 'firstName lastName email phone profileImage');
 
     if (!driver) {
         return next(new AppError('Driver not found', 404));
@@ -136,7 +204,7 @@ const updateDriver = catchAsync(async (req, res, next) => {
     }
 
     const updatedDriver = await Driver.findById(driver._id)
-        .populate('user', 'firstName lastName email phone');
+        .populate('user', 'firstName lastName email phone profileImage');
 
     // Emit socket event
     const io = req.app.get('io');
@@ -206,7 +274,7 @@ const deleteDriver = catchAsync(async (req, res, next) => {
 // @access  Private/Driver
 const getDriverProfile = catchAsync(async (req, res, next) => {
     const driver = await Driver.findOne({ user: req.user.id })
-        .populate('user', 'firstName lastName email phone');
+        .populate('user', 'firstName lastName email phone profileImage');
 
     if (!driver) {
         return next(new AppError('Driver profile not found', 404));
@@ -233,8 +301,31 @@ const updateDriverStatus = catchAsync(async (req, res, next) => {
         return next(new AppError('Driver profile not found', 404));
     }
 
+    // Prevent going offline while driver has active rides
+    if (status === 'offline') {
+        const activeRide = await Ride.findOne({
+            driver: driver._id,
+            status: { $in: ['accepted', 'driver_arrived', 'in_progress'] }
+        });
+        if (activeRide) {
+            return next(new AppError('Cannot go offline while you have an active ride', 400));
+        }
+    }
+
+    const previousStatus = driver.status;
     driver.status = status;
     await driver.save();
+
+    // Log activity for online/offline transitions
+    if (status === 'online' && previousStatus === 'offline') {
+        DriverActivity.create({ driver: driver._id, type: 'online' }).catch(err =>
+            console.error('Failed to log driver activity:', err.message)
+        );
+    } else if (status === 'offline' && previousStatus !== 'offline') {
+        DriverActivity.create({ driver: driver._id, type: 'offline' }).catch(err =>
+            console.error('Failed to log driver activity:', err.message)
+        );
+    }
 
     // Emit socket event and manage driver room membership
     const io = req.app.get('io');
@@ -250,10 +341,17 @@ const updateDriverStatus = catchAsync(async (req, res, next) => {
 
         const typeRoom = driver.vehicle?.type ? `drivers:${driver.vehicle.type}` : null;
         if (status === 'online') {
-            // Ensure sockets join driver rooms when going online
+            // Ensure only driver-app sockets join driver broadcast rooms
             const rooms = [driverRoom, 'drivers:all'];
             if (typeRoom) rooms.push(typeRoom);
-            io.in(userRoom).socketsJoin(rooms);
+            try {
+                const sockets = await io.in(userRoom).fetchSockets();
+                for (const s of sockets) {
+                    if (s.appType === 'driver') {
+                        s.join(rooms);
+                    }
+                }
+            } catch { /* ignore fetch errors */ }
         } else if (status === 'offline') {
             // Remove from broadcast rooms when going offline
             const leaveRooms = ['drivers:all'];
@@ -306,17 +404,28 @@ const updateDriverLocation = catchAsync(async (req, res, next) => {
         ),
         Ride.findOne({
             driver: driver._id,
-            status: { $in: ['accepted', 'driver_arrived'] }
-        }).select('_id user').lean()
+            status: { $in: ['accepted', 'driver_arrived', 'in_progress'] }
+        }).select('_id user status pickup dropoff pickupApproachNotified dropoffApproachNotified').lean()
     ]);
 
-    if (activeRide) {
-        const io = req.app.get('io');
-        if (io) {
+    const io = req.app.get('io');
+    if (io) {
+        // Emit to admin room for real-time tracking
+        io.to('admin').emit('driver:locationUpdate', {
+            driverId: driver._id,
+            location: { latitude, longitude }
+        });
+
+        if (activeRide) {
             io.to(`user:${activeRide.user}`).emit('driver:locationUpdate', {
                 rideId: activeRide._id,
                 location: { latitude, longitude }
             });
+
+            // Check proximity and auto-notify passenger
+            checkProximityAndNotify(io, latitude, longitude, activeRide).catch(
+                err => console.error('Proximity check error:', err.message)
+            );
         }
     }
 
@@ -481,7 +590,7 @@ const getDriverReviews = catchAsync(async (req, res, next) => {
 // @access  Private/Admin
 const getAllDriverStatistics = catchAsync(async (req, res, next) => {
     const drivers = await Driver.find({ isActive: true })
-        .populate('user', 'firstName lastName email')
+        .populate('user', 'firstName lastName email profileImage')
         .sort({ createdAt: -1 })
         .lean();
 
@@ -685,13 +794,22 @@ const batchUpdateDriverLocation = catchAsync(async (req, res, next) => {
         ),
         Ride.findOne({
             driver: driver._id,
-            status: { $in: ['accepted', 'driver_arrived'] },
-        }).select('_id user').lean()
+            status: { $in: ['accepted', 'driver_arrived', 'in_progress'] },
+        }).select('_id user status pickup dropoff pickupApproachNotified dropoffApproachNotified').lean()
     ]);
 
-    if (activeRide) {
-        const io = req.app.get('io');
-        if (io) {
+    const io = req.app.get('io');
+    if (io) {
+        // Emit to admin room for real-time tracking
+        io.to('admin').emit('driver:locationUpdate', {
+            driverId: driver._id,
+            location: {
+                latitude: accepted.latitude,
+                longitude: accepted.longitude,
+            },
+        });
+
+        if (activeRide) {
             io.to(`user:${activeRide.user}`).emit('driver:locationUpdate', {
                 rideId: activeRide._id,
                 location: {
@@ -699,10 +817,261 @@ const batchUpdateDriverLocation = catchAsync(async (req, res, next) => {
                     longitude: accepted.longitude,
                 },
             });
+
+            // Check proximity and auto-notify passenger
+            checkProximityAndNotify(io, accepted.latitude, accepted.longitude, activeRide).catch(
+                err => console.error('Proximity check error:', err.message)
+            );
         }
     }
 
     res.json({ success: true, message: 'Batch location updated', accepted: 1 });
+});
+
+// @desc    Get driver 7-day activity (active hours, rides accepted/cancelled per day)
+// @route   GET /api/drivers/:id/activity
+// @access  Private/Admin
+const getDriverActivity = catchAsync(async (req, res, next) => {
+    const driverId = req.params.id;
+
+    const driver = await Driver.findById(driverId).populate('user', 'firstName lastName email profileImage').lean();
+    if (!driver) {
+        return next(new AppError('Driver not found', 404));
+    }
+
+    const now = new Date();
+
+    // Compute server timezone for MongoDB $dateToString
+    const tzOffsetMin = -now.getTimezoneOffset(); // positive = east of UTC
+    const tzSign = tzOffsetMin >= 0 ? '+' : '-';
+    const tzH = String(Math.floor(Math.abs(tzOffsetMin) / 60)).padStart(2, '0');
+    const tzM = String(Math.abs(tzOffsetMin) % 60).padStart(2, '0');
+    const timezone = `${tzSign}${tzH}:${tzM}`;
+
+    // Helper: format local date as YYYY-MM-DD
+    const fmtDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+    // Build 7 days: today + 6 previous days
+    const days = [];
+    for (let i = 6; i >= 0; i--) {
+        const d = new Date(now);
+        d.setDate(d.getDate() - i);
+        d.setHours(0, 0, 0, 0);
+        const end = new Date(d);
+        end.setHours(23, 59, 59, 999);
+        days.push({ start: d, end });
+    }
+
+    const sevenDaysAgo = days[0].start;
+
+    // Fetch activity logs and rides in parallel
+    const [activityLogs, rideStats] = await Promise.all([
+        DriverActivity.find({
+            driver: driverId,
+            timestamp: { $gte: sevenDaysAgo }
+        }).sort({ timestamp: 1 }).lean(),
+        Ride.aggregate([
+            {
+                $match: {
+                    driver: new mongoose.Types.ObjectId(driverId),
+                    createdAt: { $gte: sevenDaysAgo }
+                }
+            },
+            {
+                $group: {
+                    _id: {
+                        $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone }
+                    },
+                    accepted: {
+                        $sum: {
+                            $cond: [{ $ne: ['$status', 'pending'] }, 1, 0]
+                        }
+                    },
+                    completed: {
+                        $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] }
+                    },
+                    cancelled: {
+                        $sum: { $cond: [{ $eq: ['$status', 'cancelled'] }, 1, 0] }
+                    },
+                    cancelledByDriver: {
+                        $sum: {
+                            $cond: {
+                                if: { $and: [{ $eq: ['$status', 'cancelled'] }, { $eq: ['$cancelledBy', 'driver'] }] },
+                                then: 1,
+                                else: 0
+                            }
+                        }
+                    },
+                    cancelledByUser: {
+                        $sum: {
+                            $cond: {
+                                if: { $and: [{ $eq: ['$status', 'cancelled'] }, { $eq: ['$cancelledBy', 'user'] }] },
+                                then: 1,
+                                else: 0
+                            }
+                        }
+                    },
+                    cancelledByAdmin: {
+                        $sum: {
+                            $cond: {
+                                if: { $and: [{ $eq: ['$status', 'cancelled'] }, { $eq: ['$cancelledBy', 'admin'] }] },
+                                then: 1,
+                                else: 0
+                            }
+                        }
+                    },
+                    totalEarnings: {
+                        $sum: { $cond: [{ $eq: ['$status', 'completed'] }, '$fare', 0] }
+                    }
+                }
+            }
+        ])
+    ]);
+
+    // Index ride stats by date string
+    const rideStatsMap = new Map(rideStats.map(s => [s._id, s]));
+
+    // Compute active hours per day from activity logs
+    // Strategy: for each day, find online/offline transitions and sum active time
+    const calendar = days.map(({ start, end }) => {
+        const dateStr = fmtDate(start);
+        const dayLabel = start.toLocaleDateString('en-US', { weekday: 'short' });
+
+        // Get activity logs for this day
+        const dayLogs = activityLogs.filter(
+            log => log.timestamp >= start && log.timestamp <= end
+        );
+
+        // Determine if driver was online at the start of this day
+        // by finding the last log before this day's start
+        let wasOnline = false;
+        for (let i = activityLogs.length - 1; i >= 0; i--) {
+            if (activityLogs[i].timestamp < start) {
+                wasOnline = activityLogs[i].type === 'online';
+                break;
+            }
+        }
+
+        let activeMs = 0;
+        let currentOnline = wasOnline;
+        let lastTime = start;
+
+        for (const log of dayLogs) {
+            if (currentOnline) {
+                activeMs += log.timestamp.getTime() - lastTime.getTime();
+            }
+            currentOnline = log.type === 'online';
+            lastTime = log.timestamp;
+        }
+
+        // If still online at end of day (or now if today)
+        if (currentOnline) {
+            const cutoff = end < now ? end : now;
+            activeMs += cutoff.getTime() - lastTime.getTime();
+        }
+
+        const activeHours = Math.round((activeMs / (1000 * 60 * 60)) * 10) / 10;
+        const totalHoursInDay = end < now ? 24 : Math.round(((now.getTime() - start.getTime()) / (1000 * 60 * 60)) * 10) / 10;
+        const offlineHours = Math.round(Math.max(0, totalHoursInDay - activeHours) * 10) / 10;
+
+        const rs = rideStatsMap.get(dateStr) || {};
+
+        return {
+            date: dateStr,
+            dayLabel,
+            activeHours,
+            offlineHours,
+            accepted: rs.accepted || 0,
+            completed: rs.completed || 0,
+            cancelled: rs.cancelled || 0,
+            cancelledByDriver: rs.cancelledByDriver || 0,
+            cancelledByUser: rs.cancelledByUser || 0,
+            cancelledByAdmin: rs.cancelledByAdmin || 0,
+            earnings: rs.totalEarnings || 0
+        };
+    });
+
+    // Totals
+    const totals = calendar.reduce((acc, day) => ({
+        activeHours: Math.round((acc.activeHours + day.activeHours) * 10) / 10,
+        offlineHours: Math.round((acc.offlineHours + day.offlineHours) * 10) / 10,
+        accepted: acc.accepted + day.accepted,
+        completed: acc.completed + day.completed,
+        cancelled: acc.cancelled + day.cancelled,
+        cancelledByDriver: acc.cancelledByDriver + day.cancelledByDriver,
+        cancelledByUser: acc.cancelledByUser + day.cancelledByUser,
+        cancelledByAdmin: acc.cancelledByAdmin + day.cancelledByAdmin,
+        earnings: acc.earnings + day.earnings,
+        activeDays: acc.activeDays + (day.activeHours > 0 ? 1 : 0)
+    }), { activeHours: 0, offlineHours: 0, accepted: 0, completed: 0, cancelled: 0, cancelledByDriver: 0, cancelledByUser: 0, cancelledByAdmin: 0, earnings: 0, activeDays: 0 });
+
+    res.json({
+        success: true,
+        data: {
+            driver: {
+                _id: driver._id,
+                name: driver.user ? `${driver.user.firstName} ${driver.user.lastName}` : 'Unknown',
+                email: driver.user?.email,
+                profileImage: driver.user?.profileImage || null,
+                phone: driver.phone,
+                vehicle: driver.vehicle,
+                status: driver.status,
+                rating: driver.rating,
+                totalTrips: driver.totalTrips,
+                totalEarnings: driver.totalEarnings
+            },
+            calendar,
+            totals
+        }
+    });
+});
+
+// @desc    Upload driver profile photo
+// @route   POST /api/drivers/:id/photo
+// @access  Private/Admin
+const uploadDriverPhoto = catchAsync(async (req, res, next) => {
+    if (!req.file) {
+        return next(new AppError('Please upload an image file', 400));
+    }
+
+    const driver = await Driver.findById(req.params.id).populate('user');
+    if (!driver) {
+        return next(new AppError('Driver not found', 404));
+    }
+
+    if (!driver.user) {
+        return next(new AppError('Driver has no associated user account', 400));
+    }
+
+    // Delete old image from Cloudinary if exists
+    if (driver.user.profileImage) {
+        try {
+            const { cloudinary } = require('../configs/cloudinary.config');
+            // Extract public_id from URL
+            const parts = driver.user.profileImage.split('/');
+            const uploadIdx = parts.indexOf('upload');
+            if (uploadIdx !== -1) {
+                // public_id is everything after upload/v{version}/ without extension
+                const publicId = parts.slice(uploadIdx + 2).join('/').replace(/\.[^.]+$/, '');
+                await cloudinary.uploader.destroy(publicId);
+            }
+        } catch (err) {
+            console.error('Failed to delete old Cloudinary image:', err.message);
+        }
+    }
+
+    // Update user's profileImage with Cloudinary URL
+    driver.user.profileImage = req.file.secure_url || req.file.url;
+    await driver.user.save();
+
+    const updatedDriver = await Driver.findById(driver._id)
+        .populate('user', 'firstName lastName email phone profileImage');
+
+    res.json({
+        success: true,
+        message: 'Driver photo uploaded successfully',
+        data: { driver: updatedDriver }
+    });
 });
 
 module.exports = {
@@ -711,6 +1080,7 @@ module.exports = {
     getDriver,
     updateDriver,
     deleteDriver,
+    uploadDriverPhoto,
     getDriverProfile,
     updateDriverStatus,
     updateDriverLocation,
@@ -719,5 +1089,6 @@ module.exports = {
     getDriverEarnings,
     getDriverReviews,
     getAllDriverStatistics,
-    getNearbyDrivers
+    getNearbyDrivers,
+    getDriverActivity
 };

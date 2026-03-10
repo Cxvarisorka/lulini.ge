@@ -1,5 +1,18 @@
 const mongoose = require('mongoose');
 
+const categoryPricingSchema = new mongoose.Schema({
+    basePrice: { type: Number, required: true, min: 0 },
+    kmPrice: { type: Number, required: true, min: 0 }
+}, { _id: false });
+
+const DEFAULT_CATEGORIES = {
+    economy: { basePrice: 5, kmPrice: 1.5 },
+    comfort: { basePrice: 7.5, kmPrice: 2.25 },
+    business: { basePrice: 10, kmPrice: 3 },
+    van: { basePrice: 7.5, kmPrice: 2.25 },
+    minibus: { basePrice: 10, kmPrice: 3 }
+};
+
 const settingsSchema = new mongoose.Schema({
     key: {
         type: String,
@@ -7,22 +20,19 @@ const settingsSchema = new mongoose.Schema({
         unique: true,
         enum: ['pricing']
     },
-    basePrice: {
-        type: Number,
-        required: true,
-        default: 5
-    },
-    kmPrice: {
-        type: Number,
-        required: true,
-        default: 1.5
-    },
     commissionPercent: {
         type: Number,
         required: true,
         default: 15,
         min: 0,
         max: 100
+    },
+    categories: {
+        economy: { type: categoryPricingSchema, default: () => DEFAULT_CATEGORIES.economy },
+        comfort: { type: categoryPricingSchema, default: () => DEFAULT_CATEGORIES.comfort },
+        business: { type: categoryPricingSchema, default: () => DEFAULT_CATEGORIES.business },
+        van: { type: categoryPricingSchema, default: () => DEFAULT_CATEGORIES.van },
+        minibus: { type: categoryPricingSchema, default: () => DEFAULT_CATEGORIES.minibus }
     }
 }, {
     timestamps: true
@@ -34,9 +44,8 @@ settingsSchema.statics.getPricing = async function () {
     if (!pricing) {
         pricing = await this.create({
             key: 'pricing',
-            basePrice: 5,
-            kmPrice: 1.5,
-            commissionPercent: 15
+            commissionPercent: 15,
+            categories: DEFAULT_CATEGORIES
         });
     }
     return pricing;

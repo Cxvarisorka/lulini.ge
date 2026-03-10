@@ -181,6 +181,18 @@ const rideSchema = new mongoose.Schema({
     expiresAt: {
         type: Date,
         default: null
+    },
+    createdByAdmin: {
+        type: Boolean,
+        default: false
+    },
+    pickupApproachNotified: {
+        type: Boolean,
+        default: false
+    },
+    dropoffApproachNotified: {
+        type: Boolean,
+        default: false
     }
 }, {
     timestamps: true

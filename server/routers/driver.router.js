@@ -1,11 +1,13 @@
 const express = require('express');
 const { protect, authorize, isDriver } = require('../middlewares/auth.middleware');
+const { uploadDriverPhoto: uploadDriverPhotoMiddleware } = require('../configs/cloudinary.config');
 const {
     createDriver,
     getAllDrivers,
     getDriver,
     updateDriver,
     deleteDriver,
+    uploadDriverPhoto,
     getDriverProfile,
     updateDriverStatus,
     updateDriverLocation,
@@ -14,7 +16,8 @@ const {
     getDriverEarnings,
     getDriverReviews,
     getAllDriverStatistics,
-    getNearbyDrivers
+    getNearbyDrivers,
+    getDriverActivity
 } = require('../controllers/driver.controller');
 
 const { validateUpdateDriverLocation } = require('../middlewares/validators');
@@ -41,8 +44,10 @@ router.get('/admin/statistics', authorize('admin'), getAllDriverStatistics);
 router.post('/', authorize('admin'), createDriver);
 router.get('/', authorize('admin'), getAllDrivers);
 router.get('/:id', authorize('admin'), getDriver);
+router.get('/:id/activity', authorize('admin'), getDriverActivity);
 router.get('/:id/reviews', getDriverReviews); // Admin or driver can access their own reviews
 router.patch('/:id', authorize('admin'), updateDriver);
+router.post('/:id/photo', authorize('admin'), uploadDriverPhotoMiddleware.single('photo'), uploadDriverPhoto);
 router.delete('/:id', authorize('admin'), deleteDriver);
 
 module.exports = router;

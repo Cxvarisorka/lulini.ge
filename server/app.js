@@ -100,7 +100,8 @@ const io = new Server(server, {
 });
 
 // Redis adapter for Socket.io (enables horizontal scaling across multiple processes)
-if (process.env.REDIS_URL) {
+// Skip in development — remote Redis adds latency and can cause ping timeouts
+if (process.env.REDIS_URL && process.env.NODE_ENV === 'production') {
     const { createAdapter } = require('@socket.io/redis-adapter');
     const { getRedisClient } = require('./configs/redis.config');
 
@@ -234,12 +235,28 @@ io.use(createSocketRateLimiter());
 const Driver = require('./models/driver.model');
 
 io.on('connection', async (socket) => {
+    // Store app type from handshake query (passenger | driver | undefined)
+    socket.appType = socket.handshake.query?.appType || null;
+
     if (process.env.NODE_ENV !== 'production') {
-        console.log(`User connected: ${socket.user.role} - socket: ${socket.id}`);
+        console.log(`User connected: ${socket.user.role} (${socket.appType || 'unknown'}) - socket: ${socket.id}`);
     }
 
     const driverRoom = `driver:${socket.user.id}`;
     const userRoom = `user:${socket.user.id}`;
+
+    // Helper: join a room for all sockets of this user that share the same appType.
+    // Prevents passenger-app sockets from being added to driver broadcast rooms.
+    const joinSameAppSockets = async (room) => {
+        try {
+            const sockets = await io.in(userRoom).fetchSockets();
+            for (const s of sockets) {
+                if (s.appType === socket.appType) {
+                    s.join(room);
+                }
+            }
+        } catch { /* ignore fetch errors */ }
+    };
 
     // Limit to 3 concurrent connections per user (disconnect oldest on overflow)
     try {
@@ -257,12 +274,11 @@ io.on('connection', async (socket) => {
         socket.join('admin');
     }
 
-    // Fast-path: if role is 'driver', join driver rooms immediately (no DB needed)
+    // Fast-path: if role is 'driver', join personal driver room immediately (no DB needed)
+    // Broadcast rooms (drivers:all, drivers:{type}) are joined only after DB confirms status is online/busy
     if (socket.user.role === 'driver') {
         socket.join(driverRoom);
-        socket.join('drivers:all');
-        io.in(userRoom).socketsJoin(driverRoom);
-        // Join vehicle-type room asynchronously (needs DB lookup)
+        // joinSameAppSockets deferred to after event listeners (must not await before listeners)
     }
 
     // ── Register ALL event listeners synchronously (before any await) ──
@@ -274,14 +290,13 @@ io.on('connection', async (socket) => {
     socket.on('driver:rejoin', async () => {
         const now = Date.now();
 
-        // Fast path: always rejoin rooms (cheap, no DB)
+        // Fast path: always rejoin personal driver room (cheap, no DB)
         if (socket.user.role === 'driver') {
             socket.join(driverRoom);
-            socket.join('drivers:all');
-            io.in(userRoom).socketsJoin(driverRoom);
+            await joinSameAppSockets(driverRoom);
         }
 
-        // Slow path: verify driver profile in DB (rate-limited)
+        // Slow path: verify driver profile AND status in DB (rate-limited)
         if (now - lastRejoinWithDb < 10000) {
             socket.emit('driver:rejoined', { success: true });
             return;
@@ -289,16 +304,19 @@ io.on('connection', async (socket) => {
         lastRejoinWithDb = now;
 
         try {
-            const profile = await Driver.findOne({ user: socket.user.id, isActive: true, isApproved: true });
+            const profile = await Driver.findOne({ user: socket.user.id, isActive: true, isApproved: true }).select('status vehicle.type').lean();
             if (socket.user.role === 'driver' || profile) {
                 socket.join(driverRoom);
-                socket.join('drivers:all');
-                io.in(userRoom).socketsJoin(driverRoom);
-                // Join vehicle-type room
-                if (profile?.vehicle?.type) {
-                    const typeRoom = `drivers:${profile.vehicle.type}`;
-                    socket.join(typeRoom);
-                    io.in(userRoom).socketsJoin(typeRoom);
+                await joinSameAppSockets(driverRoom);
+                // Only join broadcast rooms if driver is online or busy (not offline)
+                if (profile && (profile.status === 'online' || profile.status === 'busy')) {
+                    socket.join('drivers:all');
+                    await joinSameAppSockets('drivers:all');
+                    if (profile.vehicle?.type) {
+                        const typeRoom = `drivers:${profile.vehicle.type}`;
+                        socket.join(typeRoom);
+                        await joinSameAppSockets(typeRoom);
+                    }
                 }
             }
             // Always ACK to prevent client timeout loops
@@ -316,31 +334,46 @@ io.on('connection', async (socket) => {
         }
     });
 
-    // ── Async work: verify driver profile in DB (non-blocking) ──
-    // This runs AFTER listeners are registered, so no events are missed.
-    // Also joins vehicle-type room for targeted ride broadcasts.
+    // ── Async work (AFTER listeners are registered, so no events are missed) ──
+
+    // Sync other same-appType sockets into the driver room (deferred from above)
+    if (socket.user.role === 'driver') {
+        await joinSameAppSockets(driverRoom);
+    }
+
+    // Async DB lookup: join broadcast rooms only if driver status is online/busy
     if (socket.user.role === 'driver') {
         try {
-            const driverProfile = await Driver.findOne({ user: socket.user.id, isActive: true, isApproved: true }).select('vehicle.type').lean();
-            if (driverProfile?.vehicle?.type) {
-                const typeRoom = `drivers:${driverProfile.vehicle.type}`;
-                socket.join(typeRoom);
-                io.in(userRoom).socketsJoin(typeRoom);
-            }
-        } catch (err) {
-            // DB lookup failed — vehicle-type room will be joined on rejoin
-        }
-    } else {
-        try {
-            const driverProfile = await Driver.findOne({ user: socket.user.id, isActive: true, isApproved: true });
-            if (driverProfile) {
-                socket.join(driverRoom);
+            const driverProfile = await Driver.findOne({ user: socket.user.id, isActive: true, isApproved: true }).select('status vehicle.type').lean();
+            if (driverProfile && (driverProfile.status === 'online' || driverProfile.status === 'busy')) {
                 socket.join('drivers:all');
-                io.in(userRoom).socketsJoin(driverRoom);
+                await joinSameAppSockets('drivers:all');
                 if (driverProfile.vehicle?.type) {
                     const typeRoom = `drivers:${driverProfile.vehicle.type}`;
                     socket.join(typeRoom);
-                    io.in(userRoom).socketsJoin(typeRoom);
+                    await joinSameAppSockets(typeRoom);
+                }
+            }
+        } catch (err) {
+            // DB lookup failed — broadcast rooms will be joined on rejoin or goOnline
+        }
+    } else if (socket.appType === 'driver') {
+        // Non-driver-role user connecting from driver app (e.g., user with driver profile)
+        // Only join driver rooms for driver-app sockets — never for passenger or admin sockets
+        try {
+            const driverProfile = await Driver.findOne({ user: socket.user.id, isActive: true, isApproved: true }).select('status vehicle.type').lean();
+            if (driverProfile) {
+                socket.join(driverRoom);
+                await joinSameAppSockets(driverRoom);
+                // Only join broadcast rooms if online/busy
+                if (driverProfile.status === 'online' || driverProfile.status === 'busy') {
+                    socket.join('drivers:all');
+                    await joinSameAppSockets('drivers:all');
+                    if (driverProfile.vehicle?.type) {
+                        const typeRoom = `drivers:${driverProfile.vehicle.type}`;
+                        socket.join(typeRoom);
+                        await joinSameAppSockets(typeRoom);
+                    }
                 }
             }
         } catch (err) {

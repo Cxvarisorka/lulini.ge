@@ -22,6 +22,10 @@ const messages = {
         waiting_timeout_body: 'Passenger did not show up within 3 minutes',
         waiting_timeout_passenger_title: 'Ride Cancelled',
         waiting_timeout_passenger_body: 'The ride was cancelled because you didn\'t arrive at the pickup point within 3 minutes',
+        driver_approaching_pickup_title: 'Driver is Nearby!',
+        driver_approaching_pickup_body: 'Your driver will arrive in about {{minutes}} min. Get ready!',
+        driver_approaching_dropoff_title: 'Almost There!',
+        driver_approaching_dropoff_body: 'You will arrive at your destination in about {{minutes}} min.',
     },
     ka: {
         ride_request_title: 'ახალი მოთხოვნა!',
@@ -46,6 +50,10 @@ const messages = {
         waiting_timeout_body: 'მგზავრი 3 წუთის განმავლობაში არ გამოცხადდა',
         waiting_timeout_passenger_title: 'მგზავრობა გაუქმდა',
         waiting_timeout_passenger_body: 'მგზავრობა გაუქმდა, რადგან 3 წუთის განმავლობაში ვერ მოხვედით აყვანის ადგილზე',
+        driver_approaching_pickup_title: 'მძღოლი ახლოს არის!',
+        driver_approaching_pickup_body: 'მძღოლი დაახლოებით {{minutes}} წუთში ჩავა. მოემზადეთ!',
+        driver_approaching_dropoff_title: 'თითქმის მიხვედით!',
+        driver_approaching_dropoff_body: 'დანიშნულების ადგილამდე დაახლოებით {{minutes}} წუთი დარჩა.',
     },
     ru: {
         ride_request_title: 'Новый заказ!',
@@ -70,6 +78,10 @@ const messages = {
         waiting_timeout_body: 'Пассажир не появился в течение 3 минут',
         waiting_timeout_passenger_title: 'Поездка отменена',
         waiting_timeout_passenger_body: 'Поездка отменена, так как вы не подошли к месту посадки в течение 3 минут',
+        driver_approaching_pickup_title: 'Водитель рядом!',
+        driver_approaching_pickup_body: 'Водитель прибудет примерно через {{minutes}} мин. Приготовьтесь!',
+        driver_approaching_dropoff_title: 'Почти на месте!',
+        driver_approaching_dropoff_body: 'До пункта назначения примерно {{minutes}} мин.',
     },
     es: {
         ride_request_title: '¡Nueva solicitud!',
@@ -94,6 +106,10 @@ const messages = {
         waiting_timeout_body: 'El pasajero no se presentó en 3 minutos',
         waiting_timeout_passenger_title: 'Viaje cancelado',
         waiting_timeout_passenger_body: 'El viaje fue cancelado porque no llegaste al punto de recogida en 3 minutos',
+        driver_approaching_pickup_title: '¡El conductor está cerca!',
+        driver_approaching_pickup_body: 'Tu conductor llegará en unos {{minutes}} min. ¡Prepárate!',
+        driver_approaching_dropoff_title: '¡Casi llegas!',
+        driver_approaching_dropoff_body: 'Llegarás a tu destino en unos {{minutes}} min.',
     }
 };
 

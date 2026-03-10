@@ -6,7 +6,10 @@ const {
     getSavedCards,
     deleteCard,
     setDefaultCard,
-    preChargeRide,
+    preauthRide,
+    chargeRide,
+    approveRidePayment,
+    rejectRidePayment,
     verifyRidePayment,
     linkPaymentToRide,
     handleCallback,
@@ -23,8 +26,11 @@ router.get('/cards', protect, getSavedCards);
 router.delete('/cards/:cardId', protect, deleteCard);
 router.patch('/cards/:cardId/default', protect, setDefaultCard);
 
-// Pre-ride payment (authenticated) — charge card before requesting drivers
-router.post('/ride/pre-charge', protect, preChargeRide);
+// Ride payments (authenticated)
+router.post('/ride/preauth', protect, preauthRide);
+router.post('/ride/charge', protect, chargeRide);
+router.post('/ride/approve/:paymentId', protect, approveRidePayment);
+router.post('/ride/reject/:paymentId', protect, rejectRidePayment);
 router.post('/ride/verify/:orderId', protect, verifyRidePayment);
 router.patch('/:paymentId/link-ride', protect, linkPaymentToRide);
 

@@ -25,6 +25,14 @@ const savedCardSchema = new mongoose.Schema({
         type: String, // "MM/YY"
         required: true
     },
+    // How the card was saved — determines which charge method to use
+    // 'recurrent' = user sees BOG page (no card re-entry), variable amounts
+    // 'subscription' = fully automatic, fixed amount only
+    saveType: {
+        type: String,
+        enum: ['recurrent', 'subscription'],
+        default: 'recurrent'
+    },
     isActive: {
         type: Boolean,
         default: true

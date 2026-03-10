@@ -24,12 +24,17 @@ const paymentSchema = new mongoose.Schema({
     },
     type: {
         type: String,
-        enum: ['ride_payment', 'card_registration'],
+        enum: ['card_registration', 'ride_preauth', 'ride_payment'],
         required: true
     },
     amount: {
         type: Number,
         required: true
+    },
+    // For preauth: the final captured amount (may differ from original hold)
+    capturedAmount: {
+        type: Number,
+        default: null
     },
     currency: {
         type: String,
@@ -37,19 +42,35 @@ const paymentSchema = new mongoose.Schema({
     },
     status: {
         type: String,
-        enum: ['created', 'processing', 'completed', 'rejected', 'refunded'],
+        enum: [
+            'created',      // Order created, awaiting payment
+            'processing',   // Payment in progress
+            'completed',    // Payment successful
+            'rejected',     // Payment declined
+            'refunded',     // Fully refunded
+            'blocked',      // Preauth: funds held on card
+            'captured',     // Preauth: funds captured (approved)
+            'cancelled'     // Preauth: hold released (rejected)
+        ],
         default: 'created'
     },
-    // BOG payment details from callback
+    // 'automatic' for standard, 'manual' for preauth
+    captureMode: {
+        type: String,
+        enum: ['automatic', 'manual'],
+        default: 'automatic'
+    },
+    // BOG payment details from callback/receipt
     paymentDetail: {
         transferMethod: String,
         transactionId: String,
-        payerIdentifier: String, // masked card number
-        cardType: String, // visa, mc, amex
-        cardExpiryDate: String,
-        paymentOption: String, // direct_debit, recurrent, subscription
+        payerIdentifier: String,  // masked card number
+        cardType: String,         // visa, mc, amex
+        cardExpiryDate: String,   // MM/YY
+        paymentOption: String,    // direct_debit, recurrent, subscription
         code: String,
-        codeDescription: String
+        codeDescription: String,
+        authCode: String
     },
     // If this payment was made with a saved card
     savedCard: {
@@ -76,6 +97,7 @@ const paymentSchema = new mongoose.Schema({
 paymentSchema.index({ user: 1, createdAt: -1 });
 paymentSchema.index({ ride: 1 });
 paymentSchema.index({ status: 1 });
+paymentSchema.index({ externalOrderId: 1 });
 
 const Payment = mongoose.model('Payment', paymentSchema);
 

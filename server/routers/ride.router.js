@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const {
     createRide,
+    adminCreateRide,
     acceptRide,
     notifyArrival,
     startRide,
@@ -36,6 +37,7 @@ router.patch('/:id/cancel', protect, cancelRide);
 router.post('/:id/review', protect, reviewDriver);
 
 // Admin routes
+router.post('/admin', protect, authorize('admin'), adminCreateRide);
 router.get('/', protect, authorize('admin'), getAllRides);
 
 module.exports = router;
