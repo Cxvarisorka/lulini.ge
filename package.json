@@ -19,6 +19,6 @@
   },
   "homepage": "https://github.com/Cxvarisorka/gotours.ge#readme",
   "devDependencies": {
-    "@napi-rs/canvas": "^0.1.95"
+    "@napi-rs/canvas": "^0.1.96"
   }
 }

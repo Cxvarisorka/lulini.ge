@@ -2,20 +2,39 @@
  * generate-marker-assets.js
  *
  * Generates PNG marker images at @1x, @2x, @3x for react-native-maps.
- * Uses @napi-rs/canvas (pure Rust, no native deps, works on Windows).
+ * Uses @napi-rs/canvas + Ionicons font for consistent icon-library visuals.
  *
  * Run: node scripts/generate-marker-assets.js
  */
-const { createCanvas } = require('@napi-rs/canvas');
+const { createCanvas, GlobalFonts } = require('@napi-rs/canvas');
 const fs = require('fs');
 const path = require('path');
 
-// Output directories
+// ── Register Ionicons font ──────────────────────────────────────────
+const FONT_PATH = path.join(
+  __dirname, '..', 'mobile', 'node_modules',
+  '@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/Ionicons.ttf'
+);
+GlobalFonts.registerFromPath(FONT_PATH, 'Ionicons');
+
+// ── Output directories ──────────────────────────────────────────────
 const MOBILE_DIR = path.join(__dirname, '..', 'mobile', 'assets', 'markers');
 const DRIVER_DIR = path.join(__dirname, '..', 'mobile-driver', 'assets', 'markers');
-
 fs.mkdirSync(MOBILE_DIR, { recursive: true });
 fs.mkdirSync(DRIVER_DIR, { recursive: true });
+
+// ── Brand Colors ─────────────────────────────────────────────────────
+const BLUE_PRIMARY = '#1A73E8';     // Google blue — assigned car
+const BLUE_LIGHT = '#4A90D9';      // Medium blue — regular car
+
+// ── Ionicons glyph codes ─────────────────────────────────────────────
+const ICON = {
+  carSport:  String.fromCharCode(61924),  // car-sport (filled)
+  flag:      String.fromCharCode(62224),  // flag (filled)
+  location:  String.fromCharCode(62404),  // location (filled pin)
+  navigate:  String.fromCharCode(62572),  // navigate (filled arrow)
+  person:    String.fromCharCode(62629),  // person (filled)
+};
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -27,16 +46,15 @@ function savePNG(canvas, name, dirs) {
 }
 
 /**
- * Draw a filled circle with border.
- * Returns the canvas for further drawing (icon/text).
+ * Draw a filled circle with border and optional drop shadow.
  */
 function drawCircleMarker(opts) {
   const {
-    size,           // logical circle diameter (px)
-    bg,             // fill color
-    borderWidth,    // border width
+    size,
+    bg,
+    borderWidth,
     borderColor = '#ffffff',
-    padding = 14,   // padding around circle to prevent clipping
+    padding = 14,
     scale = 1,
   } = opts;
 
@@ -49,7 +67,7 @@ function drawCircleMarker(opts) {
   const r = (size / 2) * scale;
   const bw = borderWidth * scale;
 
-  // Drop shadow (subtle, like iOS shadow)
+  // Drop shadow
   ctx.shadowColor = 'rgba(0,0,0,0.25)';
   ctx.shadowBlur = 4 * scale;
   ctx.shadowOffsetX = 0;
@@ -67,7 +85,7 @@ function drawCircleMarker(opts) {
   ctx.shadowOffsetX = 0;
   ctx.shadowOffsetY = 0;
 
-  // Inner fill circle
+  // Inner fill
   ctx.beginPath();
   ctx.arc(cx, cy, r - bw, 0, Math.PI * 2);
   ctx.fillStyle = bg;
@@ -77,49 +95,87 @@ function drawCircleMarker(opts) {
 }
 
 /**
- * Draw a simple car silhouette facing up (north).
- * Draws a top-down car shape: body, windshield, rear window.
+ * Draw an Ionicons glyph centered in the marker.
+ * rotationDeg: rotate the icon (e.g., -90 for car facing north).
  */
-function drawCarIcon(ctx, cx, cy, iconSize, color, scale) {
-  const s = iconSize * scale;
-  const x = cx;
-  const y = cy;
+function drawIcon(ctx, cx, cy, glyph, fontSize, color, scale, rotationDeg = 0) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  if (rotationDeg) {
+    ctx.rotate((rotationDeg * Math.PI) / 180);
+  }
+  ctx.fillStyle = color;
+  ctx.font = `${fontSize * scale}px Ionicons`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(glyph, 0, 0);
+  ctx.restore();
+}
 
+/**
+ * Draw centered text (for stop numbers).
+ */
+function drawText(ctx, cx, cy, text, fontSize, color, scale) {
   ctx.save();
   ctx.fillStyle = color;
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 1.2 * scale;
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
+  ctx.font = `bold ${fontSize * scale}px Arial, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, cx, cy + 1 * scale);
+  ctx.restore();
+}
 
-  // Car body (rounded rectangle, slightly wider at bottom)
-  const bw = s * 0.55; // body width
-  const bh = s * 0.85; // body height
-  const br = s * 0.15; // corner radius
+// ── Marker Generators ────────────────────────────────────────────────
 
-  // Draw rounded rect body
-  const bx = x - bw / 2;
-  const by = y - bh / 2;
+/**
+ * Draw a top-down car silhouette facing north (up).
+ * Clean, polished shape — no circle background, transparent canvas.
+ */
+function drawTopDownCar(ctx, cx, cy, size, color, scale) {
+  const s = size * scale;
+  const w = s * 0.48;  // body width
+  const h = s * 0.88;  // body height
+  const r = s * 0.14;  // corner radius
+
+  const x = cx - w / 2;
+  const y = cy - h / 2;
+
+  ctx.save();
+
+  // Drop shadow
+  ctx.shadowColor = 'rgba(0,0,0,0.35)';
+  ctx.shadowBlur = 4 * scale;
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = 2 * scale;
+
+  // ── Main body ──
+  ctx.fillStyle = color;
   ctx.beginPath();
-  ctx.moveTo(bx + br, by);
-  ctx.lineTo(bx + bw - br, by);
-  ctx.quadraticCurveTo(bx + bw, by, bx + bw, by + br);
-  ctx.lineTo(bx + bw, by + bh - br);
-  ctx.quadraticCurveTo(bx + bw, by + bh, bx + bw - br, by + bh);
-  ctx.lineTo(bx + br, by + bh);
-  ctx.quadraticCurveTo(bx, by + bh, bx, by + bh - br);
-  ctx.lineTo(bx, by + br);
-  ctx.quadraticCurveTo(bx, by, bx + br, by);
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
   ctx.closePath();
   ctx.fill();
 
-  // Windshield (top window area)
-  ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  const ww = bw * 0.7;
-  const wh = bh * 0.18;
-  const wx = x - ww / 2;
-  const wy = y - bh * 0.2;
-  const wr = s * 0.06;
+  // Reset shadow for inner details
+  ctx.shadowColor = 'transparent';
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetY = 0;
+
+  // ── Windshield (front, darker) ──
+  const ww = w * 0.72;
+  const wh = h * 0.20;
+  const wx = cx - ww / 2;
+  const wy = y + h * 0.14;
+  const wr = s * 0.05;
+
+  ctx.fillStyle = 'rgba(255,255,255,0.35)';
   ctx.beginPath();
   ctx.moveTo(wx + wr, wy);
   ctx.lineTo(wx + ww - wr, wy);
@@ -133,99 +189,130 @@ function drawCarIcon(ctx, cx, cy, iconSize, color, scale) {
   ctx.closePath();
   ctx.fill();
 
-  // Rear window
-  const rwy = y + bh * 0.12;
-  const rwh = bh * 0.14;
+  // ── Rear window ──
+  const rw = w * 0.62;
+  const rh = h * 0.14;
+  const rx = cx - rw / 2;
+  const ry = y + h * 0.62;
+
+  ctx.fillStyle = 'rgba(255,255,255,0.25)';
   ctx.beginPath();
-  ctx.moveTo(wx + wr, rwy);
-  ctx.lineTo(wx + ww - wr, rwy);
-  ctx.quadraticCurveTo(wx + ww, rwy, wx + ww, rwy + wr);
-  ctx.lineTo(wx + ww, rwy + rwh - wr);
-  ctx.quadraticCurveTo(wx + ww, rwy + rwh, wx + ww - wr, rwy + rwh);
-  ctx.lineTo(wx + wr, rwy + rwh);
-  ctx.quadraticCurveTo(wx, rwy + rwh, wx, rwy + rwh - wr);
-  ctx.lineTo(wx, rwy + wr);
-  ctx.quadraticCurveTo(wx, rwy, wx + wr, rwy);
+  ctx.moveTo(rx + wr, ry);
+  ctx.lineTo(rx + rw - wr, ry);
+  ctx.quadraticCurveTo(rx + rw, ry, rx + rw, ry + wr);
+  ctx.lineTo(rx + rw, ry + rh - wr);
+  ctx.quadraticCurveTo(rx + rw, ry + rh, rx + rw - wr, ry + rh);
+  ctx.lineTo(rx + wr, ry + rh);
+  ctx.quadraticCurveTo(rx, ry + rh, rx, ry + rh - wr);
+  ctx.lineTo(rx, ry + wr);
+  ctx.quadraticCurveTo(rx, ry, rx + wr, ry);
   ctx.closePath();
   ctx.fill();
 
-  // Headlights (small circles at front)
-  ctx.fillStyle = 'rgba(255,255,255,0.5)';
-  const hlR = s * 0.06;
+  // ── Headlights (two small dots at front) ──
+  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  const hlR = s * 0.04;
   ctx.beginPath();
-  ctx.arc(x - bw * 0.32, by + bh * 0.05 + hlR, hlR, 0, Math.PI * 2);
+  ctx.arc(x + w * 0.22, y + h * 0.06, hlR, 0, Math.PI * 2);
   ctx.fill();
   ctx.beginPath();
-  ctx.arc(x + bw * 0.32, by + bh * 0.05 + hlR, hlR, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.restore();
-}
-
-/**
- * Draw a flag icon.
- */
-function drawFlagIcon(ctx, cx, cy, iconSize, color, scale) {
-  const s = iconSize * scale;
-  ctx.save();
-  ctx.strokeStyle = color;
-  ctx.fillStyle = color;
-  ctx.lineWidth = 1.5 * scale;
-  ctx.lineCap = 'round';
-
-  // Flag pole
-  const poleX = cx - s * 0.2;
-  const poleTop = cy - s * 0.4;
-  const poleBottom = cy + s * 0.4;
-  ctx.beginPath();
-  ctx.moveTo(poleX, poleTop);
-  ctx.lineTo(poleX, poleBottom);
-  ctx.stroke();
-
-  // Flag (triangle/pennant)
-  ctx.beginPath();
-  ctx.moveTo(poleX, poleTop);
-  ctx.lineTo(poleX + s * 0.5, poleTop + s * 0.2);
-  ctx.lineTo(poleX, poleTop + s * 0.4);
-  ctx.closePath();
+  ctx.arc(x + w * 0.78, y + h * 0.06, hlR, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.restore();
 }
 
-/**
- * Draw centered text.
- */
-function drawText(ctx, cx, cy, text, fontSize, color, scale) {
-  ctx.save();
-  ctx.fillStyle = color;
-  ctx.font = `bold ${fontSize * scale}px Arial, sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(text, cx, cy + 1 * scale); // +1 for visual centering
-  ctx.restore();
-}
-
-// ── Marker Generators ────────────────────────────────────────────────
-
-function generateCarMarker(name, size, bg, borderWidth, iconSize, dirs) {
+function generateCarMarker(name, size, color, dirs) {
   for (const scale of [1, 2, 3]) {
     const suffix = scale === 1 ? '' : `@${scale}x`;
-    const { canvas, ctx, cx, cy } = drawCircleMarker({
-      size, bg, borderWidth, padding: 14, scale,
-    });
-    drawCarIcon(ctx, cx, cy, iconSize, '#ffffff', scale);
+    const padding = 10;
+    const totalSize = (size + padding * 2) * scale;
+    const canvas = createCanvas(totalSize, totalSize);
+    const ctx = canvas.getContext('2d');
+    const cx = totalSize / 2;
+    const cy = totalSize / 2;
+
+    drawTopDownCar(ctx, cx, cy, size, color, scale);
     savePNG(canvas, `${name}${suffix}.png`, dirs);
   }
+}
+
+/**
+ * Draw a map pin shape: circle head with pointed tail at bottom.
+ * The tip of the tail sits at the very bottom of the canvas.
+ * Use anchor { x: 0.5, y: 1 } so the tip points to the coordinate.
+ */
+function drawPinMarker(opts) {
+  const {
+    headSize,       // circle diameter
+    bg,
+    borderWidth,
+    borderColor = '#ffffff',
+    tailHeight = 10,
+    padding = 8,
+    scale = 1,
+  } = opts;
+
+  const w = (headSize + padding * 2) * scale;
+  const h = (headSize + tailHeight + padding * 2) * scale;
+  const canvas = createCanvas(w, h);
+  const ctx = canvas.getContext('2d');
+
+  const cx = w / 2;
+  const headCy = (padding + headSize / 2) * scale;
+  const r = (headSize / 2) * scale;
+  const bw = borderWidth * scale;
+  const th = tailHeight * scale;
+
+  // Drop shadow
+  ctx.shadowColor = 'rgba(0,0,0,0.3)';
+  ctx.shadowBlur = 3 * scale;
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = 2 * scale;
+
+  // Draw pin shape: circle + triangle tail as one path
+  ctx.fillStyle = borderColor;
+  ctx.beginPath();
+  ctx.arc(cx, headCy, r, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Tail (triangle pointing down) — border
+  ctx.beginPath();
+  ctx.moveTo(cx - r * 0.45, headCy + r * 0.75);
+  ctx.lineTo(cx, headCy + r + th);
+  ctx.lineTo(cx + r * 0.45, headCy + r * 0.75);
+  ctx.closePath();
+  ctx.fill();
+
+  // Reset shadow
+  ctx.shadowColor = 'transparent';
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetY = 0;
+
+  // Inner circle
+  ctx.beginPath();
+  ctx.arc(cx, headCy, r - bw, 0, Math.PI * 2);
+  ctx.fillStyle = bg;
+  ctx.fill();
+
+  // Inner tail
+  ctx.beginPath();
+  ctx.moveTo(cx - (r - bw) * 0.4, headCy + (r - bw) * 0.7);
+  ctx.lineTo(cx, headCy + r + th - bw * 1.5);
+  ctx.lineTo(cx + (r - bw) * 0.4, headCy + (r - bw) * 0.7);
+  ctx.closePath();
+  ctx.fill();
+
+  return { canvas, ctx, cx, cy: headCy, r, bw, scale };
 }
 
 function generateDestinationMarker(dirs) {
   for (const scale of [1, 2, 3]) {
     const suffix = scale === 1 ? '' : `@${scale}x`;
-    const { canvas, ctx, cx, cy } = drawCircleMarker({
-      size: 38, bg: '#ef4444', borderWidth: 3, padding: 14, scale,
+    const { canvas, ctx, cx, cy } = drawPinMarker({
+      headSize: 28, bg: '#ef4444', borderWidth: 2.5, tailHeight: 10, padding: 8, scale,
     });
-    drawFlagIcon(ctx, cx, cy, 18, '#ffffff', scale);
+    drawIcon(ctx, cx, cy, ICON.flag, 16, '#ffffff', scale);
     savePNG(canvas, `marker-destination${suffix}.png`, dirs);
   }
 }
@@ -233,17 +320,10 @@ function generateDestinationMarker(dirs) {
 function generatePickupMarker(dirs) {
   for (const scale of [1, 2, 3]) {
     const suffix = scale === 1 ? '' : `@${scale}x`;
-    const outerSize = 24;
-    const padding = 10;
-    const { canvas, ctx, cx, cy } = drawCircleMarker({
-      size: outerSize, bg: '#22c55e', borderWidth: 2, padding, scale,
+    const { canvas, ctx, cx, cy } = drawPinMarker({
+      headSize: 28, bg: '#4285F4', borderWidth: 2.5, tailHeight: 10, padding: 8, scale,
     });
-    // Inner dot
-    const dotR = 5 * scale;
-    ctx.beginPath();
-    ctx.arc(cx, cy, dotR, 0, Math.PI * 2);
-    ctx.fillStyle = '#ffffff';
-    ctx.fill();
+    drawIcon(ctx, cx, cy, ICON.location, 15, '#ffffff', scale);
     savePNG(canvas, `marker-pickup${suffix}.png`, dirs);
   }
 }
@@ -251,10 +331,10 @@ function generatePickupMarker(dirs) {
 function generateDropoffMarker(dirs) {
   for (const scale of [1, 2, 3]) {
     const suffix = scale === 1 ? '' : `@${scale}x`;
-    const { canvas, ctx, cx, cy } = drawCircleMarker({
-      size: 26, bg: '#ef4444', borderWidth: 2.5, padding: 12, scale,
+    const { canvas, ctx, cx, cy } = drawPinMarker({
+      headSize: 24, bg: '#ef4444', borderWidth: 2.5, tailHeight: 8, padding: 6, scale,
     });
-    drawFlagIcon(ctx, cx, cy, 14, '#ffffff', scale);
+    drawIcon(ctx, cx, cy, ICON.flag, 13, '#ffffff', scale);
     savePNG(canvas, `marker-dropoff${suffix}.png`, dirs);
   }
 }
@@ -262,8 +342,9 @@ function generateDropoffMarker(dirs) {
 function generateUserMarker(dirs) {
   for (const scale of [1, 2, 3]) {
     const suffix = scale === 1 ? '' : `@${scale}x`;
+    // Simple blue dot with white border — no icon
     const { canvas } = drawCircleMarker({
-      size: 22, bg: '#4285F4', borderWidth: 3, padding: 10, scale,
+      size: 18, bg: '#4285F4', borderWidth: 3, padding: 10, scale,
     });
     savePNG(canvas, `marker-user${suffix}.png`, dirs);
   }
@@ -288,40 +369,38 @@ function main() {
   const both = [MOBILE_DIR, DRIVER_DIR];
   const mobileOnly = [MOBILE_DIR];
 
-  console.log('Generating marker assets...\n');
+  console.log('Generating marker assets (Ionicons + purple theme)...\n');
 
-  // Car markers (both apps share same assets)
-  console.log('  marker-car-assigned (38px, #171717)');
-  generateCarMarker('marker-car-assigned', 38, '#171717', 3, 20, both);
+  // Car markers — top-down purple car silhouette (no circle)
+  console.log(`  marker-car-assigned (38px, ${BLUE_PRIMARY})`);
+  generateCarMarker('marker-car-assigned', 38, BLUE_PRIMARY, both);
 
-  console.log('  marker-car (30px, #374151)');
-  generateCarMarker('marker-car', 30, '#374151', 2.5, 15, both);
+  console.log(`  marker-car (30px, ${BLUE_LIGHT})`);
+  generateCarMarker('marker-car', 30, BLUE_LIGHT, both);
 
-  // Destination (both apps)
+  // Destination — red with Ionicons flag
   console.log('  marker-destination (38px, #ef4444)');
   generateDestinationMarker(both);
 
-  // Pickup (both apps)
-  console.log('  marker-pickup (24px, #22c55e)');
+  // Pickup — blue pin with Ionicons location
+  console.log('  marker-pickup (28px, #4285F4)');
   generatePickupMarker(both);
 
-  // Dropoff (both apps)
+  // Dropoff — red with Ionicons flag
   console.log('  marker-dropoff (26px, #ef4444)');
   generateDropoffMarker(both);
 
-  // User location (mobile only)
+  // User location — blue with Ionicons navigate
   console.log('  marker-user (22px, #4285F4)');
   generateUserMarker(mobileOnly);
 
-  // Stop markers — large (TaxiScreen, anchor bottom-center)
+  // Stop markers — orange with number text
   console.log('  marker-stop-1..9 (32px, #f97316)');
   generateStopMarker('marker-stop', 32, 13, 12, both);
 
-  // Stop markers — small (RideDetailScreen, anchor center)
   console.log('  marker-stop-small-1..9 (26px, #f97316)');
   generateStopMarker('marker-stop-small', 26, 12, 10, both);
 
-  // Count generated files
   const mobileFiles = fs.readdirSync(MOBILE_DIR).filter(f => f.endsWith('.png'));
   const driverFiles = fs.readdirSync(DRIVER_DIR).filter(f => f.endsWith('.png'));
   console.log(`\nDone! Generated ${mobileFiles.length} PNGs in mobile/assets/markers/`);
