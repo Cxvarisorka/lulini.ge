@@ -8,7 +8,7 @@ import { useNetwork } from './NetworkContext';
 const SocketContext = createContext();
 
 // Socket URL Configuration
-const API_URL = process.env.EXPO_PUBLIC_SOCKET_URL || 'https://api.gotours.ge';
+const API_URL = process.env.EXPO_PUBLIC_SOCKET_URL || 'https://api.lulini.ge';
 
 export const SocketProvider = ({ children }) => {
   const [socket, setSocket] = useState(null);
@@ -40,8 +40,8 @@ export const SocketProvider = ({ children }) => {
         return;
       }
 
-      // If the same user already has a connected socket, skip
-      if (socketRef.current?.connected && socketRef.current._userId === userId) {
+      // If the same user already has a socket (connected or connecting), skip
+      if (socketRef.current && socketRef.current._userId === userId) {
         return;
       }
 
@@ -57,16 +57,9 @@ export const SocketProvider = ({ children }) => {
         if (cancelled || !token) return;
 
         const socketInstance = io(API_URL, {
+          query: { appType: 'passenger' },
           transports: ['websocket', 'polling'],
-          auth: async (cb) => {
-            try {
-              const freshToken = await SecureStore.getItemAsync('token');
-              if (!freshToken) return cb(new Error('No token'));
-              cb({ token: freshToken });
-            } catch (e) {
-              cb(e);
-            }
-          },
+          auth: { token },
           reconnection: true,
           reconnectionAttempts: Infinity,
           reconnectionDelay: 1000,
@@ -80,12 +73,13 @@ export const SocketProvider = ({ children }) => {
           if (!cancelled) setConnected(true);
         });
 
-        socketInstance.on('disconnect', () => {
+        socketInstance.on('disconnect', (reason) => {
+          if (__DEV__) console.warn('[Socket] Disconnected, reason:', reason);
           if (!cancelled) setConnected(false);
         });
 
         socketInstance.on('connect_error', (error) => {
-          console.warn('[Socket] Connection error:', error.message);
+          if (__DEV__) console.warn('[Socket] Connection error:', error.message);
         });
 
         // If cleanup ran while we were awaiting, kill this socket immediately
@@ -97,7 +91,7 @@ export const SocketProvider = ({ children }) => {
         socketRef.current = socketInstance;
         setSocket(socketInstance);
       } catch (error) {
-        console.error('[Socket] Failed to set up socket:', error.message);
+        if (__DEV__) console.error('[Socket] Failed to set up socket:', error.message);
       }
     };
 
@@ -137,7 +131,7 @@ export const SocketProvider = ({ children }) => {
           }
         }
       } catch (e) {
-        console.warn('[Socket] Failed to emit location on reconnect:', e.message);
+        if (__DEV__) console.warn('[Socket] Failed to emit location on reconnect:', e.message);
       }
     });
 

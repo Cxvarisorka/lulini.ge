@@ -3,7 +3,7 @@ import * as SecureStore from 'expo-secure-store';
 import { getIsInternetReachable } from '../context/NetworkContext';
 
 // API URL Configuration
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://api.gotours.ge/api';
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://api.lulini.ge/api';
 
 // H1: Global 401 logout callback — set by AuthContext to trigger logout on token invalidation
 let _onUnauthorized = null;

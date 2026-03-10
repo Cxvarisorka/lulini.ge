@@ -13,10 +13,12 @@ export default function RideOptionsSheet({
   estimatedPrice,
   estimatedDuration,
   onVehicleChange,
-  onPaymentChange,
+  onPaymentPress,
   onRequestRide,
   onBack,
   isRequesting,
+  pricingConfig,
+  routeDistance,
 }) {
   const typography = useTypography();
   const styles = React.useMemo(() => createStyles(typography), [typography]);
@@ -38,13 +40,15 @@ export default function RideOptionsSheet({
       <VehicleTypeSelector
         selectedVehicle={selectedVehicle}
         onSelect={onVehicleChange}
+        pricingConfig={pricingConfig}
+        routeDistance={routeDistance}
       />
 
-      {/* Payment */}
+      {/* Payment - tappable row that opens modal */}
       <Text style={styles.sectionLabel}>{t('taxi.paymentMethod')}</Text>
       <PaymentMethodSelector
         selected={paymentMethod}
-        onSelect={onPaymentChange}
+        onPress={onPaymentPress}
       />
 
       {/* Bottom: Price + Request */}
@@ -76,14 +80,12 @@ export default function RideOptionsSheet({
 }
 
 const createStyles = (typography) => StyleSheet.create({
-  container: {
-    flex: 1,
-  },
+  container: {},
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    marginBottom: 8,
   },
   headerTitle: {
     ...typography.bodyMedium,
@@ -93,14 +95,17 @@ const createStyles = (typography) => StyleSheet.create({
   sectionLabel: {
     ...typography.caption,
     color: colors.mutedForeground,
-    marginBottom: 8,
-    marginTop: 12,
+    marginBottom: 5,
+    marginTop: 8,
   },
   bottomRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: 20,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    marginTop: 12,
   },
   priceInfo: {
     flex: 1,

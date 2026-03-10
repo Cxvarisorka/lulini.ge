@@ -110,7 +110,7 @@ export async function searchPlacesNominatim(query, location = null) {
     });
 
     if (!response.ok) {
-      console.warn('[googleMaps] Nominatim search failed:', response.status);
+      if (__DEV__) console.warn('[googleMaps] Nominatim search failed:', response.status);
       return [];
     }
 
@@ -162,7 +162,7 @@ export async function searchPlacesNominatim(query, location = null) {
       };
     });
   } catch (error) {
-    console.warn('[googleMaps] Nominatim search error:', error.message);
+    if (__DEV__) console.warn('[googleMaps] Nominatim search error:', error.message);
     return [];
   }
 }
@@ -201,7 +201,7 @@ export async function reverseGeocodeNominatim(latitude, longitude) {
     });
 
     if (!response.ok) {
-      console.warn('[googleMaps] Nominatim reverse geocode failed:', response.status);
+      if (__DEV__) console.warn('[googleMaps] Nominatim reverse geocode failed:', response.status);
       return null;
     }
 
@@ -229,7 +229,7 @@ export async function reverseGeocodeNominatim(latitude, longitude) {
       placeType: data.type,
     };
   } catch (error) {
-    console.warn('[googleMaps] Nominatim reverse geocode error:', error.message);
+    if (__DEV__) console.warn('[googleMaps] Nominatim reverse geocode error:', error.message);
     return null;
   }
 }
@@ -318,7 +318,7 @@ export async function getDirectionsOSRM(origin, destination) {
     const response = await fetch(url);
 
     if (!response.ok) {
-      console.warn('[googleMaps] OSRM directions failed:', response.status);
+      if (__DEV__) console.warn('[googleMaps] OSRM directions failed:', response.status);
       return null;
     }
 
@@ -346,7 +346,7 @@ export async function getDirectionsOSRM(origin, destination) {
     cacheSet(directionsCache, cacheKey, result);
     return result;
   } catch (error) {
-    console.warn('[googleMaps] OSRM directions error:', error.message);
+    if (__DEV__) console.warn('[googleMaps] OSRM directions error:', error.message);
     return null;
   }
 }
@@ -421,7 +421,7 @@ export async function searchPlacesGoogle(query, location = null) {
     const response = await fetch(geocodeUrl);
 
     if (!response.ok) {
-      console.warn('[googleMaps] Google geocode failed:', response.status);
+      if (__DEV__) console.warn('[googleMaps] Google geocode failed:', response.status);
       return searchPlacesAutocomplete(query, location);
     }
 
@@ -487,7 +487,7 @@ export async function searchPlacesGoogle(query, location = null) {
       };
     });
   } catch (error) {
-    console.warn('[googleMaps] Google geocode error:', error.message);
+    if (__DEV__) console.warn('[googleMaps] Google geocode error:', error.message);
     return [];
   }
 }
@@ -518,7 +518,7 @@ async function searchPlacesAutocomplete(query, location = null) {
     const response = await fetch(url);
 
     if (!response.ok) {
-      console.warn('[googleMaps] Places autocomplete failed:', response.status);
+      if (__DEV__) console.warn('[googleMaps] Places autocomplete failed:', response.status);
       return [];
     }
 
@@ -536,7 +536,7 @@ async function searchPlacesAutocomplete(query, location = null) {
       coordinates: null, // Need getPlaceDetails for coordinates
     }));
   } catch (error) {
-    console.warn('[googleMaps] Places autocomplete error:', error.message);
+    if (__DEV__) console.warn('[googleMaps] Places autocomplete error:', error.message);
     return [];
   }
 }
@@ -568,7 +568,7 @@ export async function getPlaceDetails(placeId, existingCoords = null) {
     const response = await fetch(url);
 
     if (!response.ok) {
-      console.warn('[googleMaps] Place details failed:', response.status);
+      if (__DEV__) console.warn('[googleMaps] Place details failed:', response.status);
       return null;
     }
 
@@ -588,7 +588,7 @@ export async function getPlaceDetails(placeId, existingCoords = null) {
       },
     };
   } catch (error) {
-    console.warn('[googleMaps] Place details error:', error.message);
+    if (__DEV__) console.warn('[googleMaps] Place details error:', error.message);
     return null;
   }
 }
@@ -628,7 +628,7 @@ async function reverseGeocodeGoogle(latitude, longitude) {
     const response = await fetch(url);
 
     if (!response.ok) {
-      console.warn('[googleMaps] Google reverse geocode failed:', response.status);
+      if (__DEV__) console.warn('[googleMaps] Google reverse geocode failed:', response.status);
       return null;
     }
 
@@ -667,7 +667,7 @@ async function reverseGeocodeGoogle(latitude, longitude) {
       coordinates: { latitude, longitude },
     };
   } catch (error) {
-    console.warn('[googleMaps] Google reverse geocode error:', error.message);
+    if (__DEV__) console.warn('[googleMaps] Google reverse geocode error:', error.message);
     return null;
   }
 }

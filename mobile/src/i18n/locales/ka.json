@@ -83,7 +83,11 @@
     "enterStopAddress": "შეიყვანეთ გაჩერების მისამართი",
     "removeStop": "გაჩერების წაშლა",
     "yourRoute": "თქვენი გზა",
+    "lastDestination": "ბოლო მიმართულება",
     "recentPlaces": "ბოლო ადგილები",
+    "recentRides": "ბოლო მგზავრობები",
+    "showMore": "მეტის ჩვენება",
+    "showLess": "ნაკლების ჩვენება",
     "noRecentPlaces": "ბოლო ადგილები ჯერ არ არის",
     "home": "სახლი",
     "work": "სამსახური",
@@ -127,6 +131,8 @@
     "comfortDesc": "დამატებითი სივრცე და კომფორტი",
     "business": "ბიზნესი",
     "businessDesc": "პრემიუმ ავტომობილები ბიზნესისთვის",
+    "van": "XL",
+    "vanDesc": "ფართო მინივენი 7 მგზავრამდე",
     "locationPermission": "საჭიროა მდებარეობის ნებართვა",
     "locationPermissionDesc": "გთხოვთ ჩართოთ მდებარეობის სერვისები ტაქსის გამოსაყენებლად",
     "enableLocation": "მდებარეობის ჩართვა",
@@ -205,7 +211,11 @@
     "suggestions": "შეთავაზებები",
     "googleApiNotConfigured": "Google Places API არ არის კონფიგურირებული. ხელით ძიება.",
     "tapToSelectLocation": "შეეხეთ რუკას მდებარეობის ასარჩევად",
-    "activeRideExists": "თქვენ უკვე გაქვთ აქტიური მგზავრობა. დაელოდეთ მის დასრულებას ან გააუქმეთ."
+    "activeRideExists": "თქვენ უკვე გაქვთ აქტიური მგზავრობა. დაელოდეთ მის დასრულებას ან გააუქმეთ.",
+    "driverApproaching": "მძღოლი ახლოს არის!",
+    "driverApproachingPickup": "მძღოლი დაახლოებით {{minutes}} წუთში ჩავა. გთხოვთ მოემზადეთ აყვანის ადგილზე.",
+    "almostThere": "თითქმის მიხვედით!",
+    "approachingDropoff": "დანიშნულების ადგილამდე დაახლოებით {{minutes}} წუთი დარჩა."
   },
   "connection": {
     "noInternet": "ინტერნეტი არ არის",

@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   Switch,
   Alert,
+  Linking,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -98,13 +99,13 @@ export default function SettingsScreen({ navigation }) {
           icon: 'shield-checkmark',
           label: t('settings.privacyPolicy'),
           type: 'link',
-          onPress: comingSoon,
+          onPress: () => Linking.openURL('https://lulini.ge/privacy'),
         },
         {
           icon: 'document',
           label: t('settings.termsOfService'),
           type: 'link',
-          onPress: comingSoon,
+          onPress: () => Linking.openURL('https://lulini.ge/terms'),
         },
         {
           icon: 'trash',

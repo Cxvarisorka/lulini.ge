@@ -150,24 +150,6 @@ export default function HomeScreen({ navigation }) {
     },
   ];
 
-  const services = [
-    {
-      id: 'taxi',
-      icon: 'car-sport',
-      title: t('home.bookTaxi'),
-      subtitle: t('home.taxiSubtitle'),
-      screen: 'Taxi',
-      primary: true,
-    },
-    {
-      id: 'history',
-      icon: 'time',
-      title: t('taxi.rideHistory'),
-      subtitle: t('taxi.noRidesDesc'),
-      screen: 'TaxiHistory',
-    },
-  ];
-
   return (
     <View style={styles.container}>
       <ScrollView
@@ -176,7 +158,7 @@ export default function HomeScreen({ navigation }) {
           styles.scrollContent,
           {
             paddingTop: insets.top + spacing.md,
-            paddingBottom: insets.bottom + spacing.xl,
+            paddingBottom: spacing.xl,
           },
         ]}
         showsVerticalScrollIndicator={false}
@@ -286,45 +268,25 @@ export default function HomeScreen({ navigation }) {
           </View>
         </View>
 
-        {/* Services with Car Icons */}
+        {/* Kutaisi City Image */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle} numberOfLines={1}>{t('home.ourFleet')}</Text>
-          <AnimatedCard delay={350} style={styles.servicesContainer}>
-            <View style={styles.servicesInner}>
-              {services.map((service, index) => (
-                <TouchableOpacity
-                  key={service.id}
-                  style={[
-                    styles.serviceItem,
-                    index !== services.length - 1 && styles.serviceItemBorder,
-                  ]}
-                  onPress={() => navigation.navigate(service.screen)}
-                >
-                  <View style={[
-                    styles.serviceIcon,
-                    service.primary && styles.serviceIconPrimary,
-                  ]}>
-                    <Ionicons
-                      name={service.icon}
-                      size={20}
-                      color={colors.primary}
-                    />
-                  </View>
-                  <View style={styles.serviceContent}>
-                    <Text style={styles.serviceTitle} numberOfLines={1}>{service.title}</Text>
-                    <Text style={styles.serviceSubtitle} numberOfLines={1}>
-                      {service.subtitle}
-                    </Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
-                </TouchableOpacity>
-              ))}
+          <AnimatedCard delay={350}>
+            <View style={styles.cityImageCard}>
+              <Image
+                source={require('../../assets/beka-kutaisi-5740980_1920.jpg')}
+                style={styles.cityImage}
+                resizeMode="cover"
+              />
+              <View style={styles.cityImageOverlay}>
+                <Ionicons name="location" size={16} color="#fff" />
+                <Text style={styles.cityImageText}>Kutaisi, Georgia</Text>
+              </View>
             </View>
           </AnimatedCard>
         </View>
 
         {/* Support Card with 3D Effect */}
-        <View style={styles.section}>
+        <View>
           <AnimatedCard
             delay={450}
             onPress={() => navigation.navigate('Support')}
@@ -519,49 +481,32 @@ const createStyles = (typography) => StyleSheet.create({
     color: colors.foreground,
     textAlign: 'center',
   },
-  servicesContainer: {
-    backgroundColor: 'transparent',
-  },
-  servicesInner: {
-    backgroundColor: colors.background,
+  cityImageCard: {
     borderRadius: radius.lg,
+    overflow: 'hidden',
     borderWidth: 1,
     borderColor: colors.border,
   },
-  serviceItem: {
+  cityImage: {
+    width: '100%',
+    height: 160,
+  },
+  cityImageOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
     flexDirection: 'row',
     alignItems: 'center',
-    padding: spacing.lg,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    backgroundColor: 'rgba(0,0,0,0.4)',
   },
-  serviceItemBorder: {
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  serviceIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: radius.md,
-    backgroundColor: colors.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  serviceIconPrimary: {
-    backgroundColor: colors.background,
-  },
-  serviceContent: {
-    flex: 1,
-  },
-  serviceTitle: {
-    ...typography.bodyMedium,
-    color: colors.foreground,
-  },
-  serviceSubtitle: {
-    ...typography.captionSmall,
-    color: colors.mutedForeground,
-    marginTop: 2,
+  cityImageText: {
+    ...typography.bodySmall,
+    fontWeight: '600',
+    color: '#fff',
+    marginLeft: 6,
   },
   supportCard: {
     flexDirection: 'row',

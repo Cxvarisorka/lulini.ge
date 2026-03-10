@@ -83,17 +83,24 @@ export default function PaymentSettingsScreen({ navigation }) {
       const { redirectUrl, orderId } = res.data?.data || {};
 
       if (redirectUrl) {
-        await WebBrowser.openBrowserAsync(redirectUrl, {
-          dismissButtonStyle: 'close',
-          presentationStyle: 'pageSheet',
-        });
+        // openAuthSessionAsync auto-closes when BOG redirects back to
+        // our lulini:// scheme (302 → lulini://payment/success or fail)
+        const result = await WebBrowser.openAuthSessionAsync(
+          redirectUrl,
+          'lulini://'
+        );
 
-        // After browser closes, verify the card registration with BOG
+        // Verify card registration regardless of how browser closed
+        // (user may dismiss, payment may succeed or fail)
         if (orderId) {
           try {
-            await paymentAPI.verifyCardRegistration(orderId);
+            const verifyRes = await paymentAPI.verifyCardRegistration(orderId);
+            const status = verifyRes.data?.data?.status;
+            if (status === 'rejected') {
+              Alert.alert(t('errors.error'), t('payment.cardRegistrationFailed'));
+            }
           } catch {
-            // Non-fatal
+            // Non-fatal — card may still be saved via callback
           }
         }
 

@@ -12,7 +12,7 @@ class ErrorBoundary extends React.Component {
   }
 
   componentDidCatch(error, errorInfo) {
-    console.error('[ErrorBoundary] Uncaught error:', error.message, errorInfo?.componentStack);
+    if (__DEV__) console.error('[ErrorBoundary] Uncaught error:', error.message, errorInfo?.componentStack);
     try {
       const Sentry = require('@sentry/react-native');
       Sentry.captureException(error, { extra: { componentStack: errorInfo?.componentStack } });

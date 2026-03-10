@@ -31,7 +31,7 @@ export const NetworkProvider = ({ children }) => {
         wasOfflineRef.current = false;
         onReconnectCallbacksRef.current.forEach((cb) => {
           try { cb(); } catch (e) {
-            console.warn('[Network] reconnect callback error:', e.message);
+            if (__DEV__) console.warn('[Network] reconnect callback error:', e.message);
           }
         });
       }

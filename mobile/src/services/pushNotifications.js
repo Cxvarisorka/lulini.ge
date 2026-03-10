@@ -20,14 +20,14 @@ export async function registerForPushNotifications(language = 'ka') {
         }
 
         if (finalStatus !== 'granted') {
-            console.log('[Push] Permission not granted');
+            if (__DEV__) console.log('[Push] Permission not granted');
             return null;
         }
 
         // Get Expo push token
         const projectId = Constants.expoConfig?.extra?.eas?.projectId;
         if (!projectId) {
-            console.warn('[Push] No EAS projectId found in app.config.js');
+            if (__DEV__) console.warn('[Push] No EAS projectId found in app.config.js');
             return null;
         }
 
@@ -43,7 +43,7 @@ export async function registerForPushNotifications(language = 'ka') {
                     token: pushToken, platform: Platform.OS, language, app: 'passenger',
                 });
             } catch (err) {
-                console.warn('[Push] Failed to update language:', err.message);
+                if (__DEV__) console.warn('[Push] Failed to update language:', err.message);
             }
             return pushToken;
         }
@@ -53,11 +53,11 @@ export async function registerForPushNotifications(language = 'ka') {
             token: pushToken, platform: Platform.OS, language, app: 'passenger',
         });
         await SecureStore.setItemAsync('pushToken', pushToken);
-        console.log('[Push] Token registered:', pushToken.substring(0, 30) + '...');
+        if (__DEV__) console.log('[Push] Token registered:', pushToken.substring(0, 30) + '...');
 
         return pushToken;
     } catch (err) {
-        console.error('[Push] Registration failed:', err.message);
+        if (__DEV__) console.error('[Push] Registration failed:', err.message);
         return null;
     }
 }
@@ -73,9 +73,9 @@ export async function unregisterPushToken() {
         await api.post('/notifications/unregister-token', { token: pushToken });
 
         await SecureStore.deleteItemAsync('pushToken');
-        console.log('[Push] Token unregistered');
+        if (__DEV__) console.log('[Push] Token unregistered');
     } catch (err) {
-        console.warn('[Push] Unregister failed:', err.message);
+        if (__DEV__) console.warn('[Push] Unregister failed:', err.message);
         // Still clear local token even if server call fails
         await SecureStore.deleteItemAsync('pushToken');
     }

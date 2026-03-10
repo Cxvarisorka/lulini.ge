@@ -101,7 +101,7 @@ export async function showRideNotification(status, driverInfo, eta) {
       trigger: null,
     });
   } catch (error) {
-    console.warn('[RideNotification] Failed to show:', error.message);
+    if (__DEV__) console.warn('[RideNotification] Failed to show:', error.message);
   }
 }
 
@@ -131,7 +131,7 @@ export async function updateRideNotification(status, driverInfo, eta) {
       trigger: null,
     });
   } catch (error) {
-    console.warn('[RideNotification] Failed to update:', error.message);
+    if (__DEV__) console.warn('[RideNotification] Failed to update:', error.message);
   }
 }
 
@@ -143,6 +143,6 @@ export async function dismissRideNotification() {
   try {
     await Notifications.dismissNotificationAsync(NOTIFICATION_ID);
   } catch (error) {
-    console.warn('[RideNotification] Failed to dismiss:', error.message);
+    if (__DEV__) console.warn('[RideNotification] Failed to dismiss:', error.message);
   }
 }

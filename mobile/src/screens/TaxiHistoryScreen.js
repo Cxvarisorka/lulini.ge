@@ -236,7 +236,7 @@ export default function TaxiHistoryScreen({ navigation }) {
           const cached = JSON.parse(raw);
           if (cached.rides?.length) setRides(cached.rides);
         }
-      } catch (e) { console.warn('[TaxiHistory] Cache load error:', e.message); }
+      } catch (e) { if (__DEV__) console.warn('[TaxiHistory] Cache load error:', e.message); }
       if (mounted) setLoading(false);
       try {
         const response = await taxiAPI.getMyRides({ page: 1, limit: PAGE_SIZE });
@@ -249,7 +249,7 @@ export default function TaxiHistoryScreen({ navigation }) {
             rides: serverRides, total: response.data.total, timestamp: Date.now(),
           })).catch(() => {});
         }
-      } catch (e) { console.warn('[TaxiHistory] Fetch error:', e.message); }
+      } catch (e) { if (__DEV__) console.warn('[TaxiHistory] Fetch error:', e.message); }
     });
     return () => { mounted = false; task.cancel(); };
   }, []);
@@ -274,7 +274,7 @@ export default function TaxiHistoryScreen({ navigation }) {
           return merged;
         });
       }
-    } catch (e) { console.warn('[TaxiHistory] Pagination error:', e.message); }
+    } catch (e) { if (__DEV__) console.warn('[TaxiHistory] Pagination error:', e.message); }
     setLoadingMore(false);
   }, [loadingMore]);
 
@@ -291,7 +291,7 @@ export default function TaxiHistoryScreen({ navigation }) {
           rides: serverRides, total: response.data.total, timestamp: Date.now(),
         })).catch(() => {});
       }
-    } catch (e) { console.warn('[TaxiHistory] Refresh error:', e.message); }
+    } catch (e) { if (__DEV__) console.warn('[TaxiHistory] Refresh error:', e.message); }
     setRefreshing(false);
   }, []);
 

@@ -83,7 +83,11 @@
     "enterStopAddress": "Enter stop address",
     "removeStop": "Remove stop",
     "yourRoute": "Your Route",
+    "lastDestination": "Last destination",
     "recentPlaces": "Recent Places",
+    "recentRides": "Recent Rides",
+    "showMore": "Show More",
+    "showLess": "Show Less",
     "noRecentPlaces": "No recent places yet",
     "home": "Home",
     "work": "Work",
@@ -127,6 +131,8 @@
     "comfortDesc": "Extra space and comfort",
     "business": "Business",
     "businessDesc": "Premium vehicles for business",
+    "van": "XL",
+    "vanDesc": "Spacious van for groups up to 7",
     "locationPermission": "Location Permission Required",
     "locationPermissionDesc": "Please enable location services to use the taxi feature",
     "enableLocation": "Enable Location",
@@ -204,7 +210,11 @@
     "suggestions": "Suggestions",
     "googleApiNotConfigured": "Google Places API not configured. Using manual search.",
     "tapToSelectLocation": "Tap on the map to select location",
-    "activeRideExists": "You already have an active ride. Please wait for it to finish or cancel it first."
+    "activeRideExists": "You already have an active ride. Please wait for it to finish or cancel it first.",
+    "driverApproaching": "Driver is Nearby!",
+    "driverApproachingPickup": "Your driver will arrive in about {{minutes}} min. Please be ready at the pickup location.",
+    "almostThere": "Almost There!",
+    "approachingDropoff": "You will arrive at your destination in about {{minutes}} min."
   },
   "connection": {
     "noInternet": "No Internet Connection",

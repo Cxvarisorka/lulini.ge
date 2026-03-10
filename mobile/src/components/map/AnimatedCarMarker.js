@@ -12,7 +12,7 @@
  *   isAssigned  boolean                  — true = assigned driver (larger)
  */
 import { useRef, useEffect, useState, memo } from 'react';
-import { View, StyleSheet, Platform } from 'react-native';
+import { View, StyleSheet, Platform, Animated } from 'react-native';
 import AnimatedMarker from './AnimatedMarkerWrapper';
 import Marker from './MarkerWrapper';
 import { markerImages } from './markerImages';
@@ -78,6 +78,8 @@ const TopDownCar = memo(({ isAssigned, rotation }) => {
 });
 TopDownCar.displayName = 'TopDownCar';
 
+const ROTATION_DURATION = 300; // ms for smooth rotation animation
+
 const AnimatedCarMarker = memo(
   ({ coordinate, isAssigned = false }) => {
     const lat = coordinate?.latitude;
@@ -89,7 +91,12 @@ const AnimatedCarMarker = memo(
     const lastUpdateTime = useRef(Date.now());
     const headingTarget = useRef(0);
 
-    const [rotation, setRotation] = useState(0);
+    // iOS: plain state rotation (used in JSX transform)
+    const [iosRotation, setIosRotation] = useState(0);
+
+    // Android: Animated.Value for smooth rotation interpolation
+    const androidRotation = useRef(new Animated.Value(0)).current;
+    const androidRotationValue = useRef(0); // tracks current numeric value
 
     if (!prevCoord.current && isValid) {
       prevCoord.current = { latitude: lat, longitude: lng };
@@ -132,7 +139,18 @@ const AnimatedCarMarker = memo(
         const newBearing = calcBearing(prev, { latitude: lat, longitude: lng });
         const smoothTarget = shortestRotation(headingTarget.current, newBearing);
         headingTarget.current = smoothTarget;
-        setRotation(smoothTarget);
+
+        if (isIOS) {
+          setIosRotation(smoothTarget);
+        } else {
+          // Animate rotation smoothly on Android/Google Maps
+          androidRotationValue.current = smoothTarget;
+          Animated.timing(androidRotation, {
+            toValue: smoothTarget,
+            duration: ROTATION_DURATION,
+            useNativeDriver: false,
+          }).start();
+        }
       }
 
       prevCoord.current = { latitude: lat, longitude: lng };
@@ -150,21 +168,20 @@ const AnimatedCarMarker = memo(
           image={isAssigned ? markerImages.carAssigned : markerImages.car}
           anchor={{ x: 0.5, y: 0.5 }}
           flat={true}
-          rotation={rotation}
+          rotation={androidRotation}
           tracksViewChanges={false}
           zIndex={isAssigned ? 8 : 4}
         />
       );
     }
 
-    // On iOS, use native rotation prop instead of CSS transform
-    // so we don't need tracksViewChanges={true}
+    // iOS: keep existing JSX-based rendering untouched
     return (
       <Marker
         coordinate={coord}
         anchor={{ x: 0.5, y: 0.5 }}
         flat={true}
-        rotation={rotation}
+        rotation={iosRotation}
         tracksViewChanges={false}
         image={isAssigned ? markerImages.carAssigned : markerImages.car}
         zIndex={isAssigned ? 8 : 4}

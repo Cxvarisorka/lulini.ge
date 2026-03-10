@@ -8,6 +8,8 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Platform,
+  ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
@@ -15,7 +17,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { colors, shadows, radius, useTypography } from '../../theme/colors';
 import { paymentAPI } from '../../services/api';
 
-export default function PaymentMethodModal({ visible, onClose, onSelect, amount }) {
+export default function PaymentMethodModal({ visible, onClose, onSelect, amount, mode = 'select' }) {
   const typography = useTypography();
   const styles = React.useMemo(() => createStyles(typography), [typography]);
   const { t, i18n } = useTranslation();
@@ -41,6 +43,17 @@ export default function PaymentMethodModal({ visible, onClose, onSelect, amount 
     fetchCards();
   }, [fetchCards]);
 
+  const handleCashSelect = () => {
+    onSelect('cash');
+    onClose();
+  };
+
+  const handleMobilePaySelect = () => {
+    const method = Platform.OS === 'ios' ? 'apple_pay' : 'google_pay';
+    onSelect(method);
+    onClose();
+  };
+
   const handleAddCard = async () => {
     setProcessing(true);
     try {
@@ -54,7 +67,6 @@ export default function PaymentMethodModal({ visible, onClose, onSelect, amount 
           presentationStyle: 'pageSheet',
         });
 
-        // Verify card registration with BOG
         if (orderId) {
           try {
             await paymentAPI.verifyCardRegistration(orderId);
@@ -76,8 +88,13 @@ export default function PaymentMethodModal({ visible, onClose, onSelect, amount 
   };
 
   const handleSelectCard = async (card) => {
+    if (mode === 'select') {
+      onSelect('card', card._id, null);
+      onClose();
+      return;
+    }
+
     if (!amount || amount <= 0) {
-      // No amount means just selecting card (e.g. from settings)
       onSelect('card', card._id, null);
       onClose();
       return;
@@ -94,7 +111,6 @@ export default function PaymentMethodModal({ visible, onClose, onSelect, amount 
         throw new Error('No order ID returned');
       }
 
-      // If BOG requires redirect (user confirmation page)
       if (redirectUrl) {
         await WebBrowser.openBrowserAsync(redirectUrl, {
           dismissButtonStyle: 'close',
@@ -102,7 +118,6 @@ export default function PaymentMethodModal({ visible, onClose, onSelect, amount 
         });
       }
 
-      // Verify payment status with BOG
       const verifyRes = await paymentAPI.verifyRidePayment(orderId);
       const status = verifyRes.data?.data?.status;
       const confirmedPaymentId = verifyRes.data?.data?.paymentId || paymentId;
@@ -113,7 +128,6 @@ export default function PaymentMethodModal({ visible, onClose, onSelect, amount 
       } else if (status === 'rejected') {
         Alert.alert(t('errors.error'), t('payment.cardPaymentFailed'));
       } else {
-        // Still processing — might be pending
         Alert.alert(t('payment.cardPaymentProcessing'), t('payment.paymentPendingMessage'));
       }
     } catch (err) {
@@ -185,6 +199,10 @@ export default function PaymentMethodModal({ visible, onClose, onSelect, amount 
     </TouchableOpacity>
   );
 
+  const mobilePayLabel = Platform.OS === 'ios' ? t('taxi.applePay') : t('taxi.googlePay');
+  const mobilePayIcon = Platform.OS === 'ios' ? 'logo-apple' : 'logo-google';
+  const mobilePayDesc = Platform.OS === 'ios' ? t('taxi.applePayDesc') : t('taxi.googlePayDesc');
+
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={processing ? undefined : onClose}>
@@ -199,7 +217,7 @@ export default function PaymentMethodModal({ visible, onClose, onSelect, amount 
             </View>
 
             {/* Amount info */}
-            {amount > 0 && (
+            {mode === 'charge' && amount > 0 && (
               <View style={styles.amountBar}>
                 <Text style={styles.amountLabel}>{t('payment.chargeAmount')}</Text>
                 <Text style={styles.amountValue}>{amount.toFixed(2)} ₾</Text>
@@ -215,44 +233,62 @@ export default function PaymentMethodModal({ visible, onClose, onSelect, amount 
             )}
 
             {/* Content */}
-            <View style={styles.optionsContainer}>
-              {loading ? (
-                <ActivityIndicator size="small" color={colors.primary} style={{ padding: 20 }} />
-              ) : (
-                <>
-                  {cards.length > 0 && (
-                    <FlatList
-                      data={cards}
-                      keyExtractor={(item) => item._id}
-                      renderItem={renderCard}
-                      scrollEnabled={false}
-                      ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
-                    />
-                  )}
+            <ScrollView style={styles.scrollArea} showsVerticalScrollIndicator={false}>
+              <View style={styles.optionsContainer}>
+                {/* Cash option */}
+                <TouchableOpacity style={styles.paymentOption} onPress={handleCashSelect} disabled={processing}>
+                  <View style={styles.iconContainer}>
+                    <Ionicons name="cash-outline" size={28} color={colors.success} />
+                  </View>
+                  <View style={styles.optionContent}>
+                    <Text style={styles.optionTitle}>{t('taxi.cash')}</Text>
+                    <Text style={styles.optionDescription}>{t('payment.cashDesc')}</Text>
+                  </View>
+                </TouchableOpacity>
 
-                  {cards.length === 0 && (
-                    <View style={styles.emptyState}>
-                      <Ionicons name="card-outline" size={32} color={colors.mutedForeground} />
-                      <Text style={styles.emptyText}>{t('payment.noSavedCards')}</Text>
-                    </View>
-                  )}
+                {/* Apple Pay / Google Pay */}
+                <TouchableOpacity style={styles.paymentOption} onPress={handleMobilePaySelect} disabled={processing}>
+                  <View style={styles.iconContainer}>
+                    <Ionicons name={mobilePayIcon} size={28} color={colors.foreground} />
+                  </View>
+                  <View style={styles.optionContent}>
+                    <Text style={styles.optionTitle}>{mobilePayLabel}</Text>
+                    <Text style={styles.optionDescription}>{mobilePayDesc}</Text>
+                  </View>
+                </TouchableOpacity>
 
-                  {/* Add New Card Button */}
-                  <TouchableOpacity
-                    style={styles.addCardButton}
-                    onPress={handleAddCard}
-                    disabled={processing}
-                  >
-                    {processing ? (
-                      <ActivityIndicator size="small" color={colors.primary} />
-                    ) : (
-                      <Ionicons name="add-circle-outline" size={24} color={colors.primary} />
+                {/* Saved cards */}
+                {loading ? (
+                  <ActivityIndicator size="small" color={colors.primary} style={{ padding: 20 }} />
+                ) : (
+                  <>
+                    {cards.length > 0 && (
+                      <FlatList
+                        data={cards}
+                        keyExtractor={(item) => item._id}
+                        renderItem={renderCard}
+                        scrollEnabled={false}
+                        ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
+                      />
                     )}
-                    <Text style={styles.addCardText}>{t('payment.addNewCard')}</Text>
-                  </TouchableOpacity>
-                </>
-              )}
-            </View>
+
+                    {/* Add New Card Button */}
+                    <TouchableOpacity
+                      style={styles.addCardButton}
+                      onPress={handleAddCard}
+                      disabled={processing}
+                    >
+                      {processing ? (
+                        <ActivityIndicator size="small" color={colors.primary} />
+                      ) : (
+                        <Ionicons name="add-circle-outline" size={24} color={colors.primary} />
+                      )}
+                      <Text style={styles.addCardText}>{t('payment.addNewCard')}</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
+              </View>
+            </ScrollView>
           </TouchableOpacity>
         </View>
       </TouchableOpacity>
@@ -277,7 +313,10 @@ const createStyles = (typography) =>
       backgroundColor: colors.card,
       borderRadius: radius.xl,
       ...shadows.lg,
-      maxHeight: '80%',
+      maxHeight: '90%',
+    },
+    scrollArea: {
+      flexGrow: 0,
     },
     header: {
       flexDirection: 'row',
@@ -326,7 +365,7 @@ const createStyles = (typography) =>
     },
     optionsContainer: {
       padding: 20,
-      gap: 12,
+      gap: 8,
     },
     paymentOption: {
       flexDirection: 'row',
@@ -357,15 +396,6 @@ const createStyles = (typography) =>
     },
     optionDescription: {
       ...typography.small,
-      color: colors.mutedForeground,
-    },
-    emptyState: {
-      alignItems: 'center',
-      paddingVertical: 20,
-      gap: 8,
-    },
-    emptyText: {
-      ...typography.bodySmall,
       color: colors.mutedForeground,
     },
     addCardButton: {

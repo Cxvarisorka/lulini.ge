@@ -1,9 +1,10 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput, ActivityIndicator, Keyboard } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
-import { colors, radius, useTypography } from '../../theme/colors';
+import { colors, useTypography } from '../../theme/colors';
 import { searchPlaces } from '../../services/googleMaps';
+import { taxiAPI } from '../../services/api';
 
 const MAX_STOPS = 2;
 
@@ -16,15 +17,16 @@ export default function LocationSearchSheet({
   onPickupSelect,
   isLoadingLocation,
   userLocation,
-  onSelectOnMap,
   stops = [],
   onAddStop,
   onRemoveStop,
   onStopSelect,
+  onSelectOnMap,
+  lastDestination,
 }) {
   const typography = useTypography();
   const styles = React.useMemo(() => createStyles(typography), [typography]);
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [searchQuery, setSearchQuery] = useState(destination || '');
   const [pickupQuery, setPickupQuery] = useState('');
   const [pickupEdited, setPickupEdited] = useState(false);
@@ -211,7 +213,51 @@ export default function LocationSearchSheet({
     if (onPickupRefresh) onPickupRefresh();
   }, [pickup?.address, onPickupRefresh]);
 
-  const recentPlaces = []; // TODO: Load from persisted user ride history
+  const [recentRides, setRecentRides] = useState([]);
+  const [loadingRides, setLoadingRides] = useState(true);
+  const [showAllRides, setShowAllRides] = useState(false);
+
+  const INITIAL_RIDES = 3;
+  const MAX_RIDES = 10;
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const res = await taxiAPI.getMyRides({ page: 1, limit: MAX_RIDES });
+        if (res.data.success && mounted) {
+          setRecentRides(res.data.data.rides || []);
+        }
+      } catch (e) {
+        if (__DEV__) console.warn('[LocationSearch] Recent rides error:', e.message);
+      }
+      if (mounted) setLoadingRides(false);
+    })();
+    return () => { mounted = false; };
+  }, []);
+
+  // Deduplicate by dropoff address (keep the most recent ride per unique destination)
+  const uniqueRides = useMemo(() => {
+    const seen = new Set();
+    return recentRides.filter(ride => {
+      const addr = ride.dropoff?.address?.trim().toLowerCase();
+      if (!addr || seen.has(addr)) return false;
+      seen.add(addr);
+      return true;
+    });
+  }, [recentRides]);
+
+  const hasMoreRides = uniqueRides.length > INITIAL_RIDES;
+  const displayedRides = showAllRides ? uniqueRides : uniqueRides.slice(0, INITIAL_RIDES);
+
+  const formatRideDate = (dateString) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString(i18n.language, {
+      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+    });
+  };
+
+  const recentPlaces = []; // kept for backward compat with recent places section
 
   const handleInputFocus = useCallback(() => {
     setTimeout(() => {
@@ -247,14 +293,8 @@ export default function LocationSearchSheet({
   }, [handleInputFocus]);
 
   return (
-    <ScrollView
-      ref={scrollViewRef}
-      style={styles.container}
-      showsVerticalScrollIndicator={false}
-      keyboardShouldPersistTaps="handled"
-      contentContainerStyle={styles.scrollContent}
-    >
-      {/* Location Input Section */}
+    <View style={styles.container}>
+      {/* Location Input Section — sticky at top */}
       <View style={styles.searchContainer}>
         <View style={styles.inputWrapper}>
           {/* Dot Indicators */}
@@ -294,6 +334,15 @@ export default function LocationSearchSheet({
                 {activeInput === 'pickup' && isSearching && (
                   <ActivityIndicator size="small" color={colors.primary} style={styles.searchingIndicator} />
                 )}
+                {onSelectOnMap && (
+                  <TouchableOpacity
+                    onPress={() => onSelectOnMap('pickup')}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    style={styles.mapIconButton}
+                  >
+                    <Ionicons name="map-outline" size={18} color={colors.mutedForeground} />
+                  </TouchableOpacity>
+                )}
                 <TouchableOpacity
                   onPress={handlePickupReset}
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -326,6 +375,15 @@ export default function LocationSearchSheet({
                     />
                     {activeInput === index && isSearching && (
                       <ActivityIndicator size="small" color={colors.primary} style={styles.searchingIndicator} />
+                    )}
+                    {onSelectOnMap && (
+                      <TouchableOpacity
+                        onPress={() => onSelectOnMap(index)}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        style={styles.mapIconButton}
+                      >
+                        <Ionicons name="map-outline" size={18} color={colors.mutedForeground} />
+                      </TouchableOpacity>
                     )}
                     <TouchableOpacity
                       style={styles.removeStopButton}
@@ -363,6 +421,15 @@ export default function LocationSearchSheet({
                 {activeInput === 'destination' && isSearching && (
                   <ActivityIndicator size="small" color={colors.primary} style={styles.searchingIndicator} />
                 )}
+                {onSelectOnMap && (
+                  <TouchableOpacity
+                    onPress={() => onSelectOnMap('destination')}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    style={styles.mapIconButton}
+                  >
+                    <Ionicons name="map-outline" size={18} color={colors.mutedForeground} />
+                  </TouchableOpacity>
+                )}
                 {stops.length < MAX_STOPS && onAddStop && (
                   <TouchableOpacity
                     style={styles.addStopButton}
@@ -376,101 +443,173 @@ export default function LocationSearchSheet({
                   </TouchableOpacity>
                 )}
               </View>
-
-              {/* Search button (show when no suggestions and query is long enough) */}
-              {activeInput === 'destination' && searchQuery.length > 3 && suggestions.length === 0 && !isSearching && (
-                <TouchableOpacity style={styles.searchButton} onPress={handleSubmit}>
-                  <Ionicons name="search" size={18} color={colors.background} />
-                  <Text style={styles.searchButtonText}>{t('common.search')}</Text>
-                </TouchableOpacity>
-              )}
             </View>
           </View>
         </View>
+
       </View>
 
-      {/* Place Suggestions */}
-      {suggestions.length > 0 && (
-        <View style={styles.suggestionsContainer}>
-          <View style={styles.sectionHeader}>
-            <Ionicons name="location-outline" size={18} color={colors.mutedForeground} />
-            <Text style={styles.sectionTitle}>{t('taxi.suggestions') || 'Suggestions'}</Text>
-          </View>
-          {suggestions.map((place, index) => (
-            <TouchableOpacity
-              key={place.placeId || index}
-              style={styles.suggestionItem}
-              onPress={() => handlePlaceSelect(place)}
-            >
-              <View style={styles.suggestionIcon}>
-                <Ionicons name="location" size={20} color={colors.primary} />
-              </View>
-              <View style={styles.suggestionDetails}>
-                <Text style={styles.suggestionMain} numberOfLines={1}>{place.mainText}</Text>
-                <Text style={styles.suggestionSecondary} numberOfLines={1}>{place.secondaryText}</Text>
-              </View>
-            </TouchableOpacity>
-          ))}
-        </View>
-      )}
+      <View style={styles.searchShadow} />
 
-      {/* Recent Places Section (show only when no suggestions and there are recent places) */}
-      {suggestions.length === 0 && recentPlaces.length > 0 && (
-        <>
-          <View style={styles.sectionHeader}>
-            <Ionicons name="time-outline" size={18} color={colors.mutedForeground} />
-            <Text style={styles.sectionTitle}>{t('taxi.recentPlaces')}</Text>
-          </View>
-
-          {recentPlaces.map((place) => (
+      {/* Scrollable content below inputs */}
+      <ScrollView
+        ref={scrollViewRef}
+        style={styles.scrollArea}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={styles.scrollContent}
+      >
+        {/* Cached Last Destination — instant, no API call */}
+        {suggestions.length === 0 && lastDestination?.address && (
+          <View style={styles.lastDestSection}>
+            <View style={styles.sectionHeader}>
+              <Ionicons name="bookmark-outline" size={18} color={colors.mutedForeground} />
+              <Text style={styles.sectionTitle}>{t('taxi.lastDestination') || 'Last destination'}</Text>
+            </View>
             <TouchableOpacity
-              key={place.id}
-              style={styles.placeItem}
+              style={styles.recentRideCard}
               onPress={() => {
                 Keyboard.dismiss();
-                setSearchQuery(place.address);
+                setSearchQuery(lastDestination.address);
                 setSuggestions([]);
-                onDestinationSelect(place.address);
+                onDestinationSelect(lastDestination.address, lastDestination.coords || null);
               }}
+              activeOpacity={0.7}
             >
-              <View style={styles.placeIcon}>
-                <Ionicons name={place.icon} size={20} color={colors.primary} />
+              <View style={styles.recentRideIcon}>
+                <Ionicons name="navigate" size={16} color={colors.primary} />
               </View>
-              <View style={styles.placeDetails}>
-                <Text style={styles.placeName}>{place.name}</Text>
-                <Text style={styles.placeAddress} numberOfLines={1}>{place.address}</Text>
+              <View style={styles.recentRideInfo}>
+                <Text style={styles.recentRideAddress} numberOfLines={1}>
+                  {lastDestination.address}
+                </Text>
               </View>
-              <Ionicons name="chevron-forward" size={20} color={colors.mutedForeground} />
+              <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
             </TouchableOpacity>
-          ))}
-        </>
-      )}
+          </View>
+        )}
 
-      {/* Select on Map Option (show when no suggestions) */}
-      {suggestions.length === 0 && (
-        <TouchableOpacity
-          style={styles.mapSelectButton}
-          onPress={() => {
-            Keyboard.dismiss();
-            if (onSelectOnMap) {
-              onSelectOnMap();
-            }
-          }}
-        >
-          <Ionicons name="map-outline" size={20} color={colors.primary} />
-          <Text style={styles.mapSelectText}>{t('taxi.selectOnMap')}</Text>
-        </TouchableOpacity>
-      )}
+        {/* Place Suggestions */}
+        {suggestions.length > 0 && (
+          <View style={styles.suggestionsContainer}>
+            <View style={styles.sectionHeader}>
+              <Ionicons name="location-outline" size={18} color={colors.mutedForeground} />
+              <Text style={styles.sectionTitle}>{t('taxi.suggestions') || 'Suggestions'}</Text>
+            </View>
+            {suggestions.map((place, index) => (
+              <TouchableOpacity
+                key={place.placeId || index}
+                style={styles.suggestionItem}
+                onPress={() => handlePlaceSelect(place)}
+              >
+                <View style={styles.suggestionIcon}>
+                  <Ionicons name="location" size={20} color={colors.primary} />
+                </View>
+                <View style={styles.suggestionDetails}>
+                  <Text style={styles.suggestionMain} numberOfLines={1}>{place.mainText}</Text>
+                  <Text style={styles.suggestionSecondary} numberOfLines={1}>{place.secondaryText}</Text>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
 
-      {/* OpenStreetMap attribution (required by Nominatim usage policy) */}
-      {suggestions.length > 0 && (
-        <View style={styles.poweredBy}>
-          <Text style={styles.poweredByText}>
-            {'Powered by OpenStreetMap'}
-          </Text>
-        </View>
-      )}
-    </ScrollView>
+        {/* Recent Places Section (show only when no suggestions and there are recent places) */}
+        {suggestions.length === 0 && recentPlaces.length > 0 && (
+          <>
+            <View style={styles.sectionHeader}>
+              <Ionicons name="time-outline" size={18} color={colors.mutedForeground} />
+              <Text style={styles.sectionTitle}>{t('taxi.recentPlaces')}</Text>
+            </View>
+
+            {recentPlaces.map((place) => (
+              <TouchableOpacity
+                key={place.id}
+                style={styles.placeItem}
+                onPress={() => {
+                  Keyboard.dismiss();
+                  setSearchQuery(place.address);
+                  setSuggestions([]);
+                  onDestinationSelect(place.address);
+                }}
+              >
+                <View style={styles.placeIcon}>
+                  <Ionicons name={place.icon} size={20} color={colors.primary} />
+                </View>
+                <View style={styles.placeDetails}>
+                  <Text style={styles.placeName}>{place.name}</Text>
+                  <Text style={styles.placeAddress} numberOfLines={1}>{place.address}</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color={colors.mutedForeground} />
+              </TouchableOpacity>
+            ))}
+          </>
+        )}
+
+        {/* Recent Rides Section (show only when no suggestions) */}
+        {suggestions.length === 0 && !loadingRides && displayedRides.length > 0 && (
+          <View style={styles.recentRidesSection}>
+            <View style={styles.sectionHeader}>
+              <Ionicons name="time-outline" size={18} color={colors.mutedForeground} />
+              <Text style={styles.sectionTitle}>{t('taxi.recentRides')}</Text>
+            </View>
+            {displayedRides.map((ride) => (
+              <TouchableOpacity
+                key={ride._id}
+                style={styles.recentRideCard}
+                onPress={() => {
+                  if (ride.dropoff?.address) {
+                    Keyboard.dismiss();
+                    setSearchQuery(ride.dropoff.address);
+                    setSuggestions([]);
+                    const coords = ride.dropoff.lat && ride.dropoff.lng
+                      ? { latitude: ride.dropoff.lat, longitude: ride.dropoff.lng }
+                      : null;
+                    onDestinationSelect(ride.dropoff.address, coords);
+                  }
+                }}
+                activeOpacity={0.7}
+              >
+                <View style={styles.recentRideIcon}>
+                  <Ionicons name="navigate" size={16} color={colors.primary} />
+                </View>
+                <View style={styles.recentRideInfo}>
+                  <Text style={styles.recentRideAddress} numberOfLines={1}>
+                    {ride.dropoff?.address || 'N/A'}
+                  </Text>
+                  <Text style={styles.recentRideMeta} numberOfLines={1}>
+                    {formatRideDate(ride.createdAt)}
+                    {ride.fare ? ` · ${ride.fare.toFixed(2)} ₾` : ''}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
+              </TouchableOpacity>
+            ))}
+            {hasMoreRides && (
+              <TouchableOpacity
+                style={styles.showMoreButton}
+                onPress={() => setShowAllRides(prev => !prev)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.showMoreText}>
+                  {showAllRides ? t('taxi.showLess') : t('taxi.showMore')}
+                </Text>
+                <Ionicons name={showAllRides ? 'chevron-up' : 'chevron-down'} size={16} color={colors.primary} />
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+
+        {/* OpenStreetMap attribution (required by Nominatim usage policy) */}
+        {suggestions.length > 0 && (
+          <View style={styles.poweredBy}>
+            <Text style={styles.poweredByText}>
+              {'Powered by OpenStreetMap'}
+            </Text>
+          </View>
+        )}
+      </ScrollView>
+    </View>
   );
 }
 
@@ -478,11 +617,25 @@ const createStyles = (typography) => StyleSheet.create({
   container: {
     flex: 1,
   },
+  scrollArea: {
+    flex: 1,
+  },
   scrollContent: {
+    paddingTop: 16,
     paddingBottom: 20,
   },
   searchContainer: {
-    marginBottom: 20,
+    marginBottom: 0,
+    backgroundColor: colors.background,
+    zIndex: 1,
+  },
+  mapIconButton: {
+    marginLeft: 4,
+    padding: 8,
+  },
+  searchShadow: {
+    height: 1,
+    backgroundColor: colors.border,
   },
   inputWrapper: {
     flexDirection: 'row',
@@ -570,21 +723,6 @@ const createStyles = (typography) => StyleSheet.create({
     marginLeft: 8,
     padding: 8,
   },
-  searchButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.primary,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: radius.md,
-    marginTop: 12,
-  },
-  searchButtonText: {
-    ...typography.button,
-    color: colors.background,
-    marginLeft: 6,
-  },
   suggestionsContainer: {
     marginBottom: 16,
   },
@@ -658,22 +796,51 @@ const createStyles = (typography) => StyleSheet.create({
     color: colors.mutedForeground,
     marginTop: 2,
   },
-  mapSelectButton: {
+  lastDestSection: {
+    marginBottom: 8,
+  },
+  recentRidesSection: {
+    marginBottom: 8,
+  },
+  recentRideCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  recentRideIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: `${colors.primary}15`,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  recentRideInfo: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  recentRideAddress: {
+    ...typography.bodySmall,
+    fontWeight: '500',
+    color: colors.foreground,
+  },
+  recentRideMeta: {
+    ...typography.captionSmall,
+    color: colors.mutedForeground,
+    marginTop: 2,
+  },
+  showMoreButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 16,
-    marginTop: 20,
-    marginBottom: 20,
-    backgroundColor: colors.background,
-    borderRadius: radius.lg,
-    borderWidth: 2,
-    borderColor: colors.primary,
+    paddingVertical: 14,
+    gap: 6,
   },
-  mapSelectText: {
-    marginLeft: 8,
+  showMoreText: {
     ...typography.bodySmall,
-    fontWeight: '500',
+    fontWeight: '600',
     color: colors.primary,
   },
   poweredBy: {

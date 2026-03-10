@@ -30,7 +30,7 @@ const typography = useTypography();
     {
       icon: 'globe',
       label: t('about.website'),
-      url: 'https://gotours.ge',
+      url: 'https://lulini.ge',
     },
     {
       icon: 'logo-facebook',
@@ -53,17 +53,17 @@ const typography = useTypography();
     {
       icon: 'document-text',
       label: t('about.termsOfService'),
-      onPress: () => {},
+      onPress: () => handleLinkPress('https://lulini.ge/terms'),
     },
     {
       icon: 'shield-checkmark',
       label: t('about.privacyPolicy'),
-      onPress: () => {},
+      onPress: () => handleLinkPress('https://lulini.ge/privacy'),
     },
     {
       icon: 'document',
       label: t('about.licenses'),
-      onPress: () => {},
+      onPress: () => handleLinkPress('https://lulini.ge/licenses'),
     },
   ];
 
@@ -72,7 +72,7 @@ const typography = useTypography();
     try {
       await Linking.openURL(url);
     } catch (err) {
-      console.warn('[About] Failed to open URL:', err.message);
+      if (__DEV__) console.warn('[About] Failed to open URL:', err.message);
     }
   };
 
