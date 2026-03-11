@@ -20,6 +20,11 @@ function getRideEventQueue() {
         }
     });
 
+    // N8: Handle queue-level errors (connection lost, Redis errors)
+    rideEventQueue.on('error', (err) => {
+        console.error('RideEventQueue error:', err.message);
+    });
+
     return rideEventQueue;
 }
 

@@ -6,6 +6,8 @@ const AppError = require('../utils/AppError');
 const catchAsync = require('../utils/catchAsync');
 const pushService = require('../services/pushNotification.service');
 const { haversineKm } = require('../utils/distance');
+const { pushIfOffline, emitCritical } = require('../utils/socketHelpers');
+const { isUserOnlineAsync } = require('../socket/presence');
 
 // Proximity threshold: driver must be within this distance to confirm arrival/completion
 const ARRIVAL_PROXIMITY_KM = 0.5; // 500 meters
@@ -32,20 +34,6 @@ function getEligibleRideTypes(driverVehicleType) {
         case 'economy': return ['economy'];
         default: return [driverVehicleType];
     }
-}
-
-// ── Push-if-offline helper ──
-// Only send push notifications when the user has NO active socket connection.
-// When the app is foregrounded the socket event already triggers an in-app Alert;
-// sending a push as well caused duplicate/triple notifications.
-async function pushIfOffline(io, userId, titleKey, bodyKey, data = {}, params = {}) {
-    try {
-        const sockets = await io.in(`user:${userId}`).fetchSockets();
-        if (sockets.length > 0) return; // user is online — socket event is enough
-    } catch {
-        // If fetchSockets fails, fall through and send the push as a safety net
-    }
-    return pushService.sendToUser(userId, titleKey, bodyKey, data, params);
 }
 
 // ── Idempotency store ──
@@ -92,7 +80,7 @@ async function setIdempotentResponse(key, statusCode, body) {
 }
 
 // In-memory cleanup (only needed when Redis is not available)
-setInterval(() => {
+const _idempotencyCleanupInterval = setInterval(() => {
     if (process.env.REDIS_URL) return; // Redis handles TTL automatically
     const now = Date.now();
     for (const [key, entry] of idempotencyStore) {
@@ -101,6 +89,7 @@ setInterval(() => {
         }
     }
 }, 60 * 1000);
+_idempotencyCleanupInterval.unref(); // Don't keep process alive for cleanup
 
 // @desc    Create a new ride request
 // @route   POST /api/rides
@@ -454,9 +443,11 @@ const acceptRide = catchAsync(async (req, res, next) => {
         return next(new AppError('This ride is no longer available', 400));
     }
 
-    // Update driver status to busy
-    driver.status = 'busy';
-    await driver.save();
+    // Update driver status to busy (atomic — prevents status mismatch if save fails)
+    await Driver.updateOne(
+        { _id: driver._id, status: 'online' },
+        { $set: { status: 'busy' } }
+    );
 
     const populatedRide = await Ride.findById(ride._id)
         .populate('user', 'firstName lastName email phone')
@@ -468,30 +459,31 @@ const acceptRide = catchAsync(async (req, res, next) => {
             }
         });
 
-    // Emit socket events
+    // Emit socket events (critical — delivery guarantee via emitCritical)
     const io = req.app.get('io');
     if (io) {
-        // Notify user + admin (chained .to() deduplicates if socket is in both rooms)
-        io.to(`user:${ride.user}`).to('admin').emit('ride:accepted', populatedRide);
-
-        // Broadcast ride:unavailable to ALL connected drivers EXCEPT the one who accepted.
-        // This replaces the expensive Driver.find() query that scanned the full collection.
-        io.to('drivers:all').except(`driver:${req.user.id}`).emit('ride:unavailable', { rideId: ride._id });
-    }
-
-    // Push notification to passenger (only if they have no active socket)
-    // Skip for admin-created rides (ride.user = admin, not a real passenger)
-    if (!ride.createdByAdmin) {
         const driverName = populatedRide.driver?.user
             ? `${populatedRide.driver.user.firstName || ''} ${populatedRide.driver.user.lastName || ''}`.trim()
             : '';
-        pushIfOffline(
-            io, ride.user.toString(),
-            'ride_accepted_title',
-            'ride_accepted_body',
-            { rideId: ride._id.toString() },
-            { driverName }
-        ).catch(err => console.error('Push error (acceptRide):', err.message));
+
+        // Notify user + admin with push fallback for passenger
+        emitCritical(
+            io,
+            `user:${ride.user}`,
+            'ride:accepted',
+            populatedRide,
+            !ride.createdByAdmin ? {
+                userId: ride.user.toString(),
+                titleKey: 'ride_accepted_title',
+                bodyKey: 'ride_accepted_body',
+                data: { rideId: ride._id.toString() },
+                params: { driverName }
+            } : undefined
+        );
+        io.to('admin').emit('ride:accepted', populatedRide);
+
+        // Broadcast ride:unavailable to ALL connected drivers EXCEPT the one who accepted.
+        io.to('drivers:all').except(`driver:${req.user.id}`).emit('ride:unavailable', { rideId: ride._id });
     }
 
     res.json({
@@ -566,21 +558,22 @@ const notifyArrival = catchAsync(async (req, res, next) => {
             }
         });
 
-    // Emit socket event to user + admin (chained .to() deduplicates)
+    // Emit socket event to user + admin with push fallback (critical event)
     const io = req.app.get('io');
     if (io) {
-        io.to(`user:${ride.user}`).to('admin').emit('ride:arrived', populatedRide);
-    }
-
-    // Push notification to passenger (only if they have no active socket)
-    // Skip for admin-created rides (ride.user = admin, not a real passenger)
-    if (!ride.createdByAdmin) {
-        pushIfOffline(
-            io, ride.user.toString(),
-            'ride_arrived_title',
-            'ride_arrived_body',
-            { rideId: ride._id.toString() }
-        ).catch(err => console.error('Push error (notifyArrival):', err.message));
+        emitCritical(
+            io,
+            `user:${ride.user}`,
+            'ride:arrived',
+            populatedRide,
+            !ride.createdByAdmin ? {
+                userId: ride.user.toString(),
+                titleKey: 'ride_arrived_title',
+                bodyKey: 'ride_arrived_body',
+                data: { rideId: ride._id.toString() }
+            } : undefined
+        );
+        io.to('admin').emit('ride:arrived', populatedRide);
     }
 
     res.json({
@@ -612,6 +605,9 @@ const startRide = catchAsync(async (req, res, next) => {
         if (!anyRide) return next(new AppError('Ride not found', 404));
         if (!anyRide.driver || anyRide.driver.toString() !== driver._id.toString()) {
             return next(new AppError('You are not assigned to this ride', 403));
+        }
+        if (anyRide.status === 'cancelled') {
+            return next(new AppError('This ride was cancelled due to waiting timeout', 410));
         }
         return next(new AppError('Ride must be in accepted or driver_arrived status to start', 400));
     }
@@ -662,21 +658,22 @@ const startRide = catchAsync(async (req, res, next) => {
             }
         });
 
-    // Emit socket event to user + admin (chained .to() deduplicates)
+    // Emit socket event to user + admin with push fallback (critical event)
     const io = req.app.get('io');
     if (io) {
-        io.to(`user:${ride.user}`).to('admin').emit('ride:started', populatedRide);
-    }
-
-    // Push notification to passenger (only if they have no active socket)
-    // Skip for admin-created rides (ride.user = admin, not a real passenger)
-    if (!ride.createdByAdmin) {
-        pushIfOffline(
-            io, ride.user.toString(),
-            'ride_started_title',
-            'ride_started_body',
-            { rideId: ride._id.toString() }
-        ).catch(err => console.error('Push error (startRide):', err.message));
+        emitCritical(
+            io,
+            `user:${ride.user}`,
+            'ride:started',
+            populatedRide,
+            !ride.createdByAdmin ? {
+                userId: ride.user.toString(),
+                titleKey: 'ride_started_title',
+                bodyKey: 'ride_started_body',
+                data: { rideId: ride._id.toString() }
+            } : undefined
+        );
+        io.to('admin').emit('ride:started', populatedRide);
     }
 
     res.json({
@@ -741,7 +738,7 @@ const completeRide = catchAsync(async (req, res, next) => {
         }
     }
 
-    const finalFare = fare || existingRide.quote?.totalPrice || 0;
+    const finalFare = fare ?? existingRide.quote?.totalPrice ?? 0;
 
     // Calculate platform commission
     const pricing = await Settings.getPricing();
@@ -791,23 +788,38 @@ const completeRide = catchAsync(async (req, res, next) => {
             }
         });
 
-    // Emit socket events
+    // Emit socket events (critical — delivery guarantee via emitCritical)
     const io = req.app.get('io');
     if (io) {
-        // Notify user + admin (chained .to() deduplicates if socket is in both rooms)
-        io.to(`user:${ride.user}`).to('admin').emit('ride:completed', {
+        const completedPayload = {
             ...populatedRide.toObject(),
             canReview: true,
             reviewPrompt: 'How was your ride? Rate your driver!'
-        });
+        };
 
-        // Notify the driver with updated stats
+        // Notify user with push fallback
+        emitCritical(
+            io,
+            `user:${ride.user}`,
+            'ride:completed',
+            completedPayload,
+            !ride.createdByAdmin ? {
+                userId: ride.user.toString(),
+                titleKey: 'ride_completed_title',
+                bodyKey: 'ride_completed_body',
+                data: { rideId: ride._id.toString() },
+                params: { fare: String(finalFare) }
+            } : undefined
+        );
+        io.to('admin').emit('ride:completed', completedPayload);
+
+        // Notify the driver with updated stats (use post-$inc values, not stale pre-update)
         io.to(`driver:${driver.user}`).emit('ride:completed', {
             rideId: ride._id,
             updatedStats: {
-                totalTrips: driver.totalTrips,
-                totalEarnings: driver.totalEarnings,
-                status: driver.status
+                totalTrips: driver.totalTrips + 1,
+                totalEarnings: driver.totalEarnings + ride.fare,
+                status: 'online'
             }
         });
 
@@ -815,19 +827,7 @@ const completeRide = catchAsync(async (req, res, next) => {
         io.to('admin').emit('driver:updated', populatedRide.driver);
     }
 
-    // Push notification to passenger (only if they have no active socket)
-    // Skip for admin-created rides (ride.user = admin, not a real passenger)
-    if (!ride.createdByAdmin) {
-        pushIfOffline(
-            io, ride.user.toString(),
-            'ride_completed_title',
-            'ride_completed_body',
-            { rideId: ride._id.toString() },
-            { fare: String(finalFare) }
-        ).catch(err => console.error('Push error (completeRide/passenger):', err.message));
-    }
-
-    // Push notification to driver
+    // Push notification to driver (always — they may have backgrounded the app)
     pushService.sendToUser(
         driver.user.toString(),
         'ride_completed_driver_title',
@@ -951,11 +951,23 @@ const cancelRide = catchAsync(async (req, res, next) => {
             }
         });
 
-    // Emit socket events
+    // Emit socket events (critical — delivery guarantee via emitCritical)
     const io = req.app.get('io');
     if (io) {
-        // Notify user + admin (chained .to() deduplicates)
-        io.to(`user:${cancelledRide.user}`).to('admin').emit('ride:cancelled', populatedRide);
+        // Notify user with push fallback (only if cancelled by someone else)
+        emitCritical(
+            io,
+            `user:${cancelledRide.user}`,
+            'ride:cancelled',
+            populatedRide,
+            (cancelledBy !== 'user' && !cancelledRide.createdByAdmin) ? {
+                userId: cancelledRide.user.toString(),
+                titleKey: 'ride_cancelled_title',
+                bodyKey: 'ride_cancelled_body',
+                data: { rideId: cancelledRide._id.toString() }
+            } : undefined
+        );
+        io.to('admin').emit('ride:cancelled', populatedRide);
 
         // Notify driver if assigned
         if (populatedRide.driver && populatedRide.driver.user) {
@@ -966,17 +978,6 @@ const cancelRide = catchAsync(async (req, res, next) => {
         if (wasPending && hadNoDriver) {
             io.to('drivers:all').emit('ride:cancelled', populatedRide);
         }
-    }
-
-    // Push notification to passenger (only if cancelled by someone else AND no active socket)
-    // Skip for admin-created rides (ride.user = admin, not a real passenger)
-    if (cancelledBy !== 'user' && !cancelledRide.createdByAdmin) {
-        pushIfOffline(
-            io, cancelledRide.user.toString(),
-            'ride_cancelled_title',
-            'ride_cancelled_body',
-            { rideId: cancelledRide._id.toString() }
-        ).catch(err => console.error('Push error (cancelRide/passenger):', err.message));
     }
 
     // Push notification to driver if assigned (only if cancelled by someone else)
@@ -1252,16 +1253,27 @@ const reviewDriver = catchAsync(async (req, res, next) => {
     ride.reviewedAt = new Date();
     await ride.save();
 
-    // Update driver's rating
-    const driver = await Driver.findById(ride.driver);
-    if (driver) {
-        const newTotalReviews = driver.totalReviews + 1;
-        const newRating = ((driver.rating * driver.totalReviews) + rating) / newTotalReviews;
-
-        driver.rating = Math.round(newRating * 10) / 10; // Round to 1 decimal place
-        driver.totalReviews = newTotalReviews;
-        await driver.save();
-    }
+    // Update driver's rating atomically (prevents race condition on concurrent reviews)
+    const driver = await Driver.findOneAndUpdate(
+        { _id: ride.driver },
+        [
+            {
+                $set: {
+                    totalReviews: { $add: ['$totalReviews', 1] },
+                    rating: {
+                        $round: [
+                            { $divide: [
+                                { $add: [{ $multiply: ['$rating', '$totalReviews'] }, rating] },
+                                { $add: ['$totalReviews', 1] }
+                            ] },
+                            1
+                        ]
+                    }
+                }
+            }
+        ],
+        { new: true }
+    );
 
     const populatedRide = await Ride.findById(ride._id)
         .populate('user', 'firstName lastName email phone')
@@ -1334,30 +1346,22 @@ const expireOldRides = async (io) => {
             }
         );
 
-        // Batch check socket presence, then send pushes only to offline users
-        const offlineRides = [];
+        // Emit socket events and send pushes to offline users (uses presence system — no fetchSockets)
         for (const ride of expiredRides) {
             if (io) {
                 io.to(`user:${ride.user}`).emit('ride:expired', { rideId: ride._id });
                 io.to('drivers:all').emit('ride:unavailable', { rideId: ride._id });
             }
 
-            try {
-                const sockets = io ? await io.in(`user:${ride.user}`).fetchSockets() : [];
-                if (sockets.length === 0) offlineRides.push(ride);
-            } catch {
-                offlineRides.push(ride); // If check fails, send push as safety net
+            // O(1) presence check instead of O(nodes) fetchSockets()
+            if (!(await isUserOnlineAsync(ride.user.toString()))) {
+                pushService.sendToUser(
+                    ride.user.toString(),
+                    'ride_expired_title',
+                    'ride_expired_body',
+                    { rideId: ride._id.toString() }
+                ).catch(err => console.error('Push error (expireOldRides):', err.message));
             }
-        }
-
-        // Send pushes only to offline users (avoids duplicate fetchSockets inside pushIfOffline)
-        for (const ride of offlineRides) {
-            pushService.sendToUser(
-                ride.user.toString(),
-                'ride_expired_title',
-                'ride_expired_body',
-                { rideId: ride._id.toString() }
-            ).catch(err => console.error('Push error (expireOldRides):', err.message));
         }
 
         return { expired: expiredRides.length };
@@ -1420,8 +1424,7 @@ const expireWaitingRides = async (io) => {
             );
         }
 
-        // Notify via socket + batch push checks (per-ride targeting for sockets)
-        const offlinePassengers = [];
+        // Notify via socket + push (uses presence system — no fetchSockets)
         for (const ride of waitingExpiredRides) {
             if (io) {
                 io.to(`user:${ride.user}`).to('admin').emit('ride:waitingTimeout', {
@@ -1437,12 +1440,14 @@ const expireWaitingRides = async (io) => {
                 }
             }
 
-            // Check passenger socket presence in batch
-            try {
-                const sockets = io ? await io.in(`user:${ride.user}`).fetchSockets() : [];
-                if (sockets.length === 0) offlinePassengers.push(ride);
-            } catch {
-                offlinePassengers.push(ride);
+            // O(1) presence check instead of O(nodes) fetchSockets()
+            if (!(await isUserOnlineAsync(ride.user.toString()))) {
+                pushService.sendToUser(
+                    ride.user.toString(),
+                    'waiting_timeout_passenger_title',
+                    'waiting_timeout_passenger_body',
+                    { rideId: ride._id.toString() }
+                ).catch(err => console.error('Push error (waitingTimeout/passenger):', err.message));
             }
 
             // Push to driver (always — they may have backgrounded the app)
@@ -1454,16 +1459,6 @@ const expireWaitingRides = async (io) => {
                     { rideId: ride._id.toString(), channelId: 'ride-requests' }
                 ).catch(err => console.error('Push error (waitingTimeout/driver):', err.message));
             }
-        }
-
-        // Send pushes only to offline passengers
-        for (const ride of offlinePassengers) {
-            pushService.sendToUser(
-                ride.user.toString(),
-                'waiting_timeout_passenger_title',
-                'waiting_timeout_passenger_body',
-                { rideId: ride._id.toString() }
-            ).catch(err => console.error('Push error (waitingTimeout/passenger):', err.message));
         }
 
         return { cancelled: waitingExpiredRides.length };

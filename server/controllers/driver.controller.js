@@ -7,21 +7,10 @@ const AppError = require('../utils/AppError');
 const catchAsync = require('../utils/catchAsync');
 const { haversineKm } = require('../utils/distance');
 const pushService = require('../services/pushNotification.service');
+const { pushIfOffline } = require('../utils/socketHelpers');
 
 // Proximity thresholds (km)
 const APPROACH_NOTIFY_KM = 0.5;  // 500m — notify passenger that driver is approaching
-
-// Push-if-offline helper (mirrors ride.controller pattern)
-async function pushIfOffline(io, userId, titleKey, bodyKey, data = {}, params = {}) {
-    try {
-        const sockets = await io.in(`user:${userId}`).fetchSockets();
-        if (sockets.length === 0) {
-            await pushService.sendToUser(userId, titleKey, bodyKey, data, params);
-        }
-    } catch (err) {
-        console.error('Push error (proximity):', err.message);
-    }
-}
 
 /**
  * Check driver proximity to pickup/dropoff and emit approach events.
@@ -96,9 +85,10 @@ const createDriver = catchAsync(async (req, res, next) => {
         return next(new AppError('Driver with this license number already exists', 400));
     }
 
+    // Create user account for driver
+    let user;
     try {
-        // Create user account for driver
-        const user = await User.create({
+        user = await User.create({
             email,
             password,
             firstName,
@@ -108,7 +98,15 @@ const createDriver = catchAsync(async (req, res, next) => {
             provider: 'local',
             isVerified: true
         });
+    } catch (error) {
+        if (error.name === 'ValidationError') {
+            const errors = Object.values(error.errors).map(e => e.message).join(', ');
+            return next(new AppError(`Validation error: ${errors}`, 400));
+        }
+        throw error;
+    }
 
+    try {
         // Create driver profile
         const driver = await Driver.create({
             user: user._id,
@@ -126,8 +124,11 @@ const createDriver = catchAsync(async (req, res, next) => {
             data: { driver: populatedDriver }
         });
     } catch (error) {
-        console.error('Error creating driver:', error);
-        // If user was created but driver creation failed, clean up the user
+        // Clean up orphaned user if driver creation failed
+        await User.findByIdAndDelete(user._id).catch(cleanupErr =>
+            console.error('Failed to clean up orphaned user:', cleanupErr.message)
+        );
+
         if (error.name === 'ValidationError') {
             const errors = Object.values(error.errors).map(e => e.message).join(', ');
             return next(new AppError(`Validation error: ${errors}`, 400));
@@ -373,8 +374,15 @@ const updateDriverStatus = catchAsync(async (req, res, next) => {
 const updateDriverLocation = catchAsync(async (req, res, next) => {
     const { latitude, longitude } = req.body;
 
-    if (!latitude || !longitude) {
+    if (latitude == null || longitude == null) {
         return next(new AppError('Latitude and longitude are required', 400));
+    }
+
+    // Validate coordinate ranges
+    if (typeof latitude !== 'number' || typeof longitude !== 'number' ||
+        latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180 ||
+        !isFinite(latitude) || !isFinite(longitude)) {
+        return next(new AppError('Invalid coordinates: latitude must be -90..90, longitude -180..180', 400));
     }
 
     // Reuse driver from isDriver middleware (eliminates 1 DB query per request)

@@ -31,11 +31,15 @@ const protect = catchAsync(async (req, res, next) => {
         return next();
     }
 
-    const user = await User.findById(decoded.id).select('-password');
+    // .lean() returns a plain JS object — lower memory, no Mongoose document overhead
+    const user = await User.findById(decoded.id).select('-password').lean();
 
     if (!user) {
         return next(new AppError('User not found', 401));
     }
+
+    // Add `id` alias for compatibility (lean objects don't have Mongoose virtuals)
+    user.id = user._id.toString();
 
     userCache.set(decoded.id, { user, ts: Date.now() });
     req.user = user;

@@ -52,11 +52,11 @@ async function startRideEventWorker() {
             io.to('admin').emit(eventType, rideData);
         }
 
-        // Send push notifications
+        // Send push notifications (cross-process presence check via Redis)
         if (recipients.pushToUser && recipients.userId) {
             try {
-                const sockets = io ? await io.in(`user:${recipients.userId}`).fetchSockets() : [];
-                if (sockets.length === 0) {
+                const { isUserOnlineAsync } = require('../socket/presence');
+                if (!(await isUserOnlineAsync(recipients.userId))) {
                     await pushService.sendToUser(
                         recipients.userId,
                         recipients.pushTitleKey || `${eventType}_title`,
@@ -101,14 +101,30 @@ async function startRideEventWorker() {
     return worker;
 }
 
-// Graceful shutdown
-function gracefulShutdown(signal) {
+// Store worker reference for graceful shutdown
+let _workerInstance = null;
+
+// Graceful shutdown — close worker first, then DB
+async function gracefulShutdown(signal) {
     console.log(`\nRideEventWorker: ${signal} received. Shutting down...`);
-    mongoose.connection.close().then(() => {
+
+    try {
+        // Close the BullMQ worker first (stops accepting new jobs, waits for active ones)
+        if (_workerInstance) {
+            await _workerInstance.close();
+            console.log('RideEventWorker: Worker closed');
+        }
+    } catch (err) {
+        console.error('RideEventWorker: Error closing worker:', err.message);
+    }
+
+    try {
+        await mongoose.connection.close();
+        console.log('RideEventWorker: MongoDB connection closed');
         process.exit(0);
-    }).catch(() => {
+    } catch {
         process.exit(1);
-    });
+    }
 
     setTimeout(() => process.exit(1), 5000).unref();
 }
@@ -116,7 +132,9 @@ function gracefulShutdown(signal) {
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
-startRideEventWorker().catch(err => {
+startRideEventWorker().then(worker => {
+    _workerInstance = worker;
+}).catch(err => {
     console.error('Ride event worker failed to start:', err);
     process.exit(1);
 });

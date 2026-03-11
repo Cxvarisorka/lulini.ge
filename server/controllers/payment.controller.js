@@ -5,6 +5,7 @@ const Payment = require('../models/payment.model');
 const SavedCard = require('../models/savedCard.model');
 const Ride = require('../models/ride.model');
 const bogService = require('../services/bog.service');
+const { emitCritical } = require('../utils/socketHelpers');
 
 const CALLBACK_BASE_URL = process.env.BOG_CALLBACK_URL || 'https://api.lulini.ge';
 
@@ -343,14 +344,12 @@ const approveRidePayment = catchAsync(async (req, res, next) => {
     }
 
     const io = req.app.get('io');
-    if (io) {
-        io.to(`user:${payment.user}`).emit('payment:captured', {
-            paymentId: payment._id,
-            orderId: payment.bogOrderId,
-            rideId: payment.ride,
-            amount: captureAmount
-        });
-    }
+    emitCritical(io, `user:${payment.user}`, 'payment:captured', {
+        paymentId: payment._id,
+        orderId: payment.bogOrderId,
+        rideId: payment.ride,
+        amount: captureAmount
+    });
 
     res.json({ success: true, data: { actionId: result.actionId, capturedAmount: captureAmount } });
 });
@@ -381,13 +380,11 @@ const rejectRidePayment = catchAsync(async (req, res, next) => {
     await payment.save();
 
     const io = req.app.get('io');
-    if (io) {
-        io.to(`user:${payment.user}`).emit('payment:cancelled', {
-            paymentId: payment._id,
-            orderId: payment.bogOrderId,
-            rideId: payment.ride
-        });
-    }
+    emitCritical(io, `user:${payment.user}`, 'payment:cancelled', {
+        paymentId: payment._id,
+        orderId: payment.bogOrderId,
+        rideId: payment.ride
+    });
 
     res.json({ success: true, data: { actionId: result.actionId } });
 });
@@ -546,43 +543,37 @@ const handleCallback = catchAsync(async (req, res) => {
             await upsertSavedCard(payment.user, payment.bogOrderId, paymentDetail, 'recurrent');
         }
 
-        // Ride payment: update ride and notify user
+        // Ride payment: update ride and notify user (critical — payment confirmation)
         if (payment.type === 'ride_payment') {
             if (payment.ride) {
                 await Ride.updateOne({ _id: payment.ride }, { paymentStatus: 'completed' });
             }
-            if (io) {
-                io.to(`user:${payment.user}`).emit('payment:completed', {
-                    paymentId: payment._id,
-                    orderId: payment.bogOrderId,
-                    rideId: payment.ride,
-                    amount: payment.amount
-                });
-            }
+            emitCritical(io, `user:${payment.user}`, 'payment:completed', {
+                paymentId: payment._id,
+                orderId: payment.bogOrderId,
+                rideId: payment.ride,
+                amount: payment.amount
+            });
         }
     } else if (orderStatus === 'blocked') {
         // Preauth: funds held successfully
         payment.status = 'blocked';
 
-        if (io) {
-            io.to(`user:${payment.user}`).emit('payment:held', {
-                paymentId: payment._id,
-                orderId: payment.bogOrderId,
-                amount: payment.amount
-            });
-        }
+        emitCritical(io, `user:${payment.user}`, 'payment:held', {
+            paymentId: payment._id,
+            orderId: payment.bogOrderId,
+            amount: payment.amount
+        });
     } else if (orderStatus === 'rejected') {
         payment.status = 'rejected';
         payment.rejectReason = body.reject_reason;
 
-        if (io) {
-            io.to(`user:${payment.user}`).emit('payment:failed', {
-                paymentId: payment._id,
-                orderId: payment.bogOrderId,
-                rideId: payment.ride,
-                reason: body.reject_reason
-            });
-        }
+        emitCritical(io, `user:${payment.user}`, 'payment:failed', {
+            paymentId: payment._id,
+            orderId: payment.bogOrderId,
+            rideId: payment.ride,
+            reason: body.reject_reason
+        });
     } else {
         const statusMap = {
             'processing': 'processing',
