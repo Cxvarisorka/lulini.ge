@@ -116,7 +116,9 @@ export default function RidesScreen({ navigation }) {
           return [...prev, ...filtered];
         });
       }
-    } catch {}
+    } catch (e) {
+      if (__DEV__) console.warn('[RidesScreen] Failed to load more rides:', e.message);
+    }
     setLoadingMore(false);
   }, [loadingMore, selectedFilter, hasMoreRides, loadMoreRides]);
 
@@ -127,7 +129,10 @@ export default function RidesScreen({ navigation }) {
     try {
       const response = await rideAPI.acceptRide(newRideRequest._id);
       if (response.data.success) {
-        addActiveRide(response.data.data.ride);
+        const acceptedRide = response.data.data.ride;
+        addActiveRide(acceptedRide);
+        // [M8 FIX] Only clear modal AFTER confirmed success — on failure the
+        // modal stays visible so the driver can retry or decline.
         clearRideRequest();
         Alert.alert(
           t('rides.rideAccepted'),
@@ -139,9 +144,13 @@ export default function RidesScreen({ navigation }) {
             }
           ]
         );
+      } else {
+        // Server returned success: false — keep modal open for retry
+        Alert.alert(t('errors.error'), t('errors.tryAgain'));
       }
     } catch (error) {
       const errorMessage = error.response?.data?.message || t('errors.tryAgain');
+      // [M8 FIX] Don't clear ride request — driver can still retry or decline
       Alert.alert(t('errors.error'), errorMessage);
     } finally {
       setAccepting(false);

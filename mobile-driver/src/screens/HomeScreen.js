@@ -206,7 +206,9 @@ export default function HomeScreen({ navigation }) {
           }));
           setRoutePolyline(coords);
         }
-      } catch {}
+      } catch (e) {
+        if (__DEV__) console.warn('[HomeScreen] Failed to fetch route:', e.message);
+      }
     })();
     return () => { mounted = false; };
   }, [isBuiltinMap, activeRide?.status, activeRide?._id, location]);
@@ -264,6 +266,8 @@ export default function HomeScreen({ navigation }) {
       }
     } catch (error) {
       const serverMessage = error.response?.data?.message;
+      // M9: Close modal on failure so UI doesn't get stuck
+      setShowRideRequest(false);
       clearRideRequest();
       Alert.alert(
         t('common.error'),

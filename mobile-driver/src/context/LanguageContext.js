@@ -20,6 +20,7 @@ const LANGUAGES = [
 export const LanguageProvider = ({ children }) => {
   const { i18n } = useTranslation();
   const [currentLanguage, setCurrentLanguage] = useState('ka');
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     loadLanguage();
@@ -28,12 +29,14 @@ export const LanguageProvider = ({ children }) => {
   const loadLanguage = async () => {
     try {
       const savedLanguage = await SecureStore.getItemAsync('language');
-      if (savedLanguage) {
+      if (savedLanguage && LANGUAGES.find(l => l.code === savedLanguage)) {
         setCurrentLanguage(savedLanguage);
-        i18n.changeLanguage(savedLanguage);
+        await i18n.changeLanguage(savedLanguage);
       }
     } catch (error) {
       // Failed to load language preference
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -57,7 +60,8 @@ export const LanguageProvider = ({ children }) => {
     changeLanguage,
     languages: LANGUAGES,
     getCurrentLanguageName,
-  }), [currentLanguage, changeLanguage, getCurrentLanguageName]);
+    loading,
+  }), [currentLanguage, changeLanguage, getCurrentLanguageName, loading]);
 
   return <LanguageContext.Provider value={value}>{children}</LanguageContext.Provider>;
 };

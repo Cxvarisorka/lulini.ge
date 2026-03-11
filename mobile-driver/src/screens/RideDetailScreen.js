@@ -46,7 +46,7 @@ export default function RideDetailScreen({ navigation, route }) {
   const { updateActiveRide, removeActiveRide, invalidateCache } = useDriver();
   const { socket } = useSocket();
   const { navigateTo, isBuiltinMap } = useMap();
-  const { location } = useLocation();
+  const { location, setActiveRide } = useLocation();
 
   const typography = useTypography();
   const styles = useMemo(() => createStyles(typography), [typography]);
@@ -83,7 +83,9 @@ export default function RideDetailScreen({ navigation, route }) {
           }));
           setPolylineCoords(coords);
         }
-      } catch {}
+      } catch (e) {
+        if (__DEV__) console.warn('[RideDetail] Failed to fetch route:', e.message);
+      }
     })();
     return () => { mounted = false; };
   }, [ride?.pickup?.lat, ride?.dropoff?.lat]);
@@ -107,6 +109,20 @@ export default function RideDetailScreen({ navigation, route }) {
     }
   }, [ride, location]);
 
+  // [C5 FIX] Wire up setActiveRide when ride data is loaded/changes
+  useEffect(() => {
+    if (ride && ['accepted', 'driver_arrived', 'in_progress'].includes(ride.status)) {
+      setActiveRide(ride);
+    }
+    return () => {
+      // Clear active ride when leaving detail screen (unless ride is still active —
+      // DriverContext handles the persistent active ride tracking)
+      if (ride && ['completed', 'cancelled'].includes(ride.status)) {
+        setActiveRide(null);
+      }
+    };
+  }, [ride?.status]);
+
   // Listen for passenger cancelling this ride
   useEffect(() => {
     if (!socket || !rideId) return;
@@ -115,14 +131,36 @@ export default function RideDetailScreen({ navigation, route }) {
       if (cancelledId && cancelledId !== rideId) return;
       if (cancelledHandledRef.current) return;
       cancelledHandledRef.current = true;
+      setActiveRide(null);
       Alert.alert(
         t('rides.rideCancelled'),
         t('rides.passengerCancelledRide'),
         [{ text: t('common.ok'), onPress: () => navigation.goBack() }]
       );
     };
+
+    // [M7 FIX] Listen for live ride status updates so UI stays in sync
+    const handleRideUpdated = (updatedRide) => {
+      if (!updatedRide?._id || updatedRide._id !== rideId) return;
+      setRide(updatedRide);
+      updateActiveRide(rideId, updatedRide);
+    };
+    const handleRideCompleted = (data) => {
+      const completedId = data?._id || data?.rideId;
+      if (completedId && completedId !== rideId) return;
+      setActiveRide(null);
+      loadRideDetails(); // Reload to get final fare/data
+    };
+
     socket.on('ride:cancelled', handleCancelled);
-    return () => socket.off('ride:cancelled', handleCancelled);
+    socket.on('ride:updated', handleRideUpdated);
+    socket.on('ride:completed', handleRideCompleted);
+
+    return () => {
+      socket.off('ride:cancelled', handleCancelled);
+      socket.off('ride:updated', handleRideUpdated);
+      socket.off('ride:completed', handleRideCompleted);
+    };
   }, [socket, rideId, navigation, t]);
 
   // Waiting time countdown
@@ -208,8 +246,11 @@ export default function RideDetailScreen({ navigation, route }) {
     try {
       const response = await rideAPI.startRide(rideId);
       if (response.data.success) {
-        setRide(response.data.data.ride);
-        updateActiveRide(rideId, response.data.data.ride);
+        const startedRide = response.data.data.ride;
+        setRide(startedRide);
+        updateActiveRide(rideId, startedRide);
+        // [C5 FIX] Update GPS accuracy for active ride
+        setActiveRide(startedRide);
         Alert.alert(t('common.success'), t('rides.rideStarted'));
       }
     } catch (error) {
@@ -238,6 +279,8 @@ export default function RideDetailScreen({ navigation, route }) {
                 setRide(completedRide);
                 removeActiveRide(rideId);
                 invalidateCache();
+                // [C5 FIX] Revert to idle GPS accuracy
+                setActiveRide(null);
                 const finalFare = completedRide.fare ?? fare;
                 navigation.goBack();
                 Alert.alert(t('common.success'), `${t('rides.rideCompletedSuccess')}\n${t('rides.earned')}: ${finalFare.toFixed(2)} ₾`);

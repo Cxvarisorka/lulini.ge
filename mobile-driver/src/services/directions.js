@@ -8,15 +8,19 @@ const routeCache = new Map();
 const CACHE_TTL = 300000; // 5 minutes
 const MAX_CACHE_ENTRIES = 50;
 
-// [H5 FIX] Periodic TTL cleanup to prevent memory leaks over long sessions
-setInterval(() => {
+// Lazy TTL cleanup — called on cache access instead of a module-level setInterval.
+// Prevents leaked intervals on hot reload and avoids unnecessary CPU usage.
+let lastCleanup = Date.now();
+function cleanupExpiredEntries() {
   const now = Date.now();
+  if (now - lastCleanup < CACHE_TTL) return; // at most once per TTL period
+  lastCleanup = now;
   for (const [key, entry] of routeCache) {
     if (now - entry.timestamp > CACHE_TTL) {
       routeCache.delete(key);
     }
   }
-}, CACHE_TTL);
+}
 
 /**
  * Fetch OSRM route with full step-by-step maneuver data
@@ -25,6 +29,9 @@ setInterval(() => {
  * @returns {Promise<Object|null>}
  */
 export async function getNavigationRoute(origin, destination) {
+  // Lazy cleanup instead of module-level setInterval
+  cleanupExpiredEntries();
+
   const cacheKey = `${origin.latitude.toFixed(5)},${origin.longitude.toFixed(5)}-${destination.latitude.toFixed(5)},${destination.longitude.toFixed(5)}`;
 
   const cached = routeCache.get(cacheKey);

@@ -68,6 +68,10 @@ export const LocationProvider = ({ children }) => {
   // [C4 FIX] Promise-based lock to prevent overlapping permission requests (iOS crash fix)
   const permissionLockRef = useRef(null); // null = unlocked, Promise = locked
 
+  // C6: Ref for location to avoid stale closures in startTracking/updateLocationOnServer
+  const locationRef = useRef(null);
+  useEffect(() => { locationRef.current = location; }, [location]);
+
   // Throttle server updates from foreground watcher
   const lastServerUpdate = useRef({ lat: 0, lng: 0, time: 0 });
   // Track background permission status via ref (avoid stale closure in watcher callback)
@@ -127,11 +131,17 @@ export const LocationProvider = ({ children }) => {
     ]);
   }, []);
 
+  // Track permission status via ref so concurrent waiters read the latest value
+  // (not a stale closure captured before the first caller finished)
+  const permissionStatusRef = useRef(permissionStatus);
+  useEffect(() => { permissionStatusRef.current = permissionStatus; }, [permissionStatus]);
+
   const requestPermissions = async () => {
-    // [C4 FIX] Promise-based lock — concurrent callers wait for the first to finish
+    // [C4 FIX] Promise-based lock — concurrent callers wait for the first to finish.
+    // Use ref (not closure) so waiters get the value set by the first caller.
     if (permissionLockRef.current) {
       await permissionLockRef.current;
-      return permissionStatus === 'foreground' || permissionStatus === 'background';
+      return permissionStatusRef.current === 'foreground' || permissionStatusRef.current === 'background';
     }
 
     let unlockResolve;
@@ -260,8 +270,8 @@ export const LocationProvider = ({ children }) => {
         if (!ok) return false;
       }
 
-      // Get initial location if missing
-      if (!location) {
+      // C6: Use ref to avoid stale closure — location state may have changed since startTracking was created
+      if (!locationRef.current) {
         try {
           const pos = await Promise.race([
             Location.getCurrentPositionAsync({

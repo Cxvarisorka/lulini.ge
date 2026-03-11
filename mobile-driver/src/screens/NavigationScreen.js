@@ -52,6 +52,12 @@ export default function NavigationScreen({ navigation, route: navRoute }) {
   const routeDataRef = useRef(null);
   const currentStepIndexRef = useRef(0);
   const hasFittedRef = useRef(false);
+  const mountedRef = useRef(true);
+
+  // Cleanup on unmount — prevent state updates after navigation away
+  useEffect(() => {
+    return () => { mountedRef.current = false; };
+  }, []);
 
   // Keep refs in sync to avoid stale closures
   useEffect(() => { routeDataRef.current = routeData; }, [routeData]);
@@ -114,6 +120,7 @@ export default function NavigationScreen({ navigation, route: navRoute }) {
   const fetchRouteFrom = async (fromPos) => {
     setIsLoading(true);
     const result = await getNavigationRoute(fromPos, destination);
+    if (!mountedRef.current) return;
     if (!result) {
       Alert.alert(t('common.error'), t('nav.routeError'));
       navigation.goBack();
@@ -149,6 +156,7 @@ export default function NavigationScreen({ navigation, route: navRoute }) {
 
     setIsRecalculating(true);
     const result = await getNavigationRoute(pos, destination);
+    if (!mountedRef.current) return;
     if (result) {
       setRouteData(result);
       setCurrentStepIndex(0);

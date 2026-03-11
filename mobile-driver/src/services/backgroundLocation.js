@@ -127,6 +127,8 @@ async function flushRetryQueue(token) {
 // ─── Server communication ────────────────────────────────────────────────────
 
 async function sendBatchToServer(batch, token) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
   try {
     const response = await fetch(`${getApiUrl()}/drivers/location/batch`, {
       method: 'POST',
@@ -135,7 +137,10 @@ async function sendBatchToServer(batch, token) {
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({ locations: batch }),
+      signal: controller.signal,
     });
+
+    clearTimeout(timeoutId);
 
     if (response.status === 401) {
       // Token expired — re-queue batch so it can be sent after foreground re-auth
@@ -145,6 +150,7 @@ async function sendBatchToServer(batch, token) {
 
     return response.ok;
   } catch (e) {
+    clearTimeout(timeoutId);
     console.warn('[BgLocation] Network error sending batch:', e.message);
     return false;
   }
@@ -154,7 +160,7 @@ async function flushBatch() {
   if (locationBatch.length === 0) return;
 
   const batch = [...locationBatch];
-  locationBatch = [];
+  // Don't clear batch yet — wait for server confirmation to prevent data loss
   lastFlushedAt = Date.now();
 
   try {
@@ -163,14 +169,21 @@ async function flushBatch() {
 
     // Send current batch first (fresh data has priority over stale retries)
     const success = await sendBatchToServer(batch, token);
-    if (!success) {
+    if (success) {
+      // Only remove sent points after confirmed delivery.
+      // New points may have arrived during the network request — keep those.
+      locationBatch = locationBatch.filter(p => !batch.includes(p));
+    } else {
+      // Server rejected — move to persistent retry queue
       await enqueueForRetry(batch);
+      locationBatch = locationBatch.filter(p => !batch.includes(p));
     }
 
     // Then drain retry queue
     await flushRetryQueue(token);
   } catch (e) {
     await enqueueForRetry(batch);
+    locationBatch = locationBatch.filter(p => !batch.includes(p));
   }
 }
 

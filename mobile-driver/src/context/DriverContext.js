@@ -350,7 +350,8 @@ export const DriverProvider = ({ children }) => {
     }
   }, [loadAllRides]);
 
-  const goOnline = async () => {
+  // C5: Wrap goOnline/goOffline in useCallback so useMemo deps stay stable
+  const goOnline = useCallback(async () => {
     try {
       setLoading(true);
 
@@ -385,18 +386,18 @@ export const DriverProvider = ({ children }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [startTracking, stopTracking, setDriverOnlineStatus]);
 
-  const goOffline = async () => {
+  // M7: Update server first, then stop tracking — rollback on failure
+  const goOffline = useCallback(async () => {
     try {
       setLoading(true);
 
-      // Stop location tracking
-      stopTracking();
-
-      // Update status on server
+      // Update status on server FIRST (before stopping tracking)
       const response = await driverAPI.updateStatus('offline');
       if (response.data.success) {
+        // Only stop tracking after server confirms offline
+        stopTracking();
         setIsOnline(false);
         setDriverOnlineStatus(false);
 
@@ -405,11 +406,12 @@ export const DriverProvider = ({ children }) => {
 
       return { success: false, message: 'Failed to go offline' };
     } catch (error) {
+      // M7: Don't stop tracking on failure — driver is still online on server
       return { success: false, message: error.message };
     } finally {
       setLoading(false);
     }
-  };
+  }, [stopTracking, setDriverOnlineStatus]);
 
   const addActiveRide = useCallback((ride) => {
     setActiveRides((prev) => [...prev, ride]);
@@ -454,7 +456,7 @@ export const DriverProvider = ({ children }) => {
     loadEarnings,
     invalidateEarningsCache,
   }), [isOnline, activeRides, cachedRides, stats, loading, hasMoreRides,
-    addActiveRide, removeActiveRide, updateActiveRide, refreshStats, updateStats,
+    goOnline, goOffline, addActiveRide, removeActiveRide, updateActiveRide, refreshStats, updateStats,
     loadActiveRides, loadAllRides, loadMoreRides, invalidateCache, loadEarnings, invalidateEarningsCache]);
 
   return <DriverContext.Provider value={value}>{children}</DriverContext.Provider>;
