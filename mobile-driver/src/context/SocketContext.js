@@ -64,8 +64,9 @@ export const SocketProvider = ({ children }) => {
 
   useEffect(() => {
     if (isAuthenticated && userId) {
-      // Skip reconnection if userId hasn't actually changed
-      if (userIdRef.current === userId && socketRef.current) {
+      // Skip reconnection if userId hasn't changed AND socket is still alive.
+      // [C3 FIX] Check socket.connected — a dead/failed socket must be replaced.
+      if (userIdRef.current === userId && socketRef.current?.connected) {
         return;
       }
       userIdRef.current = userId;
@@ -253,16 +254,14 @@ export const SocketProvider = ({ children }) => {
       });
 
       // Listen for new ride requests
+      // C9: Notification scheduled outside state updater (state updaters must be pure)
       socketInstance.on('ride:request', (rideData) => {
-
-        
-
         setNewRideRequest((current) => {
-          // Avoid showing duplicate if we already have this ride (from polling)
           if (current && current._id === rideData._id) return current;
-          showRideNotification(rideData);
           return rideData;
         });
+        // Show notification separately — idempotent via notifiedRideIds check inside
+        showRideNotification(rideData);
       });
 
       // Listen for ride updates
@@ -271,6 +270,7 @@ export const SocketProvider = ({ children }) => {
       });
 
       // Listen for ride cancelled (by passenger or admin)
+      // C9: Notification scheduled outside state updater
       socketInstance.on('ride:cancelled', (ride) => {
         const rideId = ride?._id || ride?.rideId;
         if (rideId) {
@@ -278,47 +278,45 @@ export const SocketProvider = ({ children }) => {
         } else {
           notifiedRideIdsRef.current.clear();
         }
-        // Clear ride request modal if it matches (or if no ID to compare) and notify driver
+        // Read current state before the updater to decide notification outside
         setNewRideRequest((current) => {
           if (!current || !rideId || current._id === rideId) {
-            if (current) {
-              // Show notification so driver knows the ride was cancelled
-              Notifications.scheduleNotificationAsync({
-                content: {
-                  title: 'Ride Cancelled',
-                  body: 'The passenger cancelled the ride request.',
-                  data: { rideId: rideId || current?._id, type: 'ride_cancelled', _local: true },
-                  sound: true,
-                },
-                trigger: null,
-              }).catch(() => {});
-            }
             return null;
           }
           return current;
         });
+        // Show cancellation notification outside state updater
+        Notifications.scheduleNotificationAsync({
+          content: {
+            title: 'Ride Cancelled',
+            body: 'The passenger cancelled the ride request.',
+            data: { rideId: rideId, type: 'ride_cancelled', _local: true },
+            sound: true,
+          },
+          trigger: null,
+        }).catch(() => {});
       });
 
       // Listen for ride unavailable (accepted by another driver or cancelled by user)
+      // C9: Notification scheduled outside state updater
       socketInstance.on('ride:unavailable', (data) => {
         notifiedRideIdsRef.current.delete(data.rideId);
-        // Clear the ride request if it matches and notify the driver
         setNewRideRequest((current) => {
           if (current && current._id === data.rideId) {
-            // Show notification so driver knows the ride is no longer available
-            Notifications.scheduleNotificationAsync({
-              content: {
-                title: 'Ride Unavailable',
-                body: 'The ride request is no longer available.',
-                data: { rideId: data.rideId, type: 'ride_unavailable', _local: true },
-                sound: true,
-              },
-              trigger: null,
-            }).catch(() => {});
             return null;
           }
           return current;
         });
+        // Show unavailable notification outside state updater
+        Notifications.scheduleNotificationAsync({
+          content: {
+            title: 'Ride Unavailable',
+            body: 'The ride request is no longer available.',
+            data: { rideId: data.rideId, type: 'ride_unavailable', _local: true },
+            sound: true,
+          },
+          trigger: null,
+        }).catch(() => {});
       });
 
       // Listen for ride expired (ride request timed out)
@@ -336,7 +334,7 @@ export const SocketProvider = ({ children }) => {
       // Listen for waiting timeout (passenger didn't show up)
       socketInstance.on('ride:waitingTimeout', (data) => {
         // TODO: i18n - these notification strings need localization
-        // Show notification that ride was cancelled due to passenger no-show
+        // M10: Add .catch() to prevent unhandled promise rejection
         Notifications.scheduleNotificationAsync({
           content: {
             title: 'Ride Cancelled',
@@ -345,7 +343,7 @@ export const SocketProvider = ({ children }) => {
             sound: true,
           },
           trigger: null,
-        });
+        }).catch(() => {});
       });
 
       socketRef.current = socketInstance;

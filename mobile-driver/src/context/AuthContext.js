@@ -47,6 +47,26 @@ export const AuthProvider = ({ children }) => {
       const token = await SecureStore.getItemAsync('token');
 
       if (storedUser && token) {
+        // [M4 FIX] Check JWT expiry before trusting stored token.
+        // JWT format: header.payload.signature — payload is base64url JSON with exp field.
+        try {
+          const parts = token.split('.');
+          if (parts.length === 3) {
+            const payload = JSON.parse(atob(parts[1]));
+            if (payload.exp && payload.exp * 1000 < Date.now()) {
+              // Token expired — force re-login
+              await SecureStore.deleteItemAsync('token');
+              await SecureStore.deleteItemAsync('user');
+              return; // falls through to finally { setLoading(false) }
+            }
+          }
+        } catch (_) {
+          // Malformed token — clear and re-login
+          await SecureStore.deleteItemAsync('token');
+          await SecureStore.deleteItemAsync('user');
+          return;
+        }
+
         const userData = JSON.parse(storedUser);
         // Verify user is a driver
         if (userData.role === 'driver') {

@@ -22,6 +22,10 @@ export const SocketProvider = ({ children }) => {
   // even when the async connect hasn't finished before cleanup runs.
   const socketRef = useRef(null);
 
+  // N6: Circuit breaker — stop reconnecting after repeated auth/connection failures
+  const consecutiveErrorsRef = useRef(0);
+  const CIRCUIT_BREAKER_THRESHOLD = 5;
+
   useEffect(() => {
     // Guard: prevent stale async completions from mutating state after cleanup
     let cancelled = false;
@@ -40,8 +44,8 @@ export const SocketProvider = ({ children }) => {
         return;
       }
 
-      // If the same user already has a socket (connected or connecting), skip
-      if (socketRef.current && socketRef.current._userId === userId) {
+      // If the same user already has a live socket, skip
+      if (socketRef.current?.connected && socketRef.current._userId === userId) {
         return;
       }
 
@@ -70,6 +74,7 @@ export const SocketProvider = ({ children }) => {
         socketInstance._userId = userId;
 
         socketInstance.on('connect', () => {
+          consecutiveErrorsRef.current = 0; // N6: Reset circuit breaker on successful connect
           if (!cancelled) setConnected(true);
         });
 
@@ -80,6 +85,12 @@ export const SocketProvider = ({ children }) => {
 
         socketInstance.on('connect_error', (error) => {
           if (__DEV__) console.warn('[Socket] Connection error:', error.message);
+          // N6: Circuit breaker — stop reconnecting after repeated failures
+          consecutiveErrorsRef.current += 1;
+          if (consecutiveErrorsRef.current >= CIRCUIT_BREAKER_THRESHOLD) {
+            if (__DEV__) console.warn(`[Socket] Circuit breaker open after ${CIRCUIT_BREAKER_THRESHOLD} failures — stopping reconnection`);
+            socketInstance.disconnect();
+          }
         });
 
         // If cleanup ran while we were awaiting, kill this socket immediately
@@ -111,6 +122,8 @@ export const SocketProvider = ({ children }) => {
   useEffect(() => {
     const unsubscribe = onReconnect(async () => {
       const s = socketRef.current;
+      // N6: Reset circuit breaker on network reconnect — give it fresh chances
+      consecutiveErrorsRef.current = 0;
       // Nudge socket reconnection if it hasn't auto-recovered yet
       if (s && !s.connected) {
         s.connect();
@@ -120,9 +133,12 @@ export const SocketProvider = ({ children }) => {
       try {
         const { status } = await Location.getForegroundPermissionsAsync();
         if (status === 'granted') {
-          const pos = await Location.getCurrentPositionAsync({
-            accuracy: Location.Accuracy.Balanced,
-          });
+          const pos = await Promise.race([
+            Location.getCurrentPositionAsync({
+              accuracy: Location.Accuracy.Balanced,
+            }),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('GPS timeout')), 10000)),
+          ]);
           if (socketRef.current?.connected) {
             socketRef.current.emit('user:locationUpdate', {
               latitude: pos.coords.latitude,

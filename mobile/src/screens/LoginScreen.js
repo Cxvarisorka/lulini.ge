@@ -30,13 +30,22 @@ export default function LoginScreen({ navigation }) {
   const { login, loginWithGoogle } = useAuth();
 
   const handleLogin = async () => {
-    if (!email.trim() || !password.trim()) {
+    const trimmedEmail = email.trim().toLowerCase();
+    const trimmedPassword = password.trim();
+
+    if (!trimmedEmail || !trimmedPassword) {
       Alert.alert(t('errors.error'), t('auth.fillAllFields'));
       return;
     }
 
+    // Basic email format check
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+      Alert.alert(t('errors.error'), t('auth.invalidEmail') || 'Invalid email format');
+      return;
+    }
+
     setIsLoading(true);
-    const result = await login(email.trim(), password);
+    const result = await login(trimmedEmail, trimmedPassword);
     setIsLoading(false);
 
     if (!result.success) {

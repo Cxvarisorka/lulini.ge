@@ -76,6 +76,23 @@ export const AuthProvider = ({ children }) => {
       try {
         const token = await SecureStore.getItemAsync('token');
         if (token) {
+          // [M4 FIX] Check JWT expiry before making a network call.
+          // Prevents unnecessary API hit and avoids delay on expired tokens.
+          try {
+            const parts = token.split('.');
+            if (parts.length === 3) {
+              const payload = JSON.parse(atob(parts[1]));
+              if (payload.exp && payload.exp * 1000 < Date.now()) {
+                await SecureStore.deleteItemAsync('token');
+                return; // expired — skip getMe, fall through to setLoading(false)
+              }
+            }
+          } catch (_) {
+            // Malformed token — clear it
+            await SecureStore.deleteItemAsync('token');
+            return;
+          }
+
           const response = await authAPI.getMe();
           if (response.data.success && !isCancelled) {
             setUser(response.data.data.user);

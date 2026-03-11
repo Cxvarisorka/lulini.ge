@@ -31,14 +31,23 @@ export default function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
 
   const handleLogin = async () => {
-    if (!email || !password) {
+    const trimmedEmail = email.trim().toLowerCase();
+    const trimmedPassword = password.trim();
+
+    if (!trimmedEmail || !trimmedPassword) {
       Alert.alert(t('common.error'), 'Please enter email and password');
+      return;
+    }
+
+    // Basic email format check
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+      Alert.alert(t('common.error'), t('auth.invalidEmail') || 'Invalid email format');
       return;
     }
 
     setLoading(true);
     try {
-      const result = await login(email, password);
+      const result = await login(trimmedEmail, trimmedPassword);
       if (!result.success) {
         Alert.alert(
           t('common.error'),
