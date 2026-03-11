@@ -4,7 +4,6 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const passport = require('passport');
-const jwt = require('jsonwebtoken');
 const compression = require('compression');
 const helmet = require('helmet');
 const morgan = require('morgan');
@@ -56,7 +55,6 @@ const connectDB = require('./configs/db.config');
 require('./configs/passport.config');
 const globalErrorHandler = require('./middlewares/error.middleware');
 const AppError = require('./utils/AppError');
-const User = require('./models/user.model');
 
 // Routers
 const authRouter = require('./routers/auth.router');
@@ -99,13 +97,16 @@ const io = new Server(server, {
     pingTimeout: 30000,   // Wait 30s for pong (Android on mobile networks can be slow)
 });
 
-// Redis adapter for Socket.io (enables horizontal scaling across multiple processes)
-// Skip in development — remote Redis adds latency and can cause ping timeouts
-if (process.env.REDIS_URL && process.env.NODE_ENV === 'production') {
-    const { createAdapter } = require('@socket.io/redis-adapter');
-    const { getRedisClient } = require('./configs/redis.config');
+// ── Socket.IO initialization ──
+// Redis adapter setup is awaited BEFORE server.listen() to prevent split-brain
+// where early connections use the in-memory adapter while Redis is still connecting.
+const initSocket = require('./socket');
 
-    (async () => {
+async function setupRedisAdapter() {
+    if (process.env.REDIS_URL && process.env.NODE_ENV === 'production') {
+        const { createAdapter } = require('@socket.io/redis-adapter');
+        const { getRedisClient } = require('./configs/redis.config');
+
         try {
             const pubClient = await getRedisClient();
             const subClient = pubClient.duplicate();
@@ -115,274 +116,10 @@ if (process.env.REDIS_URL && process.env.NODE_ENV === 'production') {
         } catch (err) {
             console.error('Redis adapter setup failed, running in single-process mode:', err.message);
         }
-    })();
+    }
 }
 
-// Helper to parse cookies from string
-const parseCookies = (cookieString) => {
-    const cookies = {};
-    if (cookieString) {
-        cookieString.split(';').forEach(cookie => {
-            const [name, value] = cookie.trim().split('=');
-            if (name && value) {
-                cookies[name] = decodeURIComponent(value);
-            }
-        });
-    }
-    return cookies;
-};
-
-// Socket.io authentication middleware (uses shared auth cache to avoid DB storm on reconnect)
-const { userCache, AUTH_CACHE_TTL } = require('./utils/authCache');
-const { verifyToken } = require('./utils/jwt.utils');
-
-// Capacity-based admission control: reject new connections BEFORE auth (fail fast)
-const MAX_SOCKET_CONNECTIONS = parseInt(process.env.MAX_SOCKET_CONNECTIONS || '5000');
-io.use((socket, next) => {
-    const currentConnections = io.engine.clientsCount;
-    if (currentConnections >= MAX_SOCKET_CONNECTIONS) {
-        return next(new Error('Server at capacity. Please retry.'));
-    }
-    next();
-});
-
-io.use(async (socket, next) => {
-    try {
-        let token = null;
-
-        // Try to get token from auth header (mobile apps)
-        if (socket.handshake.auth && socket.handshake.auth.token) {
-            token = socket.handshake.auth.token;
-        }
-        // Otherwise try cookies (web app)
-        else if (socket.handshake.headers.cookie) {
-            const cookies = parseCookies(socket.handshake.headers.cookie);
-            token = cookies.token;
-        }
-
-        if (!token) {
-            return next(new Error('Authentication required'));
-        }
-
-        const decoded = verifyToken(token);
-        if (!decoded) {
-            return next(new Error('Invalid or expired token'));
-        }
-
-        // Check shared auth cache first (prevents thundering herd on mass reconnect)
-        const cached = userCache.get(decoded.id);
-        let user;
-        if (cached && Date.now() - cached.ts < AUTH_CACHE_TTL) {
-            user = cached.user;
-        } else {
-            user = await User.findById(decoded.id).select('-password');
-            if (user) {
-                userCache.set(decoded.id, { user, ts: Date.now() });
-            }
-        }
-
-        if (!user) {
-            return next(new Error('User not found'));
-        }
-
-        socket.user = user;
-        next();
-    } catch (error) {
-        next(new Error('Invalid token'));
-    }
-});
-
-// Socket event rate limiter: tracks event counts per socket per event name
-function createSocketRateLimiter() {
-    // Returns middleware that checks per-event limits
-    return (socket, next) => {
-        const eventCounts = new Map(); // eventName -> { count, windowStart }
-        const limits = {
-            'driver:rejoin': { max: 5, windowMs: 10000 },    // 5 per 10s
-            'user:locationUpdate': { max: 10, windowMs: 10000 }, // 10 per 10s
-        };
-        const defaultLimit = { max: 20, windowMs: 10000 }; // 20 per 10s for unlisted events
-
-        const originalEmit = socket.onevent;
-        socket.onevent = function (packet) {
-            const eventName = packet.data?.[0];
-            if (eventName && typeof eventName === 'string') {
-                const limit = limits[eventName] || defaultLimit;
-                const now = Date.now();
-                let entry = eventCounts.get(eventName);
-                if (!entry || now - entry.windowStart > limit.windowMs) {
-                    entry = { count: 0, windowStart: now };
-                    eventCounts.set(eventName, entry);
-                }
-                entry.count++;
-                if (entry.count > limit.max) {
-                    // Drop the event silently — don't crash the socket
-                    return;
-                }
-            }
-            originalEmit.call(socket, packet);
-        };
-
-        next();
-    };
-}
-
-io.use(createSocketRateLimiter());
-
-// Socket.io connection handling
-// IMPORTANT: All socket.on() listeners MUST be registered synchronously (before any await)
-// to avoid race conditions where the client sends events before handlers are set up.
-const Driver = require('./models/driver.model');
-
-io.on('connection', async (socket) => {
-    // Store app type from handshake query (passenger | driver | undefined)
-    socket.appType = socket.handshake.query?.appType || null;
-
-    if (process.env.NODE_ENV !== 'production') {
-        console.log(`User connected: ${socket.user.role} (${socket.appType || 'unknown'}) - socket: ${socket.id}`);
-    }
-
-    const driverRoom = `driver:${socket.user.id}`;
-    const userRoom = `user:${socket.user.id}`;
-
-    // Helper: join a room for all sockets of this user that share the same appType.
-    // Prevents passenger-app sockets from being added to driver broadcast rooms.
-    const joinSameAppSockets = async (room) => {
-        try {
-            const sockets = await io.in(userRoom).fetchSockets();
-            for (const s of sockets) {
-                if (s.appType === socket.appType) {
-                    s.join(room);
-                }
-            }
-        } catch { /* ignore fetch errors */ }
-    };
-
-    // Limit to 3 concurrent connections per user (disconnect oldest on overflow)
-    try {
-        const existingSockets = await io.in(userRoom).fetchSockets();
-        if (existingSockets.length >= 3) {
-            existingSockets[0].disconnect(true);
-        }
-    } catch { /* ignore fetch errors */ }
-
-    // Join user to their personal room (always - this is the fallback for event delivery)
-    socket.join(userRoom);
-
-    // Join admins to admin room for real-time updates
-    if (socket.user.role === 'admin') {
-        socket.join('admin');
-    }
-
-    // Fast-path: if role is 'driver', join personal driver room immediately (no DB needed)
-    // Broadcast rooms (drivers:all, drivers:{type}) are joined only after DB confirms status is online/busy
-    if (socket.user.role === 'driver') {
-        socket.join(driverRoom);
-        // joinSameAppSockets deferred to after event listeners (must not await before listeners)
-    }
-
-    // ── Register ALL event listeners synchronously (before any await) ──
-
-    // Allow drivers to rejoin their room (e.g., after reconnection)
-    // Rate-limited: max 1 rejoin with DB query per 10 seconds per socket.
-    // Intermediate rejoins use the fast path (room join only, no DB query).
-    let lastRejoinWithDb = 0;
-    socket.on('driver:rejoin', async () => {
-        const now = Date.now();
-
-        // Fast path: always rejoin personal driver room (cheap, no DB)
-        if (socket.user.role === 'driver') {
-            socket.join(driverRoom);
-            await joinSameAppSockets(driverRoom);
-        }
-
-        // Slow path: verify driver profile AND status in DB (rate-limited)
-        if (now - lastRejoinWithDb < 10000) {
-            socket.emit('driver:rejoined', { success: true });
-            return;
-        }
-        lastRejoinWithDb = now;
-
-        try {
-            const profile = await Driver.findOne({ user: socket.user.id, isActive: true, isApproved: true }).select('status vehicle.type').lean();
-            if (socket.user.role === 'driver' || profile) {
-                socket.join(driverRoom);
-                await joinSameAppSockets(driverRoom);
-                // Only join broadcast rooms if driver is online or busy (not offline)
-                if (profile && (profile.status === 'online' || profile.status === 'busy')) {
-                    socket.join('drivers:all');
-                    await joinSameAppSockets('drivers:all');
-                    if (profile.vehicle?.type) {
-                        const typeRoom = `drivers:${profile.vehicle.type}`;
-                        socket.join(typeRoom);
-                        await joinSameAppSockets(typeRoom);
-                    }
-                }
-            }
-            // Always ACK to prevent client timeout loops
-            socket.emit('driver:rejoined', { success: !!(socket.user.role === 'driver' || profile) });
-        } catch (err) {
-            console.error(`Error during driver:rejoin for user ${socket.user.id}:`, err.message);
-            // Always ACK even on error to prevent client timeout loops
-            socket.emit('driver:rejoined', { success: false, error: true });
-        }
-    });
-
-    socket.on('disconnect', (reason) => {
-        if (process.env.NODE_ENV !== 'production') {
-            console.log(`User disconnected: socket ${socket.id}, reason: ${reason}`);
-        }
-    });
-
-    // ── Async work (AFTER listeners are registered, so no events are missed) ──
-
-    // Sync other same-appType sockets into the driver room (deferred from above)
-    if (socket.user.role === 'driver') {
-        await joinSameAppSockets(driverRoom);
-    }
-
-    // Async DB lookup: join broadcast rooms only if driver status is online/busy
-    if (socket.user.role === 'driver') {
-        try {
-            const driverProfile = await Driver.findOne({ user: socket.user.id, isActive: true, isApproved: true }).select('status vehicle.type').lean();
-            if (driverProfile && (driverProfile.status === 'online' || driverProfile.status === 'busy')) {
-                socket.join('drivers:all');
-                await joinSameAppSockets('drivers:all');
-                if (driverProfile.vehicle?.type) {
-                    const typeRoom = `drivers:${driverProfile.vehicle.type}`;
-                    socket.join(typeRoom);
-                    await joinSameAppSockets(typeRoom);
-                }
-            }
-        } catch (err) {
-            // DB lookup failed — broadcast rooms will be joined on rejoin or goOnline
-        }
-    } else if (socket.appType === 'driver') {
-        // Non-driver-role user connecting from driver app (e.g., user with driver profile)
-        // Only join driver rooms for driver-app sockets — never for passenger or admin sockets
-        try {
-            const driverProfile = await Driver.findOne({ user: socket.user.id, isActive: true, isApproved: true }).select('status vehicle.type').lean();
-            if (driverProfile) {
-                socket.join(driverRoom);
-                await joinSameAppSockets(driverRoom);
-                // Only join broadcast rooms if online/busy
-                if (driverProfile.status === 'online' || driverProfile.status === 'busy') {
-                    socket.join('drivers:all');
-                    await joinSameAppSockets('drivers:all');
-                    if (driverProfile.vehicle?.type) {
-                        const typeRoom = `drivers:${driverProfile.vehicle.type}`;
-                        socket.join(typeRoom);
-                        await joinSameAppSockets(typeRoom);
-                    }
-                }
-            }
-        } catch (err) {
-            // DB lookup failed — role-based join already handled above
-        }
-    }
-});
-
-// Make io accessible to routes
+// Make io accessible to routes (handlers registered in startServer after Redis adapter)
 app.set('io', io);
 
 // Trust proxy for accurate IP-based rate limiting behind reverse proxy
@@ -513,42 +250,58 @@ let waitingIntervalId = null;
 const isPrimaryWorker = !process.env.NODE_APP_INSTANCE || process.env.NODE_APP_INSTANCE === '0';
 const backgroundJobsEnabled = isPrimaryWorker && !process.env.DISABLE_BACKGROUND_JOBS;
 
-server.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}${process.env.NODE_APP_INSTANCE ? ` (instance ${process.env.NODE_APP_INSTANCE})` : ''}`);
+// ── Startup sequence ──
+// Await Redis adapter setup BEFORE server.listen() to prevent split-brain.
+// Early connections would otherwise use the in-memory adapter while Redis is still connecting.
+async function startServer() {
+    await setupRedisAdapter();
 
-    if (backgroundJobsEnabled) {
-        // Run initial expiration check on startup
-        expireOldRides(io).then(result => {
-            if (result.expired > 0) {
-                console.log(`Expired ${result.expired} old ride requests on startup`);
-            }
-        });
+    // Register socket middleware and handlers AFTER Redis adapter is ready
+    // to prevent split-brain where early connections use the in-memory adapter.
+    initSocket(io);
 
-        // Run initial waiting expiration check on startup
-        expireWaitingRides(io).then(result => {
-            if (result.cancelled > 0) {
-                console.log(`Cancelled ${result.cancelled} rides due to waiting timeout on startup`);
-            }
-        });
+    server.listen(PORT, () => {
+        console.log(`Server is running on port ${PORT}${process.env.NODE_APP_INSTANCE ? ` (instance ${process.env.NODE_APP_INSTANCE})` : ''}`);
 
-        // Schedule periodic ride request expiration checks (1 hour timeout)
-        expirationIntervalId = setInterval(() => {
+        if (backgroundJobsEnabled) {
+            // Run initial expiration check on startup
             expireOldRides(io).then(result => {
                 if (result.expired > 0) {
-                    console.log(`Expired ${result.expired} old ride requests`);
+                    console.log(`Expired ${result.expired} old ride requests on startup`);
                 }
             });
-        }, EXPIRATION_CHECK_INTERVAL);
 
-        // Schedule periodic waiting expiration checks (3-minute timeout)
-        waitingIntervalId = setInterval(() => {
+            // Run initial waiting expiration check on startup
             expireWaitingRides(io).then(result => {
                 if (result.cancelled > 0) {
-                    console.log(`Cancelled ${result.cancelled} rides due to waiting timeout`);
+                    console.log(`Cancelled ${result.cancelled} rides due to waiting timeout on startup`);
                 }
             });
-        }, WAITING_CHECK_INTERVAL);
-    }
+
+            // Schedule periodic ride request expiration checks (1 hour timeout)
+            expirationIntervalId = setInterval(() => {
+                expireOldRides(io).then(result => {
+                    if (result.expired > 0) {
+                        console.log(`Expired ${result.expired} old ride requests`);
+                    }
+                });
+            }, EXPIRATION_CHECK_INTERVAL);
+
+            // Schedule periodic waiting expiration checks (3-minute timeout)
+            waitingIntervalId = setInterval(() => {
+                expireWaitingRides(io).then(result => {
+                    if (result.cancelled > 0) {
+                        console.log(`Cancelled ${result.cancelled} rides due to waiting timeout`);
+                    }
+                });
+            }, WAITING_CHECK_INTERVAL);
+        }
+    });
+}
+
+startServer().catch(err => {
+    console.error('Failed to start server:', err);
+    process.exit(1);
 });
 
 // Graceful shutdown handler
