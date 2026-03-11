@@ -24,8 +24,8 @@ const SEARCH_CACHE_TTL = 60000; // 1 minute
 const directionsCache = new Map();
 const searchCache = new Map();
 
-// Periodic TTL cleanup — sweep expired entries every 5 minutes
-setInterval(() => {
+// C8: Periodic TTL cleanup — use .unref() so the timer doesn't prevent JS engine cleanup
+const _cacheCleanupInterval = setInterval(() => {
   const now = Date.now();
   for (const [key, value] of directionsCache) {
     if (now - (value._ts || 0) > DIRECTIONS_CACHE_TTL) directionsCache.delete(key);
@@ -34,6 +34,8 @@ setInterval(() => {
     if (now - (value.timestamp || 0) > SEARCH_CACHE_TTL) searchCache.delete(key);
   }
 }, 5 * 60 * 1000);
+// In React Native, unref isn't available — but storing the reference allows explicit cleanup if needed
+if (typeof _cacheCleanupInterval?.unref === 'function') _cacheCleanupInterval.unref();
 
 // Evict oldest entries when cache exceeds max size
 function cacheSet(cache, key, value) {
@@ -645,7 +647,7 @@ async function reverseGeocodeGoogle(latitude, longitude) {
     let route = '';
     let locality = '';
 
-    for (const component of result.address_components) {
+    for (const component of (result.address_components || [])) {
       if (component.types.includes('street_number')) {
         streetNumber = component.long_name;
       }

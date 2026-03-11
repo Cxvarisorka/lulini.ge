@@ -66,7 +66,9 @@ export default function RideDetailScreen({ route }) {
             setPolylineCoords(coords);
           }
         }
-      } catch {}
+      } catch (e) {
+        if (__DEV__) console.warn('[RideDetail] Failed to fetch route:', e.message);
+      }
       if (mounted) setLoadingRoute(false);
     })();
     return () => { mounted = false; };

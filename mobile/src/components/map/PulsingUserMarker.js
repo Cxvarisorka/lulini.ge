@@ -9,7 +9,7 @@
  * if the parent briefly passes null/undefined during rapid state changes
  * (e.g. when a driver accepts a ride and 7+ setState calls fire at once).
  */
-import { memo, useEffect, useRef } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { View, StyleSheet, Animated, Easing, Platform } from 'react-native';
 import Marker from './MarkerWrapper';
 import { markerImages } from './markerImages';
@@ -37,6 +37,11 @@ const PulsingUserMarker = memo(({ coordinate, tappable = true }) => {
 
   const pulseAnim = useRef(new Animated.Value(0)).current;
 
+  // iOS: disable tracksViewChanges after first animation cycle to stop re-rasterization.
+  // The pulse animation runs on the native thread (useNativeDriver: true) so the
+  // marker bitmap only needs to be captured once — subsequent frames are GPU-composited.
+  const [iosTracksViews, setIosTracksViews] = useState(isIOS);
+
   useEffect(() => {
     if (!isIOS) return; // no animation on Android
     const loop = Animated.loop(
@@ -48,7 +53,9 @@ const PulsingUserMarker = memo(({ coordinate, tappable = true }) => {
       })
     );
     loop.start();
-    return () => loop.stop();
+    // Stop re-rasterizing after 1 full animation cycle — bitmap is captured
+    const timer = setTimeout(() => setIosTracksViews(false), PULSE_DURATION + 100);
+    return () => { loop.stop(); clearTimeout(timer); };
   }, []);
 
   // No valid coordinate ever received — nothing to show
@@ -84,7 +91,7 @@ const PulsingUserMarker = memo(({ coordinate, tappable = true }) => {
       coordinate={stableCoord}
       anchor={{ x: 0.5, y: 0.5 }}
       tappable={tappable}
-      tracksViewChanges={true}
+      tracksViewChanges={iosTracksViews}
       zIndex={5}
       style={styles.marker}
     >

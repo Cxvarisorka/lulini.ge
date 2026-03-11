@@ -80,6 +80,9 @@ function clearSearchMeta() {
 // Distance threshold (km) for "driver is close" notification
 const DRIVER_CLOSE_THRESHOLD_KM = 0.3; // 300 meters
 
+// Shared hitSlop constant — avoids re-creating objects in JSX on every render
+const HIT_SLOP = { top: 10, bottom: 10, left: 10, right: 10 };
+
 // Default location (Kutaisi, Georgia)
 const DEFAULT_LOCATION = {
   latitude: 42.2679,
@@ -337,6 +340,7 @@ export default function TaxiScreen({ navigation }) {
     };
 
     const startPolling = () => {
+      stopPolling(); // M5: Clear existing interval before creating new one
       fetchNearby();
       intervalId = setInterval(fetchNearby, 30000);
     };
@@ -406,10 +410,13 @@ export default function TaxiScreen({ navigation }) {
                 setLocation({ latitude: cachedLat, longitude: cachedLng });
               }
             }
-            // Refine with fresh GPS in background
-            const currentLocation = await Location.getCurrentPositionAsync({
-              accuracy: Location.Accuracy.Balanced,
-            });
+            // Refine with fresh GPS in background (with timeout to prevent hanging)
+            const currentLocation = await Promise.race([
+              Location.getCurrentPositionAsync({
+                accuracy: Location.Accuracy.Balanced,
+              }),
+              new Promise((_, reject) => setTimeout(() => reject(new Error('GPS timeout')), 10000)),
+            ]);
             const newLat = currentLocation.coords.latitude;
             const newLng = currentLocation.coords.longitude;
             const prev = locationRef.current;
@@ -1148,7 +1155,7 @@ export default function TaxiScreen({ navigation }) {
     socket.on('ride:cancelled', (ride) => {
       // Skip entirely when the cancel was initiated by this client — handleConfirmCancel
       // already reset state and showed an alert.
-      if (userCancellingRef.current || ride.cancelledBy === 'user') {
+      if (userCancellingRef.current) {
         return;
       }
       // Ignore cancellations for rides that don't belong to this user
@@ -1408,13 +1415,18 @@ export default function TaxiScreen({ navigation }) {
             ].filter(Boolean).join(', ');
             setLocationAddress(addressString || t('taxi.currentLocation'));
           }
-        } catch {}
+        } catch (e) {
+          if (__DEV__) console.warn('[TaxiScreen] Reverse geocode failed:', e.message);
+        }
       }
 
-      // 2. Get fresh position in background to refine
-      const currentLocation = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
+      // 2. Get fresh position in background to refine (with timeout to prevent hanging)
+      const currentLocation = await Promise.race([
+        Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('GPS timeout')), 10000)),
+      ]);
 
       const newLocation = {
         latitude: currentLocation.coords.latitude,
@@ -1654,10 +1666,11 @@ export default function TaxiScreen({ navigation }) {
         [{ text: t('common.ok') }]
       );
     } catch (error) {
+      resetBookingState(); // C7: Reset state unconditionally, not just on alert dismiss
       Alert.alert(
         t('errors.error'),
         t('taxi.noDriverFoundMessage'),
-        [{ text: t('common.ok'), onPress: () => resetBookingState() }]
+        [{ text: t('common.ok') }]
       );
     }
   };
@@ -2091,8 +2104,9 @@ export default function TaxiScreen({ navigation }) {
     }
   };
 
-  // Render sheet content based on step
-  const renderSheetContent = () => {
+  // Memoized sheet content — only re-creates when booking step or its dependencies change,
+  // avoiding unnecessary React element allocation on unrelated re-renders.
+  const sheetContent = useMemo(() => {
     const rideStatus = getRideStatus();
 
     if (rideStatus) {
@@ -2149,7 +2163,13 @@ export default function TaxiScreen({ navigation }) {
         lastDestination={lastDestination}
       />
     );
-  };
+  }, [
+    bookingStep, currentRide, estimatedPrice, estimatedDuration, totalDistance,
+    driverETA, driverDistance, waitingTimeLeft, waitingFee,
+    selectedVehicle, paymentMethod, isRequesting, pricingConfig,
+    locationAddress, destination, isLoadingLocation, isLoadingDirections,
+    location, stops, lastDestination,
+  ]);
 
   const initialRegion = {
     latitude: location?.latitude || DEFAULT_LOCATION.latitude,
@@ -2365,7 +2385,7 @@ export default function TaxiScreen({ navigation }) {
                 <TouchableOpacity
                   style={styles.sheetHeaderSide}
                   onPress={() => bottomSheetRef.current?.snapToIndex(1)}
-                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  hitSlop={HIT_SLOP}
                 >
                   <Ionicons name="close" size={24} color={colors.foreground} />
                 </TouchableOpacity>
@@ -2373,7 +2393,7 @@ export default function TaxiScreen({ navigation }) {
                 <TouchableOpacity
                   style={styles.sheetHeaderSide}
                   onPress={handleAddStop}
-                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  hitSlop={HIT_SLOP}
                 >
                   <Ionicons name="add" size={24} color={colors.foreground} />
                 </TouchableOpacity>
@@ -2382,7 +2402,7 @@ export default function TaxiScreen({ navigation }) {
             : null
         }
       >
-        {renderSheetContent()}
+        {sheetContent}
       </DraggableBottomSheet>
     </View>
   );

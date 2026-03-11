@@ -212,7 +212,7 @@ export default function ProfileScreen({ navigation }) {
               <Text style={styles.infoLabel} numberOfLines={1}>{t('profile.loginProvider')}</Text>
               <Text style={styles.infoValue} numberOfLines={1}>
                 {user.provider === 'local' ? t('profile.emailPassword') :
-                 user.provider?.charAt(0).toUpperCase() + user.provider?.slice(1)}
+                 user.provider ? user.provider.charAt(0).toUpperCase() + user.provider.slice(1) : t('profile.emailPassword')}
               </Text>
             </View>
           </View>
