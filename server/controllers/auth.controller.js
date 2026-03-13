@@ -162,7 +162,8 @@ const oauthSuccess = (req, res) => {
     const token = generateToken(req.user._id);
 
     res.cookie('token', token, cookieOptions);
-    res.redirect(`${process.env.CLIENT_URL || 'http://localhost:5173'}/profile`);
+    const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
+    res.redirect(`${clientUrl}/profile?token=${token}`);
 };
 
 // Allowlist of valid redirect URI schemes for OAuth mobile flow

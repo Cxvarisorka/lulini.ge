@@ -71,9 +71,9 @@ const typography = useTypography();
     {
       icon: 'mail',
       label: t('support.emailUs'),
-      subtitle: 'support@gotours.ge',
+      subtitle: 'support@lulini.ge',
       color: colors.warning,
-      onPress: () => safeLinkOpen('mailto:support@gotours.ge'),
+      onPress: () => safeLinkOpen('mailto:support@lulini.ge'),
     },
   ];
 

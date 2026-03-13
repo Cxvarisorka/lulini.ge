@@ -6,6 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
+  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
@@ -70,12 +71,12 @@ export default function SettingsScreen({ navigation }) {
         {
           icon: 'document-text-outline',
           label: t('settings.termsOfService'),
-          onPress: () => Alert.alert(t('common.comingSoon') || 'Coming Soon', t('common.featureComingSoon') || 'This feature is coming soon.'),
+          onPress: () => Linking.openURL('https://lulini.ge/terms'),
         },
         {
           icon: 'shield-checkmark-outline',
           label: t('settings.privacyPolicy'),
-          onPress: () => Alert.alert(t('common.comingSoon') || 'Coming Soon', t('common.featureComingSoon') || 'This feature is coming soon.'),
+          onPress: () => Linking.openURL('https://lulini.ge/privacy'),
         },
       ],
     },

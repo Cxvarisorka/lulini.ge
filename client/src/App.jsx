@@ -5,6 +5,8 @@ import { useTranslation } from 'react-i18next';
 import { Home } from './pages/Home';
 import { Contact } from './pages/Contact';
 import { Careers } from './pages/Careers';
+import { Privacy } from './pages/Privacy';
+import { Terms } from './pages/Terms';
 import { SignIn } from './pages/SignIn';
 import { UserProfile } from './pages/UserProfile';
 import { AdminProvider } from './context/AdminContext';
@@ -42,6 +44,8 @@ function AppContent() {
             <Route path="/" element={<Home />} />
             <Route path="/contact" element={<Contact />} />
             <Route path="/careers" element={<Careers />} />
+            <Route path="/privacy" element={<Privacy />} />
+            <Route path="/terms" element={<Terms />} />
             <Route path="/signin" element={<SignIn />} />
             <Route path="/profile" element={<ProtectedRoute><UserProfile /></ProtectedRoute>} />
 

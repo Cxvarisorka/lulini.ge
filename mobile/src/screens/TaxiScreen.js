@@ -9,6 +9,7 @@ import {
   Platform,
   AppState,
   Animated,
+  InteractionManager,
 } from 'react-native';
 import MapView from '../components/map/MapViewWrapper';
 import Polyline from '../components/map/PolylineWrapper';
@@ -203,6 +204,8 @@ export default function TaxiScreen({ navigation }) {
   // Refs for values used inside socket handlers to avoid re-registering listeners
   const locationRef = useRef(null);
   const currentRideRef = useRef(null);
+  const customPickupRef = useRef(null); // Tracks customPickup for async guards in requestLocationPermission
+  const hasInitialFixRef = useRef(false); // True after first successful GPS fix — prevents fallback to DEFAULT_LOCATION
   const tRef = useRef(t);
   const locationWatchRef = useRef(null); // GPS watch subscription during active rides
 
@@ -235,6 +238,7 @@ export default function TaxiScreen({ navigation }) {
 
   // Map selection mode — stores which input triggered it: 'pickup', 'destination', or stop index (number)
   const [isSelectingOnMap, setIsSelectingOnMap] = useState(null);
+  const isSelectingOnMapRef = useRef(null);
 
   // Track bottom sheet snap index for fullscreen mode
   const [sheetSnapIndex, setSheetSnapIndex] = useState(1);
@@ -258,6 +262,8 @@ export default function TaxiScreen({ navigation }) {
 
   // Throttle driver route fetching
   const lastDriverRouteFetchRef = useRef(0);
+  // Generation counter: incremented on ride transition to invalidate in-flight driverRoute fetches
+  const driverRouteGenRef = useRef(0);
 
   // Debounce zoom level updates to avoid re-renders during pinch/pan
   const zoomDebounceRef = useRef(null);
@@ -758,6 +764,7 @@ export default function TaxiScreen({ navigation }) {
   useEffect(() => { locationRef.current = location; }, [location]);
   useEffect(() => { currentRideRef.current = currentRide; }, [currentRide]);
   useEffect(() => { tRef.current = t; }, [t]);
+  useEffect(() => { customPickupRef.current = customPickup; }, [customPickup]);
 
   // Continuous GPS watch during active ride — keeps user's blue dot accurate.
   // Without this, location is only fetched once on mount and on AppState changes,
@@ -823,7 +830,9 @@ export default function TaxiScreen({ navigation }) {
     };
   }, [bookingStep]);
 
-  // Fetch driver-to-pickup route when driver location updates (throttled to 15s)
+  // Fetch driver-to-pickup route when driver location updates (throttled to 15s).
+  // Uses a generation counter to discard stale in-flight OSRM responses when the
+  // ride transitions to IN_PROGRESS (prevents old driver→pickup route from reappearing).
   useEffect(() => {
     if (!driverLocation || !effectivePickup) return;
     if (bookingStep !== BOOKING_STEPS.DRIVER_FOUND && bookingStep !== BOOKING_STEPS.DRIVER_ARRIVED) return;
@@ -832,7 +841,12 @@ export default function TaxiScreen({ navigation }) {
     if (now - lastDriverRouteFetchRef.current < 15000) return; // 15s throttle (was 5s)
     lastDriverRouteFetchRef.current = now;
 
-    fetchRouteOSRM(driverLocation, effectivePickup).then(setDriverRoute);
+    const gen = driverRouteGenRef.current;
+    fetchRouteOSRM(driverLocation, effectivePickup).then(route => {
+      // Discard if ride transitioned while fetch was in-flight
+      if (driverRouteGenRef.current !== gen) return;
+      setDriverRoute(route);
+    });
   }, [driverLocation, bookingStep, effectivePickup]);
 
   // Fit map to driver + pickup — only on first driver location, not every update.
@@ -1068,8 +1082,12 @@ export default function TaxiScreen({ navigation }) {
       // Update persistent notification
       showRideNotification('in_progress', extractDriverInfo(ride), ride.quote?.duration || null);
 
-      // Clear driver marker/route, restore destination + stops
-      setDriverLocation(null);
+      // Invalidate any in-flight driverRoute OSRM fetches so stale driver→pickup
+      // route doesn't reappear after we clear it below.
+      driverRouteGenRef.current += 1;
+
+      // Clear driver-to-pickup route. Keep driverLocation — driver:locationUpdate
+      // events keep flowing during IN_PROGRESS and the car should remain visible.
       setDriverRoute(null);
 
       const savedCoords = savedDestinationCoordsRef.current;
@@ -1092,9 +1110,31 @@ export default function TaxiScreen({ navigation }) {
           .filter(s => s.coords)
           .map(s => s.coords);
 
-        // Fetch full route: pickup → stops → destination
-        if (loc) {
-          fetchRouteOSRM(loc, savedCoords, waypoints).then(coords => {
+        // IMMEDIATE: Show straight-line route + fit map right away so the user
+        // sees pickup → stops → destination without waiting for the OSRM fetch.
+        const straightLine = [
+          loc || { latitude: ride.pickup?.lat, longitude: ride.pickup?.lng },
+          ...waypoints,
+          savedCoords,
+        ].filter(c => c && isFinite(c.latitude));
+        if (straightLine.length >= 2) {
+          setRoutePolyline(straightLine);
+          setTimeout(() => {
+            if (mapRef.current) {
+              mapRef.current.fitToCoordinates(straightLine, {
+                edgePadding: { top: 50, right: 50, bottom: 250, left: 50 },
+                animated: true,
+              });
+            }
+          }, 100);
+        }
+
+        // REFINE: Replace straight line with real OSRM route in background
+        const origin = loc || (ride.pickup?.lat
+          ? { latitude: ride.pickup.lat, longitude: ride.pickup.lng }
+          : null);
+        if (origin) {
+          fetchRouteOSRM(origin, savedCoords, waypoints).then(coords => {
             setRoutePolyline(coords);
 
             // Calculate total distance from polyline
@@ -1105,15 +1145,8 @@ export default function TaxiScreen({ navigation }) {
                 coords[i].latitude, coords[i].longitude,
               );
             }
-            setTotalDistance(Math.round(totalDist * 10) / 10); // 1 decimal place
+            setTotalDistance(Math.round(totalDist * 10) / 10);
             routeDistanceRef.current = Math.round(totalDist * 10) / 10;
-
-            if (mapRef.current) {
-              mapRef.current.fitToCoordinates(coords, {
-                edgePadding: { top: 50, right: 50, bottom: 250, left: 50 },
-                animated: true,
-              });
-            }
           });
         }
       }
@@ -1366,6 +1399,7 @@ export default function TaxiScreen({ navigation }) {
     setTotalDistance(null);
     routeDistanceRef.current = null;
     driverLocationRef.current = null;
+    driverRouteGenRef.current += 1; // Invalidate any in-flight driverRoute fetches
     driverCloseNotifiedRef.current = false;
     savedDestinationRef.current = null;
     savedDestinationCoordsRef.current = null;
@@ -1377,7 +1411,7 @@ export default function TaxiScreen({ navigation }) {
     clearRideState();
   };
 
-  const requestLocationPermission = async () => {
+  const requestLocationPermission = async (resetPickup = false) => {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
@@ -1401,22 +1435,25 @@ export default function TaxiScreen({ navigation }) {
           longitude: lastKnown.coords.longitude,
         };
         setLocation(cachedLocation);
-        setCustomPickup(null);
+        hasInitialFixRef.current = true;
+        if (resetPickup) setCustomPickup(null);
         setIsLoadingLocation(false);
 
-        // Reverse geocode the cached location
-        try {
-          const [address] = await Location.reverseGeocodeAsync(cachedLocation);
-          if (address) {
-            const addressString = [
-              address.street,
-              address.name,
-              address.city,
-            ].filter(Boolean).join(', ');
-            setLocationAddress(addressString || t('taxi.currentLocation'));
+        // Reverse geocode — skip if user has a custom pickup (don't overwrite their chosen address)
+        if (resetPickup || !customPickupRef.current) {
+          try {
+            const [address] = await Location.reverseGeocodeAsync(cachedLocation);
+            if (address && !customPickupRef.current) {
+              const addressString = [
+                address.street,
+                address.name,
+                address.city,
+              ].filter(Boolean).join(', ');
+              setLocationAddress(addressString || t('taxi.currentLocation'));
+            }
+          } catch (e) {
+            if (__DEV__) console.warn('[TaxiScreen] Reverse geocode failed:', e.message);
           }
-        } catch (e) {
-          if (__DEV__) console.warn('[TaxiScreen] Reverse geocode failed:', e.message);
         }
       }
 
@@ -1442,20 +1479,28 @@ export default function TaxiScreen({ navigation }) {
       }
 
       setLocation(newLocation);
-      setCustomPickup(null);
+      hasInitialFixRef.current = true;
+      if (resetPickup) setCustomPickup(null);
 
-      const [address] = await Location.reverseGeocodeAsync(newLocation);
-      if (address) {
-        const addressString = [
-          address.street,
-          address.name,
-          address.city,
-        ].filter(Boolean).join(', ');
-        setLocationAddress(addressString || t('taxi.currentLocation'));
+      // Only update address if user hasn't set a custom pickup in the meantime
+      if (resetPickup || !customPickupRef.current) {
+        const [address] = await Location.reverseGeocodeAsync(newLocation);
+        if (address && !customPickupRef.current) {
+          const addressString = [
+            address.street,
+            address.name,
+            address.city,
+          ].filter(Boolean).join(', ');
+          setLocationAddress(addressString || t('taxi.currentLocation'));
+        }
       }
     } catch (error) {
-      setLocation(DEFAULT_LOCATION);
-      setLocationAddress('Kutaisi, Georgia');
+      // Only fall back to default if we never got a real GPS fix.
+      // After first fix, keep the last known location instead of resetting to Kutaisi.
+      if (!hasInitialFixRef.current && !locationRef.current) {
+        setLocation(DEFAULT_LOCATION);
+        setLocationAddress('Kutaisi, Georgia');
+      }
     } finally {
       setIsLoadingLocation(false);
     }
@@ -1468,8 +1513,10 @@ export default function TaxiScreen({ navigation }) {
   }, [pricingConfig]);
 
   // Fetch directions and update map with route polyline
+  // Uses refs for pickup to always get the latest value (especially after drag-end
+  // where setCustomPickup just fired but React hasn't re-rendered yet).
   const fetchDirectionsAndUpdate = useCallback(async (destCoords) => {
-    const pickup = customPickup || location;
+    const pickup = customPickupRef.current || locationRef.current;
     if (!pickup || !destCoords) return;
 
     setIsLoadingDirections(true);
@@ -1580,7 +1627,7 @@ export default function TaxiScreen({ navigation }) {
     } finally {
       setIsLoadingDirections(false);
     }
-  }, [location, customPickup, stops, selectedVehicle, calculatePrice]);
+  }, [stops, selectedVehicle, calculatePrice]);
 
   // Handle destination selection with coordinates (from Places Autocomplete)
   const handleDestinationSelectWithCoords = useCallback(async (address, coords) => {
@@ -1937,8 +1984,8 @@ export default function TaxiScreen({ navigation }) {
     setStops([]);
     setCustomPickup(null);
     setBookingStep(BOOKING_STEPS.LOCATION_SEARCH);
-    // Restore pickup address from GPS
-    requestLocationPermission();
+    // Restore pickup address from GPS (resetPickup=true to clear custom pickup)
+    requestLocationPermission(true);
   }, []);
 
   const handlePickupSelect = useCallback((address, coords) => {
@@ -1946,18 +1993,52 @@ export default function TaxiScreen({ navigation }) {
     setCustomPickup(coords);
   }, []);
 
-  // Handle draggable pickup pin drop — reverse geocode to get address
-  const handlePickupDragEnd = useCallback(async (coords) => {
+  // Handle draggable pickup pin drop — place pin immediately, defer geocode + re-route
+  const handlePickupDragEnd = useCallback((coords) => {
     setCustomPickup(coords);
-    try {
-      const result = await reverseGeocode(coords.latitude, coords.longitude);
-      if (result) {
-        setLocationAddress(result.mainText || result.address);
+    customPickupRef.current = coords; // Eager sync so fetchDirectionsAndUpdate uses new pickup
+    InteractionManager.runAfterInteractions(() => {
+      // Reverse geocode for address
+      reverseGeocode(coords.latitude, coords.longitude)
+        .then(result => {
+          if (result) {
+            setLocationAddress(result.mainText || result.address);
+          }
+        })
+        .catch(e => {
+          if (__DEV__) console.warn('[TaxiScreen] Reverse geocode on drag error:', e.message);
+        });
+
+      // Re-fetch route & price from new pickup to existing destination
+      const destCoords = destinationCoordsRef.current;
+      if (destCoords) {
+        fetchDirectionsAndUpdate(destCoords);
       }
-    } catch (e) {
-      if (__DEV__) console.warn('[TaxiScreen] Reverse geocode on drag error:', e.message);
-    }
-  }, []);
+    });
+  }, [fetchDirectionsAndUpdate]);
+
+  // Handle draggable destination pin drop — update destination, re-route + recalculate price
+  const handleDestinationDragEnd = useCallback((coords) => {
+    setDestinationCoords(coords);
+    destinationCoordsRef.current = coords; // Eager sync for fetchDirectionsAndUpdate
+    setDestination(`${coords.latitude.toFixed(4)}, ${coords.longitude.toFixed(4)}`);
+
+    InteractionManager.runAfterInteractions(() => {
+      // Reverse geocode for address
+      reverseGeocode(coords.latitude, coords.longitude)
+        .then(result => {
+          if (result) {
+            setDestination(result.mainText || result.address);
+          }
+        })
+        .catch(e => {
+          if (__DEV__) console.warn('[TaxiScreen] Reverse geocode destination drag error:', e.message);
+        });
+
+      // Re-fetch route & price
+      fetchDirectionsAndUpdate(coords);
+    });
+  }, [fetchDirectionsAndUpdate]);
 
   const handleAddStop = useCallback(() => {
     setStops(prev => {
@@ -2019,22 +2100,31 @@ export default function TaxiScreen({ navigation }) {
 
   // Handle "Select on Map" icon press — target: 'pickup', 'destination', or stop index
   const handleSelectOnMap = useCallback((target = 'destination') => {
+    isSelectingOnMapRef.current = target;
     setIsSelectingOnMap(target);
     if (bottomSheetRef.current) {
       bottomSheetRef.current.collapse();
     }
   }, []);
 
-  // Handle map press for location selection (routed to the correct input)
-  // Sets pin immediately, then reverse geocodes address in background
-  const handleMapPress = useCallback(async (event) => {
-    if (isSelectingOnMap == null) return;
+  // Handle map press for location selection (routed to the correct input).
+  // Uses refs for isSelectingOnMap and destinationCoords so the callback is
+  // stable and never causes MapView prop churn / re-renders.
+  // Heavy work (reverse geocode, directions) is deferred via InteractionManager
+  // so the pin placement and UI feedback happen on the next frame without jank.
+  const destinationCoordsRef = useRef(null);
+  destinationCoordsRef.current = destinationCoords;
+
+  const handleMapPress = useCallback((event) => {
+    const target = isSelectingOnMapRef.current;
+    if (target == null) return;
 
     const { latitude, longitude } = event.nativeEvent.coordinate;
-    const target = isSelectingOnMap;
     const coords = { latitude, longitude };
+    const coordLabel = `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
 
-    // Immediately place the pin and dismiss selection mode
+    // Immediately place the pin and dismiss selection mode (single batch)
+    isSelectingOnMapRef.current = null;
     setIsSelectingOnMap(null);
     if (bottomSheetRef.current) {
       bottomSheetRef.current.snapToIndex(1);
@@ -2042,51 +2132,53 @@ export default function TaxiScreen({ navigation }) {
 
     if (target === 'pickup') {
       setCustomPickup(coords);
-      setLocationAddress(`${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
+      customPickupRef.current = coords; // Eager sync so fetchDirectionsAndUpdate uses new pickup
+      setLocationAddress(coordLabel);
     } else if (typeof target === 'number') {
       setStops(prev => {
         const updated = [...prev];
-        updated[target] = { address: `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`, coords };
+        updated[target] = { address: coordLabel, coords };
         return updated;
       });
     } else {
       setDestinationCoords(coords);
-      setDestination(`${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
+      setDestination(coordLabel);
     }
 
-    // Reverse geocode in background to get real address
-    try {
-      const addressResult = await reverseGeocode(latitude, longitude);
-      const address = addressResult?.mainText || addressResult?.address || `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
-
-      if (target === 'pickup') {
-        setLocationAddress(address);
-      } else if (typeof target === 'number') {
-        setStops(prev => {
-          const updated = [...prev];
-          if (updated[target]) updated[target] = { ...updated[target], address };
-          return updated;
+    // Defer heavy work (geocode + directions) until after animations settle
+    InteractionManager.runAfterInteractions(() => {
+      // Reverse geocode in background to get real address
+      reverseGeocode(latitude, longitude)
+        .then(addressResult => {
+          const address = addressResult?.mainText || addressResult?.address || coordLabel;
+          if (target === 'pickup') {
+            setLocationAddress(address);
+          } else if (typeof target === 'number') {
+            setStops(prev => {
+              const updated = [...prev];
+              if (updated[target]) updated[target] = { ...updated[target], address };
+              return updated;
+            });
+          } else {
+            setDestination(address);
+          }
+        })
+        .catch(e => {
+          if (__DEV__) console.warn('[TaxiScreen] Reverse geocode error:', e.message);
         });
-      } else {
-        setDestination(address);
-      }
-    } catch (e) {
-      if (__DEV__) console.warn('[TaxiScreen] Reverse geocode error:', e.message);
-    }
 
-    // Fetch directions after pin is placed
-    if (target === 'destination') {
-      setIsLoadingDirections(true);
-      try {
-        await fetchDirectionsAndUpdate(coords);
-        setBookingStep(BOOKING_STEPS.RIDE_OPTIONS);
-      } finally {
-        setIsLoadingDirections(false);
+      // Fetch directions after pin is placed
+      if (target === 'destination') {
+        setIsLoadingDirections(true);
+        fetchDirectionsAndUpdate(coords)
+          .then(() => setBookingStep(BOOKING_STEPS.RIDE_OPTIONS))
+          .finally(() => setIsLoadingDirections(false));
+      } else if (destinationCoordsRef.current) {
+        // Pickup or stop changed — re-route from new pickup through stops to destination
+        fetchDirectionsAndUpdate(destinationCoordsRef.current);
       }
-    } else if (typeof target === 'number' && destinationCoords) {
-      setTimeout(() => fetchDirectionsAndUpdate(destinationCoords), 100);
-    }
-  }, [isSelectingOnMap, fetchDirectionsAndUpdate, destinationCoords]);
+    });
+  }, [fetchDirectionsAndUpdate]);
 
   // Get ride status for RideStatusSheet
   const getRideStatus = () => {
@@ -2151,7 +2243,7 @@ export default function TaxiScreen({ navigation }) {
         destination={destination}
         onDestinationChange={handleDestinationChange}
         onDestinationSelect={handleDestinationSelect}
-        onPickupRefresh={requestLocationPermission}
+        onPickupRefresh={() => requestLocationPermission(true)}
         onPickupSelect={handlePickupSelect}
         isLoadingLocation={isLoadingLocation || isLoadingDirections}
         userLocation={location}
@@ -2170,6 +2262,17 @@ export default function TaxiScreen({ navigation }) {
     locationAddress, destination, isLoadingLocation, isLoadingDirections,
     location, stops, lastDestination,
   ]);
+
+  // Memoized — prevents MapView re-render from inline function ref churn
+  const handleRegionChangeComplete = useCallback((region) => {
+    if (zoomDebounceRef.current) clearTimeout(zoomDebounceRef.current);
+    zoomDebounceRef.current = setTimeout(() => {
+      if (region.latitudeDelta > 0) {
+        const zoom = Math.round(Math.log2(360 / region.latitudeDelta));
+        setMapZoomLevel(prev => prev === zoom ? prev : zoom);
+      }
+    }, 300);
+  }, []);
 
   const initialRegion = {
     latitude: location?.latitude || DEFAULT_LOCATION.latitude,
@@ -2228,16 +2331,7 @@ export default function TaxiScreen({ navigation }) {
           showsMyLocationButton={false}
           toolbarEnabled={false}
           showsCompass={false}
-          onRegionChangeComplete={(region) => {
-            // Debounce zoom level calculation — avoids re-renders during pan/pinch
-            if (zoomDebounceRef.current) clearTimeout(zoomDebounceRef.current);
-            zoomDebounceRef.current = setTimeout(() => {
-              if (region.latitudeDelta > 0) {
-                const zoom = Math.round(Math.log2(360 / region.latitudeDelta));
-                setMapZoomLevel(prev => prev === zoom ? prev : zoom);
-              }
-            }, 300);
-          }}
+          onRegionChangeComplete={handleRegionChangeComplete}
         >
           {/* User location - pulsing blue dot (always at true GPS) */}
           {(location || locationRef.current) && (
@@ -2266,8 +2360,14 @@ export default function TaxiScreen({ navigation }) {
             />
           )}
 
-          {/* Destination marker - red pin with flag */}
-          {destinationCoords && <DestinationMarker coordinate={destinationCoords} />}
+          {/* Destination marker - red pin, draggable during location search / ride options */}
+          {destinationCoords && (
+            <DestinationMarker
+              coordinate={destinationCoords}
+              draggable={bookingStep === BOOKING_STEPS.LOCATION_SEARCH || bookingStep === BOOKING_STEPS.RIDE_OPTIONS}
+              onDragEnd={handleDestinationDragEnd}
+            />
+          )}
 
           {/* Stop markers - custom orange pins (not pinColor, which Apple Maps hides on zoom out) */}
           {stops.map((stop, index) => stop.coords && (
@@ -2330,6 +2430,7 @@ export default function TaxiScreen({ navigation }) {
               <TouchableOpacity
                 style={styles.mapSelectionCancel}
                 onPress={() => {
+                  isSelectingOnMapRef.current = null;
                   setIsSelectingOnMap(null);
                   if (bottomSheetRef.current) {
                     bottomSheetRef.current.snapToIndex(1);

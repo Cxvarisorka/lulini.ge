@@ -14,11 +14,19 @@
       "android": {
         "buildType": "app-bundle"
       },
-      "channel": "preview"
+      "channel": "preview",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://api.lulini.ge/api",
+        "EXPO_PUBLIC_SOCKET_URL": "https://api.lulini.ge"
+      }
     },
     "production": {
       "autoIncrement": true,
-      "channel": "production"
+      "channel": "production",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://api.lulini.ge/api",
+        "EXPO_PUBLIC_SOCKET_URL": "https://api.lulini.ge"
+      }
     }
   },
   "submit": {

@@ -1,6 +1,6 @@
 import * as SecureStore from 'expo-secure-store';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || '';
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://api.lulini.ge/api';
 
 // LRU-style cache with max size and TTL
 const MAX_CACHE_ENTRIES = 50;

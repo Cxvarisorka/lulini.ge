@@ -23,7 +23,7 @@ const MAX_RETRY_QUEUE_SIZE = 200;
 const RETRY_FLUSH_INTERVAL_MS = 60000; // attempt flush every 60s
 
 // API
-const getApiUrl = () => process.env.EXPO_PUBLIC_API_URL || '';
+const getApiUrl = () => process.env.EXPO_PUBLIC_API_URL || 'https://api.lulini.ge/api';
 
 // ─── In-memory state (persists across background invocations within same process) ─
 

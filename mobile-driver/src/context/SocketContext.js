@@ -16,7 +16,7 @@ export const useSocket = () => {
   return context;
 };
 
-const SOCKET_URL = process.env.EXPO_PUBLIC_SOCKET_URL || '';
+const SOCKET_URL = process.env.EXPO_PUBLIC_SOCKET_URL || 'https://api.lulini.ge';
 // Poll less aggressively when socket is healthy, more when degraded
 const POLL_INTERVAL_HEALTHY_MS = 60000; // 60s when WebSocket is connected
 const POLL_INTERVAL_DEGRADED_MS = 10000; // 10s when socket is disconnected

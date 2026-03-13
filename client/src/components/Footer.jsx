@@ -99,14 +99,14 @@ export function Footer() {
             <h4 className="font-semibold text-sm uppercase tracking-wider text-white/90">{t('footer.legal')}</h4>
             <ul className="space-y-2.5 text-sm text-white/60">
               <li>
-                <a href="#" className="hover:text-white transition-colors">
+                <Link to="/terms" className="hover:text-white transition-colors">
                   {t('footer.terms')}
-                </a>
+                </Link>
               </li>
               <li>
-                <a href="#" className="hover:text-white transition-colors">
+                <Link to="/privacy" className="hover:text-white transition-colors">
                   {t('footer.privacy')}
-                </a>
+                </Link>
               </li>
             </ul>
           </div>

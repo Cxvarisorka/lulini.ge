@@ -11,8 +11,8 @@ import * as Sentry from '@sentry/react-native';
 // be linked yet (stale prebuild, Expo Go, or first build after adding Sentry).
 try {
   Sentry.init({
-    dsn: process.env.EXPO_PUBLIC_SENTRY_DSN || '',
-    enabled: !__DEV__ && !!process.env.EXPO_PUBLIC_SENTRY_DSN,
+    dsn: process.env.SENTRY_DSN || '',
+    enabled: !__DEV__ && !!process.env.SENTRY_DSN,
     tracesSampleRate: 0,
   });
 } catch (e) {

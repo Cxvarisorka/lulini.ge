@@ -74,8 +74,8 @@ connectDB();
 
 // Middleware
 const allowedOrigins = process.env.NODE_ENV === 'production'
-    ? ['https://gotours.ge', 'https://www.gotours.ge']
-    : ['http://localhost:5173', 'https://gotours.ge', 'https://www.gotours.ge', 'https://api.gotours.ge', 'http://192.168.100.3:3000'];
+    ? ['https://lulini.ge', 'https://www.lulini.ge']
+    : ['http://localhost:5173', 'https://lulini.ge', 'https://www.lulini.ge', 'https://api.lulini.ge', 'http://192.168.100.3:3000'];
 
 // Socket.io setup with CORS
 const io = new Server(server, {
