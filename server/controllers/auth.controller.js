@@ -8,13 +8,14 @@ const { generateOTP, sendVerification, checkVerification } = require('../service
 const appleSignin = require('apple-signin-auth');
 
 // Cookie options
+const isProduction = process.env.NODE_ENV === 'production';
 const cookieOptions = {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
+    secure: isProduction,
+    sameSite: isProduction ? 'none' : 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     path: '/',
-    ...(process.env.NODE_ENV === 'production' && { domain: '.lulini.ge' }),
+    ...(process.env.COOKIE_DOMAIN && { domain: process.env.COOKIE_DOMAIN }),
 };
 
 // Helper to send token via cookie AND response body (for mobile clients)
@@ -118,12 +119,9 @@ const login = catchAsync(async (req, res, next) => {
 // @route   POST /api/auth/logout
 const logout = (req, res) => {
     res.cookie('token', '', {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-        path: '/',
-        ...(process.env.NODE_ENV === 'production' && { domain: '.lulini.ge' }),
-        expires: new Date(0)
+        ...cookieOptions,
+        expires: new Date(0),
+        maxAge: 0,
     });
 
     res.json({
