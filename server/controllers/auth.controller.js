@@ -11,9 +11,10 @@ const appleSignin = require('apple-signin-auth');
 const cookieOptions = {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax', // Mobile apps use Bearer token, cookies are for same-origin web admin only
+    sameSite: 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    path: '/'
+    path: '/',
+    ...(process.env.NODE_ENV === 'production' && { domain: '.lulini.ge' }),
 };
 
 // Helper to send token via cookie AND response body (for mobile clients)
@@ -121,6 +122,7 @@ const logout = (req, res) => {
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'lax',
         path: '/',
+        ...(process.env.NODE_ENV === 'production' && { domain: '.lulini.ge' }),
         expires: new Date(0)
     });
 
@@ -162,8 +164,7 @@ const oauthSuccess = (req, res) => {
     const token = generateToken(req.user._id);
 
     res.cookie('token', token, cookieOptions);
-    const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
-    res.redirect(`${clientUrl}/profile?token=${token}`);
+    res.redirect(`${process.env.CLIENT_URL || 'http://localhost:5173'}/profile`);
 };
 
 // Allowlist of valid redirect URI schemes for OAuth mobile flow

@@ -1,6 +1,5 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import { authService } from '../services/auth';
-import { setToken } from '../services/api';
 
 const UserContext = createContext(null);
 
@@ -20,14 +19,6 @@ export function UserProvider({ children }) {
 
   // Check if user is logged in on mount
   useEffect(() => {
-    // Capture token from OAuth redirect URL
-    const params = new URLSearchParams(window.location.search);
-    const urlToken = params.get('token');
-    if (urlToken) {
-      setToken(urlToken);
-      window.history.replaceState({}, '', window.location.pathname);
-    }
-
     authService.getCurrentUser()
       .then((res) => {
         const userData = res.data.user;
@@ -43,7 +34,6 @@ export function UserProvider({ children }) {
         });
       })
       .catch(() => {
-        setToken(null);
         setUser(defaultUser);
       })
       .finally(() => {
@@ -54,7 +44,6 @@ export function UserProvider({ children }) {
   // Login user
   const login = async (email, password) => {
     const res = await authService.login(email, password);
-    if (res.token) setToken(res.token);
     const userData = res.data.user;
     const newUser = {
       id: userData.id,
@@ -73,7 +62,6 @@ export function UserProvider({ children }) {
   // Register user
   const register = async (userData) => {
     const res = await authService.register(userData);
-    if (res.token) setToken(res.token);
     const user = res.data.user;
     const newUser = {
       id: user.id,
@@ -92,7 +80,6 @@ export function UserProvider({ children }) {
   // Logout user
   const logout = async () => {
     await authService.logout();
-    setToken(null);
     setUser(defaultUser);
   };
 
