@@ -19,8 +19,9 @@ const isIOS = Platform.OS === 'ios';
 const DOT_SIZE = 22;
 const PULSE_MAX = 72;
 const PULSE_DURATION = 2000;
+const USE_NATIVE_IMAGE_MARKER = true;
 
-const PulsingUserMarker = memo(({ coordinate, tappable = true }) => {
+const PulsingUserMarker = memo(({ coordinate, tappable = true, visible = true }) => {
   const lat = coordinate?.latitude;
   const lng = coordinate?.longitude;
   const isValid = isFinite(lat) && isFinite(lng);
@@ -61,8 +62,13 @@ const PulsingUserMarker = memo(({ coordinate, tappable = true }) => {
   // No valid coordinate ever received — nothing to show
   if (!stableCoord) return null;
 
-  // Android: static PNG — avoids Google Maps JSX-to-bitmap clipping
-  if (!isIOS) {
+  // Hidden but not unmounted — keeps refs and animation alive
+  if (!visible) return null;
+
+  // Use a native image marker for maximum stability on Google Maps.
+  // The JSX-based pulsing marker is fragile on iOS Google Maps and can
+  // disappear after map subtree updates even when the coordinate is valid.
+  if (USE_NATIVE_IMAGE_MARKER) {
     return (
       <Marker
         coordinate={stableCoord}
@@ -70,12 +76,12 @@ const PulsingUserMarker = memo(({ coordinate, tappable = true }) => {
         anchor={{ x: 0.5, y: 0.5 }}
         tappable={tappable}
         tracksViewChanges={false}
-        zIndex={5}
+        zIndex={20}
       />
     );
   }
 
-  // iOS: animated JSX pulsing ring
+  // iOS Apple Maps: animated JSX pulsing ring
   const pulseScale = pulseAnim.interpolate({
     inputRange: [0, 1],
     outputRange: [0.3, 1],
@@ -92,7 +98,7 @@ const PulsingUserMarker = memo(({ coordinate, tappable = true }) => {
       anchor={{ x: 0.5, y: 0.5 }}
       tappable={tappable}
       tracksViewChanges={iosTracksViews}
-      zIndex={5}
+      zIndex={20}
       style={styles.marker}
     >
       <View style={styles.container}>
@@ -110,7 +116,7 @@ const PulsingUserMarker = memo(({ coordinate, tappable = true }) => {
     </Marker>
   );
 }, (prev, next) => {
-  // Always re-render if tappable changed
+  if (prev.visible !== next.visible) return false;
   if (prev.tappable !== next.tappable) return false;
 
   const pLat = prev.coordinate?.latitude;

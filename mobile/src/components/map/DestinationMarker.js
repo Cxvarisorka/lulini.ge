@@ -6,7 +6,7 @@
  * Optionally draggable (during ride options step) to adjust destination.
  */
 import { memo, useCallback } from 'react';
-import { Marker } from 'react-native-maps';
+import Marker from './MarkerWrapper';
 import { markerImages } from './markerImages';
 
 const DestinationMarker = memo(({

@@ -6,7 +6,7 @@
  * Uses markerImages.pickup (PNG) on both platforms for consistency.
  */
 import { memo, useCallback } from 'react';
-import { Marker } from 'react-native-maps';
+import Marker from './MarkerWrapper';
 import { markerImages } from './markerImages';
 
 const DraggablePickupMarker = memo(({
