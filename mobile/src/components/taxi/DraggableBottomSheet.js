@@ -21,6 +21,7 @@ const DraggableBottomSheet = forwardRef(function DraggableBottomSheet({
   floatingButton,
   headerBar,
   isFullscreen = false,
+  handleKeyboard = true,
 }, ref) {
   const insets = useSafeAreaInsets();
 
@@ -37,13 +38,23 @@ const DraggableBottomSheet = forwardRef(function DraggableBottomSheet({
   const snapPointsRef = useRef(snapPointsPixels);
   // Keep ref in sync with latest snap points
   useEffect(() => {
+    const prevPixels = snapPointsRef.current;
     snapPointsRef.current = snapPointsPixels;
     // Clamp current index to new range
     if (currentSnapIndex.current >= snapPointsPixels.length) {
       currentSnapIndex.current = snapPointsPixels.length - 1;
     }
+    const targetY = snapPointsPixels[currentSnapIndex.current];
+    // Only animate if the target position actually changed (avoids spurious
+    // spring re-triggers when snap point strings change but pixel values match)
+    const prevTarget = prevPixels[Math.min(currentSnapIndex.current, prevPixels.length - 1)];
+    if (prevTarget !== undefined && Math.abs(targetY - prevTarget) < 1) {
+      onChange?.(currentSnapIndex.current);
+      return;
+    }
+    translateY.stopAnimation();
     Animated.spring(translateY, {
-      toValue: snapPointsPixels[currentSnapIndex.current],
+      toValue: targetY,
       useNativeDriver: true,
       tension: 100,
       friction: 12,
@@ -51,11 +62,17 @@ const DraggableBottomSheet = forwardRef(function DraggableBottomSheet({
     onChange?.(currentSnapIndex.current);
   }, [snapPoints.join(',')]);
 
-  // Handle keyboard events
+  // Handle keyboard events — only when handleKeyboard is true (i.e. sheet
+  // contains TextInputs). During driver search / ride tracking states there
+  // are no inputs, so spurious Android keyboard events (from Alerts, system
+  // UI changes, etc.) would cause the sheet to jump up and down rapidly.
+  const handleKeyboardRef = useRef(handleKeyboard);
+  handleKeyboardRef.current = handleKeyboard;
   useEffect(() => {
     const keyboardWillShow = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
       (event) => {
+        if (!handleKeyboardRef.current) return;
         // Save current position and snap to highest point
         preKeyboardSnapIndex.current = currentSnapIndex.current;
         const highestIndex = snapPointsRef.current.length - 1;
@@ -68,6 +85,7 @@ const DraggableBottomSheet = forwardRef(function DraggableBottomSheet({
     const keyboardWillHide = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
       () => {
+        if (!handleKeyboardRef.current) return;
         // Restore to previous position
         snapToIndex(preKeyboardSnapIndex.current);
       }
@@ -86,6 +104,8 @@ const DraggableBottomSheet = forwardRef(function DraggableBottomSheet({
     const pts = snapPointsRef.current;
     const clampedIndex = Math.min(index, pts.length - 1);
     currentSnapIndex.current = clampedIndex;
+    // Stop any in-flight animation to prevent competing springs
+    translateY.stopAnimation();
     Animated.spring(translateY, {
       toValue: pts[clampedIndex],
       useNativeDriver: true,

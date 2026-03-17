@@ -48,10 +48,58 @@ export default function PaymentMethodModal({ visible, onClose, onSelect, amount,
     onClose();
   };
 
-  const handleMobilePaySelect = () => {
+  const handleMobilePaySelect = async () => {
     const method = Platform.OS === 'ios' ? 'apple_pay' : 'google_pay';
-    onSelect(method);
-    onClose();
+
+    if (mode === 'select') {
+      // Just selecting the method — actual charge happens later
+      onSelect(method);
+      onClose();
+      return;
+    }
+
+    if (!amount || amount <= 0) {
+      onSelect(method);
+      onClose();
+      return;
+    }
+
+    // Charge mode: create a BOG order with Apple Pay / Google Pay
+    setProcessing(true);
+    try {
+      const lang = i18n.language === 'ka' ? 'ka' : 'en';
+      const payRes = await paymentAPI.payRide(amount, null, [method], lang);
+      const { orderId, redirectUrl, paymentId } = payRes.data?.data || {};
+
+      if (!orderId) {
+        throw new Error('No order ID returned');
+      }
+
+      if (redirectUrl) {
+        // BOG handles Apple Pay / Google Pay on their payment page
+        await WebBrowser.openAuthSessionAsync(redirectUrl, 'lulini://');
+      }
+
+      const verifyRes = await paymentAPI.verifyRidePayment(orderId);
+      const status = verifyRes.data?.data?.status;
+      const confirmedPaymentId = verifyRes.data?.data?.paymentId || paymentId;
+
+      if (status === 'completed') {
+        onSelect(method, null, confirmedPaymentId);
+        onClose();
+      } else if (status === 'rejected') {
+        Alert.alert(t('errors.error'), t('payment.cardPaymentFailed'));
+      } else {
+        Alert.alert(t('payment.cardPaymentProcessing'), t('payment.paymentPendingMessage'));
+      }
+    } catch (err) {
+      Alert.alert(
+        t('errors.error'),
+        err.response?.data?.message || t('errors.somethingWentWrong')
+      );
+    } finally {
+      setProcessing(false);
+    }
   };
 
   const handleAddCard = async () => {
@@ -62,16 +110,18 @@ export default function PaymentMethodModal({ visible, onClose, onSelect, amount,
       const { redirectUrl, orderId } = res.data?.data || {};
 
       if (redirectUrl) {
-        await WebBrowser.openBrowserAsync(redirectUrl, {
-          dismissButtonStyle: 'close',
-          presentationStyle: 'pageSheet',
-        });
+        // openAuthSessionAsync auto-closes when BOG redirects to lulini:// scheme
+        const result = await WebBrowser.openAuthSessionAsync(redirectUrl, 'lulini://');
 
         if (orderId) {
           try {
-            await paymentAPI.verifyCardRegistration(orderId);
+            const verifyRes = await paymentAPI.verifyCardRegistration(orderId);
+            const status = verifyRes.data?.data?.status;
+            if (status === 'rejected') {
+              Alert.alert(t('errors.error'), t('payment.cardRegistrationFailed'));
+            }
           } catch {
-            // Non-fatal
+            // Non-fatal — card may still be saved via callback
           }
         }
 
@@ -104,7 +154,7 @@ export default function PaymentMethodModal({ visible, onClose, onSelect, amount,
     setProcessing(true);
     try {
       const lang = i18n.language === 'ka' ? 'ka' : 'en';
-      const chargeRes = await paymentAPI.preChargeRide(card._id, amount, lang);
+      const chargeRes = await paymentAPI.chargeRide(card._id, amount, null, lang);
       const { orderId, redirectUrl, paymentId } = chargeRes.data?.data || {};
 
       if (!orderId) {
@@ -112,10 +162,7 @@ export default function PaymentMethodModal({ visible, onClose, onSelect, amount,
       }
 
       if (redirectUrl) {
-        await WebBrowser.openBrowserAsync(redirectUrl, {
-          dismissButtonStyle: 'close',
-          presentationStyle: 'pageSheet',
-        });
+        await WebBrowser.openAuthSessionAsync(redirectUrl, 'lulini://');
       }
 
       const verifyRes = await paymentAPI.verifyRidePayment(orderId);

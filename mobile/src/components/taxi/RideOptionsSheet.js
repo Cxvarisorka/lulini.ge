@@ -44,12 +44,11 @@ export default function RideOptionsSheet({
         routeDistance={routeDistance}
       />
 
-      {/* Payment - tappable row that opens modal */}
-      <Text style={styles.sectionLabel}>{t('taxi.paymentMethod')}</Text>
-      <PaymentMethodSelector
-        selected={paymentMethod}
-        onPress={onPaymentPress}
-      />
+      {/* Cash payment indicator */}
+      <View style={styles.cashRow}>
+        <Ionicons name="cash-outline" size={18} color={colors.success} />
+        <Text style={styles.cashLabel}>{t('taxi.cash')}</Text>
+      </View>
 
       {/* Bottom: Price + Request */}
       <View style={styles.bottomRow}>
@@ -97,6 +96,16 @@ const createStyles = (typography) => StyleSheet.create({
     color: colors.mutedForeground,
     marginBottom: 5,
     marginTop: 8,
+  },
+  cashRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 10,
+  },
+  cashLabel: {
+    ...typography.bodySmall,
+    color: colors.mutedForeground,
   },
   bottomRow: {
     flexDirection: 'row',

@@ -43,15 +43,22 @@ api.interceptors.request.use(
 // Response interceptor: token extraction + retry on transient failures
 api.interceptors.response.use(
   async (response) => {
-    const setCookie = response.headers['set-cookie'];
-    if (setCookie) {
-      const tokenCookie = setCookie.find(cookie => cookie.startsWith('token='));
-      if (tokenCookie) {
-        const token = tokenCookie.split('token=')[1].split(';')[0];
-        if (token) {
-          await SecureStore.setItemAsync('token', token);
+    try {
+      const setCookie = response.headers['set-cookie'];
+      if (setCookie) {
+        // set-cookie can be a string or an array depending on platform
+        const cookies = Array.isArray(setCookie) ? setCookie : [setCookie];
+        const tokenCookie = cookies.find(cookie => cookie.startsWith('token='));
+        if (tokenCookie) {
+          const token = tokenCookie.split('token=')[1].split(';')[0];
+          if (token) {
+            await SecureStore.setItemAsync('token', token);
+          }
         }
       }
+    } catch (e) {
+      // Never crash on cookie parsing — token will be refreshed on next auth call
+      if (__DEV__) console.warn('[api] cookie parse error:', e.message);
     }
     return response;
   },
@@ -178,15 +185,34 @@ export const paymentAPI = {
   setDefaultCard: (cardId) =>
     api.patch(`/payments/cards/${cardId}/default`),
 
-  // Pre-ride payment: charge card before requesting drivers
-  preChargeRide: (cardId, amount, lang) =>
-    api.post('/payments/ride/pre-charge', { cardId, amount, lang }),
+  // Pre-ride payment: charge saved card before requesting drivers
+  chargeRide: (cardId, amount, rideId, lang) =>
+    api.post('/payments/ride/charge', { cardId, amount, rideId, lang }),
+
+  // One-time payment (card / Apple Pay / Google Pay) without saved card
+  payRide: (amount, rideId, paymentMethods, lang) =>
+    api.post('/payments/ride/pay', { amount, rideId, paymentMethods, lang }),
+
+  // Preauthorize ride payment (hold funds on saved card)
+  preauthRide: (cardId, amount, lang) =>
+    api.post('/payments/ride/preauth', { cardId, amount, lang }),
+
+  // Approve preauthorized payment after ride completion
+  approveRidePayment: (paymentId, amount, rideId) =>
+    api.post(`/payments/ride/approve/${paymentId}`, { amount, rideId }),
+
+  // Reject/cancel preauthorized payment
+  rejectRidePayment: (paymentId, reason) =>
+    api.post(`/payments/ride/reject/${paymentId}`, { reason }),
 
   verifyRidePayment: (orderId) =>
     api.post(`/payments/ride/verify/${orderId}`),
 
   getPaymentStatus: (paymentId) =>
     api.get(`/payments/${paymentId}/status`),
+
+  getPaymentHistory: (page = 1, limit = 20) =>
+    api.get('/payments/history', { params: { page, limit } }),
 };
 
 export { API_URL };
