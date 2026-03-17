@@ -86,10 +86,13 @@ async function getAccessToken() {
  * @param {number} [options.ttl] - Order lifetime in minutes (2-1440, default: 15)
  * @param {string} [options.capture] - 'automatic' (default) or 'manual' (preauth)
  * @param {string} [options.idempotencyKey] - UUID v4 for deduplication
+ * @param {string[]} [options.paymentMethods] - Allowed methods: card, apple_pay, google_pay, etc. Default: ['card']
  * @returns {Object} { id, redirectUrl, detailsUrl }
  */
 async function createOrder(options) {
     const token = await getAccessToken();
+
+    const paymentMethods = options.paymentMethods || ['card'];
 
     const body = {
         callback_url: options.callbackUrl,
@@ -104,10 +107,21 @@ async function createOrder(options) {
                 description: options.description || 'Lulini Ride Payment'
             }]
         },
-        payment_method: ['card'],
+        payment_method: paymentMethods,
         capture: options.capture || 'automatic',
         ttl: options.ttl || 15
     };
+
+    // Apple Pay / Google Pay: BOG handles on their payment page (external: false)
+    if (paymentMethods.includes('apple_pay') || paymentMethods.includes('google_pay')) {
+        body.config = {};
+        if (paymentMethods.includes('apple_pay')) {
+            body.config.apple_pay = { external: false };
+        }
+        if (paymentMethods.includes('google_pay')) {
+            body.config.google_pay = { external: false };
+        }
+    }
 
     if (options.redirectSuccess || options.redirectFail) {
         body.redirect_urls = {};

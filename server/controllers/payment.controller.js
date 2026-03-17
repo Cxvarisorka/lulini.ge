@@ -309,6 +309,61 @@ const chargeRide = catchAsync(async (req, res, next) => {
     });
 });
 
+// @desc    One-time payment (card / Apple Pay / Google Pay) — no saved card needed
+// @route   POST /api/payments/ride/pay
+// @access  Private
+const payRide = catchAsync(async (req, res, next) => {
+    const userId = req.user._id || req.user.id;
+    const { amount, rideId, paymentMethods, lang } = req.body;
+
+    if (!amount || amount <= 0) {
+        return next(new AppError('Invalid payment amount', 400));
+    }
+
+    // Determine which BOG payment methods to offer
+    // paymentMethods can be: ['card'], ['apple_pay'], ['google_pay'], or a combination
+    const methods = Array.isArray(paymentMethods) && paymentMethods.length > 0
+        ? paymentMethods
+        : ['card'];
+
+    const externalOrderId = `pay_${rideId || userId}_${Date.now()}`;
+
+    const order = await bogService.createOrder({
+        amount,
+        currency: 'GEL',
+        externalOrderId,
+        callbackUrl: `${CALLBACK_BASE_URL}/api/payments/callback`,
+        redirectSuccess: `${CALLBACK_BASE_URL}/api/payments/redirect/success`,
+        redirectFail: `${CALLBACK_BASE_URL}/api/payments/redirect/fail`,
+        description: 'Lulini Ride Payment',
+        lang: lang || 'ka',
+        ttl: 30,
+        paymentMethods: methods,
+        idempotencyKey: crypto.randomUUID()
+    });
+
+    const payment = await Payment.create({
+        user: userId,
+        bogOrderId: order.id,
+        externalOrderId,
+        type: 'ride_payment',
+        amount,
+        currency: 'GEL',
+        status: 'created',
+        ride: rideId || null
+    });
+
+    res.status(201).json({
+        success: true,
+        data: {
+            paymentId: payment._id,
+            orderId: order.id,
+            redirectUrl: order.redirectUrl,
+            amount
+        }
+    });
+});
+
 // @desc    Approve (capture) a preauthorized ride payment after ride completion
 // @route   POST /api/payments/ride/approve/:paymentId
 // @access  Private (or internal server call)
@@ -627,6 +682,40 @@ const getPaymentStatus = catchAsync(async (req, res, next) => {
     res.json({ success: true, data: { payment } });
 });
 
+// @desc    Get payment history for user
+// @route   GET /api/payments/history
+// @access  Private
+const getPaymentHistory = catchAsync(async (req, res) => {
+    const userId = req.user._id || req.user.id;
+    const page = parseInt(req.query.page) || 1;
+    const limit = Math.min(parseInt(req.query.limit) || 20, 50);
+    const skip = (page - 1) * limit;
+
+    const [payments, total] = await Promise.all([
+        Payment.find({
+            user: userId,
+            type: { $in: ['ride_payment', 'ride_preauth'] }
+        })
+            .select('amount currency status type bogOrderId ride createdAt paymentDetail.transferMethod paymentDetail.cardType')
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit)
+            .populate('ride', 'pickup.address dropoff.address'),
+        Payment.countDocuments({
+            user: userId,
+            type: { $in: ['ride_payment', 'ride_preauth'] }
+        })
+    ]);
+
+    res.json({
+        success: true,
+        data: {
+            payments,
+            pagination: { page, limit, total, pages: Math.ceil(total / limit) }
+        }
+    });
+});
+
 // @desc    Redirect handlers (user returns from BOG payment page)
 // @route   GET /api/payments/redirect/success
 // @route   GET /api/payments/redirect/fail
@@ -684,6 +773,8 @@ module.exports = {
     setDefaultCard,
     preauthRide,
     chargeRide,
+    payRide,
+    getPaymentHistory,
     approveRidePayment,
     rejectRidePayment,
     verifyRidePayment,
