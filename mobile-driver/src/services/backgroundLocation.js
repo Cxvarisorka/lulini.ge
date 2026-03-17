@@ -31,6 +31,7 @@ let locationBatch = [];
 let lastFlushedAt = Date.now();
 let lastValidLocation = null; // { latitude, longitude, timestamp }
 let retryFlushTimer = null;
+let lastLocationReceivedAt = 0; // Timestamp of last location delivered by background task
 
 // ─── Spoofing detection (client-side heuristics) ─────────────────────────────
 
@@ -218,6 +219,7 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
       longitude: coords.longitude,
       timestamp,
     };
+    lastLocationReceivedAt = Date.now();
 
     locationBatch.push({
       latitude: coords.latitude,
@@ -241,15 +243,32 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
 
 // ─── Start / Stop helpers (called from LocationContext) ──────────────────────
 
+/**
+ * Check background location health.
+ * Returns { healthy, lastUpdateAge } where lastUpdateAge is seconds since last location.
+ * If lastUpdateAge > threshold, the background task may have been killed by the OS.
+ */
+export function getBackgroundLocationHealth() {
+  if (lastLocationReceivedAt === 0) {
+    return { healthy: true, lastUpdateAge: 0, hasReceivedAny: false };
+  }
+  const age = (Date.now() - lastLocationReceivedAt) / 1000;
+  return { healthy: age < 180, lastUpdateAge: Math.round(age), hasReceivedAny: true };
+}
+
 export async function startBackgroundLocationUpdates(hasActiveRide = false) {
   const isRegistered = await TaskManager.isTaskRegisteredAsync(
     BACKGROUND_LOCATION_TASK,
   );
+  // Don't stop-then-start if already registered — just start with new params.
+  // expo-location will update the existing task. Stopping first creates a gap
+  // where Android OEMs may not allow the foreground service to restart.
   if (isRegistered) {
-    // Already running — just update accuracy if ride state changed
-    await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK).catch(
-      () => {},
-    );
+    try {
+      await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
+    } catch (_) {}
+    // Small delay to allow OS to clean up the previous service
+    await new Promise(r => setTimeout(r, 100));
   }
 
   await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {

@@ -18,6 +18,7 @@ import { mapStyle } from '../components/map/mapStyle';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { safeFitToCoordinates } from '../utils/mapSafety';
 
 import { rideAPI } from '../services/api';
 import { getDirections } from '../services/googleMaps';
@@ -102,7 +103,7 @@ export default function RideDetailScreen({ navigation, route }) {
     });
     if (coords.length >= 2) {
       hasFitted.current = true;
-      mapRef.current.fitToCoordinates(coords, {
+      safeFitToCoordinates(mapRef, coords, {
         edgePadding: { top: 60, right: 60, bottom: 60, left: 60 },
         animated: false,
       });

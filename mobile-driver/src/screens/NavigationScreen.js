@@ -18,6 +18,7 @@ import Polyline from '../components/map/PolylineWrapper';
 import { markerImages } from '../components/map/markerImages';
 import { mapStyle } from '../components/map/mapStyle';
 import { useLocation } from '../context/LocationContext';
+import { safeFitToCoordinates, safeAnimateToRegion } from '../utils/mapSafety';
 import { colors, shadows, radius, spacing, useTypography } from '../theme/colors';
 import {
   getNavigationRoute,
@@ -179,7 +180,7 @@ export default function NavigationScreen({ navigation, route: navRoute }) {
     coords.push({ latitude: destination.latitude, longitude: destination.longitude });
     if (coords.length >= 2) {
       hasFittedRef.current = true;
-      mapRef.current.fitToCoordinates(coords, {
+      safeFitToCoordinates(mapRef, coords, {
         edgePadding: { top: 120, right: 60, bottom: 100, left: 60 },
         animated: false,
       });
@@ -187,8 +188,8 @@ export default function NavigationScreen({ navigation, route: navRoute }) {
   }, [driverLocation, destination]);
 
   const handleRecenter = useCallback(() => {
-    if (driverLocation && mapRef.current) {
-      mapRef.current.animateToRegion({
+    if (driverLocation) {
+      safeAnimateToRegion(mapRef, {
         latitude: driverLocation.latitude,
         longitude: driverLocation.longitude,
         latitudeDelta: 0.005,

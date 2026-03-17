@@ -14,6 +14,7 @@ import {
   startBackgroundLocationUpdates,
   stopBackgroundLocationUpdates,
   clearRetryQueue,
+  getBackgroundLocationHealth,
 } from '../services/backgroundLocation';
 import { haversineKm } from '../utils/distance';
 
@@ -65,6 +66,7 @@ export const LocationProvider = ({ children }) => {
   const locationSubscription = useRef(null);
   const isShowingAlert = useRef(false);
   const activeRideRef = useRef(null);
+  const healthCheckTimerRef = useRef(null);
   // [C4 FIX] Promise-based lock to prevent overlapping permission requests (iOS crash fix)
   const permissionLockRef = useRef(null); // null = unlocked, Promise = locked
 
@@ -97,7 +99,7 @@ export const LocationProvider = ({ children }) => {
     };
   }, []);
 
-  // Re-check permissions when app returns to foreground
+  // Re-check permissions and background location health when app returns to foreground
   useEffect(() => {
     const subscription = AppState.addEventListener(
       'change',
@@ -111,12 +113,61 @@ export const LocationProvider = ({ children }) => {
               'Location Permission Required',
               'Location permission was revoked. Please re-enable it in settings to continue driving.',
             );
+            return;
+          }
+
+          // Health check: if tracking is on, verify background task is alive
+          if (isTracking && bgPermissionRef.current) {
+            const health = getBackgroundLocationHealth();
+            if (health.hasReceivedAny && !health.healthy) {
+              console.warn(
+                `[Location] Background location stale (${health.lastUpdateAge}s) — restarting task`,
+              );
+              try {
+                await startBackgroundLocationUpdates(!!activeRideRef.current);
+              } catch (e) {
+                console.warn('[Location] Background task restart failed:', e.message);
+              }
+            }
           }
         }
       },
     );
     return () => subscription.remove();
-  }, []);
+  }, [isTracking]);
+
+  // Watchdog timer: periodically verify background location is delivering
+  // while tracking is active. Restarts the task if it has gone silent.
+  useEffect(() => {
+    if (!isTracking || !bgPermissionRef.current) {
+      if (healthCheckTimerRef.current) {
+        clearInterval(healthCheckTimerRef.current);
+        healthCheckTimerRef.current = null;
+      }
+      return;
+    }
+
+    healthCheckTimerRef.current = setInterval(async () => {
+      const health = getBackgroundLocationHealth();
+      if (health.hasReceivedAny && !health.healthy) {
+        console.warn(
+          `[Location] Watchdog: background stale (${health.lastUpdateAge}s) — restarting`,
+        );
+        try {
+          await startBackgroundLocationUpdates(!!activeRideRef.current);
+        } catch (e) {
+          console.warn('[Location] Watchdog restart failed:', e.message);
+        }
+      }
+    }, 60000); // Check every 60s
+
+    return () => {
+      if (healthCheckTimerRef.current) {
+        clearInterval(healthCheckTimerRef.current);
+        healthCheckTimerRef.current = null;
+      }
+    };
+  }, [isTracking]);
 
   const showAlert = useCallback((title, message) => {
     if (isShowingAlert.current) return;
@@ -307,6 +358,22 @@ export const LocationProvider = ({ children }) => {
 
       bgPermissionRef.current = bgPermission.status === 'granted';
       if (bgPermissionRef.current) {
+        // Android 13+ (SDK 33): foreground service needs notification permission.
+        // Without it, the notification can't show and the OS may kill the service.
+        if (Platform.OS === 'android' && Platform.Version >= 33) {
+          try {
+            const { Notifications } = require('expo-notifications');
+            const { status: notifStatus } = await Notifications.getPermissionsAsync();
+            if (notifStatus !== 'granted') {
+              const { status: newStatus } = await Notifications.requestPermissionsAsync();
+              if (newStatus !== 'granted') {
+                console.warn('[Location] Notification permission denied on Android 13+ — background tracking may be unreliable');
+              }
+            }
+          } catch (_) {
+            // expo-notifications may not be available — proceed anyway
+          }
+        }
         await startBackgroundLocationUpdates(hasActiveRide);
       } else {
         // Background not granted — foreground watcher will handle server updates instead
@@ -484,6 +551,10 @@ export const LocationProvider = ({ children }) => {
   const cleanupForLogout = useCallback(async () => {
     await stopTracking();
     await clearRetryQueue();
+    if (healthCheckTimerRef.current) {
+      clearInterval(healthCheckTimerRef.current);
+      healthCheckTimerRef.current = null;
+    }
     setLocation(null);
     setAddress('');
     setError(null);

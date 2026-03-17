@@ -31,6 +31,7 @@ import { useMap } from '../context/MapContext';
 import { rideAPI } from '../services/api';
 import { getDirections } from '../services/googleMaps';
 import { colors, shadows, radius, spacing, useTypography } from '../theme/colors';
+import { safeFitToCoordinates, safeAnimateToRegion } from '../utils/mapSafety';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -164,9 +165,8 @@ export default function HomeScreen({ navigation }) {
     });
     if (coords.length >= 2) {
       hasFitted.current = true;
-      mapRef.current.fitToCoordinates(coords, {
+      safeFitToCoordinates(mapRef, coords, {
         edgePadding: { top: 80, right: 40, bottom: 40, left: 40 },
-        animated: true,
       });
     }
   }, [activeRide, location]);
@@ -285,8 +285,8 @@ export default function HomeScreen({ navigation }) {
   };
 
   const handleMyLocation = useCallback(() => {
-    if (location && mapRef.current) {
-      mapRef.current.animateToRegion({
+    if (location) {
+      safeAnimateToRegion(mapRef, {
         latitude: location.latitude,
         longitude: location.longitude,
         latitudeDelta: 0.01,
@@ -319,7 +319,7 @@ export default function HomeScreen({ navigation }) {
     // If first location is real, animate once
     if (!isDefault || !animatedToLocationRef.current) {
       animatedToLocationRef.current = isDefault ? 'default' : 'real';
-      mapRef.current.animateToRegion({
+      safeAnimateToRegion(mapRef, {
         latitude: location.latitude,
         longitude: location.longitude,
         latitudeDelta: 0.01,
