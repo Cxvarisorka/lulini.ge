@@ -24,6 +24,24 @@ const SEARCH_CACHE_TTL = 60000; // 1 minute
 const directionsCache = new Map();
 const searchCache = new Map();
 
+function toFiniteNumber(value) {
+  if (typeof value === 'number' && isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    if (isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+function normalizeCoordinatePair(coord) {
+  if (!coord) return null;
+  const latitude = toFiniteNumber(coord.latitude);
+  const longitude = toFiniteNumber(coord.longitude);
+  if (latitude == null || longitude == null) return null;
+  if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return null;
+  return { latitude, longitude };
+}
+
 // C8: Periodic TTL cleanup — use .unref() so the timer doesn't prevent JS engine cleanup
 const _cacheCleanupInterval = setInterval(() => {
   const now = Date.now();
@@ -244,11 +262,15 @@ export async function reverseGeocodeNominatim(latitude, longitude) {
  * @returns {Promise<Object>} - { distance, duration, distanceText, durationText, polyline, steps }
  */
 export async function getDirections(origin, destination) {
+  const safeOrigin = normalizeCoordinatePair(origin);
+  const safeDestination = normalizeCoordinatePair(destination);
+  if (!safeOrigin || !safeDestination) return null;
+
   // Round to 4 decimals for better cache hits (~11m precision)
-  const oLat = origin.latitude.toFixed(4);
-  const oLng = origin.longitude.toFixed(4);
-  const dLat = destination.latitude.toFixed(4);
-  const dLng = destination.longitude.toFixed(4);
+  const oLat = safeOrigin.latitude.toFixed(4);
+  const oLng = safeOrigin.longitude.toFixed(4);
+  const dLat = safeDestination.latitude.toFixed(4);
+  const dLng = safeDestination.longitude.toFixed(4);
   const cacheKey = `${oLat},${oLng}-${dLat},${dLng}`;
 
   // Check cache first (with TTL)
@@ -260,10 +282,10 @@ export async function getDirections(origin, destination) {
   try {
     const response = await api.get('/maps/directions', {
       params: {
-        originLat: origin.latitude,
-        originLng: origin.longitude,
-        destLat: destination.latitude,
-        destLng: destination.longitude,
+        originLat: safeOrigin.latitude,
+        originLng: safeOrigin.longitude,
+        destLat: safeDestination.latitude,
+        destLng: safeDestination.longitude,
       },
     });
 
@@ -302,11 +324,15 @@ export async function getDirections(origin, destination) {
  * @returns {Promise<Object|null>}
  */
 export async function getDirectionsOSRM(origin, destination) {
+  const safeOrigin = normalizeCoordinatePair(origin);
+  const safeDestination = normalizeCoordinatePair(destination);
+  if (!safeOrigin || !safeDestination) return null;
+
   // Round OSRM coordinates too for better cache hits
-  const oLat = origin.latitude.toFixed(4);
-  const oLng = origin.longitude.toFixed(4);
-  const dLat = destination.latitude.toFixed(4);
-  const dLng = destination.longitude.toFixed(4);
+  const oLat = safeOrigin.latitude.toFixed(4);
+  const oLng = safeOrigin.longitude.toFixed(4);
+  const dLat = safeDestination.latitude.toFixed(4);
+  const dLng = safeDestination.longitude.toFixed(4);
   const cacheKey = `osrm:${oLat},${oLng}-${dLat},${dLng}`;
 
   const cachedOsrm = directionsCache.get(cacheKey);
@@ -315,7 +341,7 @@ export async function getDirectionsOSRM(origin, destination) {
   }
 
   try {
-    const url = `https://router.project-osrm.org/route/v1/driving/${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}?overview=full&geometries=geojson`;
+    const url = `https://router.project-osrm.org/route/v1/driving/${safeOrigin.longitude},${safeOrigin.latitude};${safeDestination.longitude},${safeDestination.latitude}?overview=full&geometries=geojson`;
 
     const response = await fetch(url);
 

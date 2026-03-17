@@ -8,6 +8,7 @@ import {
   Image,
   Animated,
   Easing,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -253,7 +254,13 @@ export default function HomeScreen({ navigation }) {
                 key={action.id}
                 style={styles.quickActionCard}
                 delay={200 + index * 50}
-                onPress={() => navigation.navigate(action.screen)}
+                onPress={() => {
+                  if (action.id === 'payment') {
+                    Alert.alert(t('payment.comingSoon'), t('payment.comingSoonMessage'));
+                    return;
+                  }
+                  navigation.navigate(action.screen);
+                }}
               >
                 <View style={styles.quickActionInner}>
                   <View style={[styles.quickActionIcon, { backgroundColor: `${action.color}20` }]}>

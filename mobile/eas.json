@@ -17,7 +17,8 @@
       "channel": "preview",
       "env": {
         "EXPO_PUBLIC_API_URL": "https://api.lulini.ge/api",
-        "EXPO_PUBLIC_SOCKET_URL": "https://api.lulini.ge"
+        "EXPO_PUBLIC_SOCKET_URL": "https://api.lulini.ge",
+        "GOOGLE_MAPS_API_KEY": "AIzaSyDblD2MHibBszfWq1G6kCIx_Ua4Wan4W9U"
       }
     },
     "production": {
@@ -25,7 +26,8 @@
       "channel": "production",
       "env": {
         "EXPO_PUBLIC_API_URL": "https://api.lulini.ge/api",
-        "EXPO_PUBLIC_SOCKET_URL": "https://api.lulini.ge"
+        "EXPO_PUBLIC_SOCKET_URL": "https://api.lulini.ge",
+        "GOOGLE_MAPS_API_KEY": "AIzaSyDblD2MHibBszfWq1G6kCIx_Ua4Wan4W9U"
       }
     }
   },

@@ -414,7 +414,10 @@
     "cardPaymentFailed": "Card payment failed. You can retry or pay with cash.",
     "cardPaymentProcessing": "Processing card payment...",
     "cardPaymentSuccess": "Card payment successful!",
-    "paymentPendingMessage": "Your payment is still being processed. Please try again in a moment."
+    "paymentPendingMessage": "Your payment is still being processed. Please try again in a moment.",
+    "cardRegistrationFailed": "Card registration failed. Please try again.",
+    "comingSoon": "Coming Soon",
+    "comingSoonMessage": "Payment settings will be available soon!"
   },
   "support": {
     "contactUs": "Contact Us",

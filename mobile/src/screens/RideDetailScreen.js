@@ -17,6 +17,7 @@ import { useTranslation } from 'react-i18next';
 
 import { colors, shadows, radius, useTypography } from '../theme/colors';
 import { getDirections } from '../services/googleMaps';
+import { safeFitToCoordinates, safePolyline } from '../utils/mapSafety';
 
 const STATUS_COLORS = {
   pending: colors.status.pending,
@@ -89,7 +90,7 @@ export default function RideDetailScreen({ route }) {
 
     if (coords.length >= 2) {
       hasFitted.current = true;
-      mapRef.current.fitToCoordinates(coords, {
+      safeFitToCoordinates(mapRef, coords, {
         edgePadding: { top: 60, right: 60, bottom: 60, left: 60 },
         animated: false,
       });
@@ -130,6 +131,7 @@ export default function RideDetailScreen({ route }) {
   };
 
   const actualDuration = formatDuration(ride.startTime, ride.endTime);
+  const safePolylineCoords = safePolyline(polylineCoords);
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
@@ -192,10 +194,10 @@ export default function RideDetailScreen({ route }) {
           )}
 
           {/* Route Polyline */}
-          {polylineCoords.length > 1 && (
+          {safePolylineCoords.length > 1 && (
             <Polyline
               id="ride-route"
-              coordinates={polylineCoords}
+              coordinates={safePolylineCoords}
               strokeColor={colors.primary}
               strokeWidth={4}
             />
