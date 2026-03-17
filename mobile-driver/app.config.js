@@ -11,9 +11,9 @@ export default {
     // newArchEnabled: true,
     scheme: 'lulini-driver',
     splash: {
-      image: './assets/splash.png',
+      image: './assets/png_files_core 1024 × 1024 .png',
       resizeMode: 'contain',
-      backgroundColor: '#171717'
+      backgroundColor: '#000000'
     },
     runtimeVersion: {
       policy: 'appVersion',
@@ -49,7 +49,7 @@ export default {
       versionCode: 3,
       adaptiveIcon: {
         foregroundImage: './assets/adaptive-icon.png',
-        backgroundColor: '#171717'
+        backgroundColor: '#000000'
       },
       edgeToEdgeEnabled: true,
       package: 'com.lulini.driver',

@@ -2,34 +2,57 @@ import React, { useEffect, useRef } from 'react';
 import { View, Image, StyleSheet, Animated } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 
-const logo = require('../../assets/loading-screen logo.png');
+const logo = require('../../assets/png_files_core 1024 × 1024 .png');
 
 export default function SplashScreen({ onFinish }) {
   const fadeAnim = useRef(new Animated.Value(0)).current;
+  const scaleAnim = useRef(new Animated.Value(0.94)).current;
 
   useEffect(() => {
-    Animated.timing(fadeAnim, {
-      toValue: 1,
-      duration: 600,
-      useNativeDriver: true,
-    }).start();
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 650,
+        useNativeDriver: true,
+      }),
+      Animated.timing(scaleAnim, {
+        toValue: 1,
+        duration: 650,
+        useNativeDriver: true,
+      }),
+    ]).start();
 
     const timer = setTimeout(() => {
-      Animated.timing(fadeAnim, {
-        toValue: 0,
-        duration: 400,
-        useNativeDriver: true,
-      }).start(() => onFinish());
+      Animated.parallel([
+        Animated.timing(fadeAnim, {
+          toValue: 0,
+          duration: 450,
+          useNativeDriver: true,
+        }),
+        Animated.timing(scaleAnim, {
+          toValue: 1.03,
+          duration: 450,
+          useNativeDriver: true,
+        }),
+      ]).start(() => onFinish());
     }, 1500);
 
     return () => clearTimeout(timer);
-  }, []);
+  }, [fadeAnim, onFinish, scaleAnim]);
 
   return (
     <View style={styles.container}>
       <StatusBar style="light" />
-      <Animated.View style={[styles.logoWrapper, { opacity: fadeAnim }]}>
-        <Image source={logo} style={styles.logo} resizeMode="cover" />
+      <Animated.View
+        style={[
+          styles.logoWrapper,
+          {
+            opacity: fadeAnim,
+            transform: [{ scale: scaleAnim }],
+          },
+        ]}
+      >
+        <Image source={logo} style={styles.logo} resizeMode="contain" />
       </Animated.View>
     </View>
   );
@@ -43,14 +66,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   logoWrapper: {
-    width: 260,
-    height: 120,
-    overflow: 'hidden',
+    width: 220,
+    height: 220,
     alignItems: 'center',
     justifyContent: 'center',
   },
   logo: {
-    width: 340,
-    height: 170,
+    width: '100%',
+    height: '100%',
   },
 });

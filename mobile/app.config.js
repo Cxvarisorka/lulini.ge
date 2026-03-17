@@ -10,13 +10,14 @@ export default {
     // newArchEnabled: true,
     scheme: "lulini",
     splash: {
-      image: "./assets/splash-icon.png",
+      image: "./assets/png_files_core 1024 × 1024 .png",
       resizeMode: "contain",
-      backgroundColor: "#171717"
+      backgroundColor: "#000000"
     },
     ios: {
       supportsTablet: true,
       bundleIdentifier: "com.lulini.mobile",
+      buildNumber: "4",
       usesAppleSignIn: true,
       config: {
         googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY || ""
@@ -30,7 +31,7 @@ export default {
       versionCode: 3,
       adaptiveIcon: {
         foregroundImage: "./assets/adaptive-icon.png",
-        backgroundColor: "#171717"
+        backgroundColor: "#000000"
       },
       edgeToEdgeEnabled: true,
       package: "com.lulini.mobile",
