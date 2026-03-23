@@ -262,63 +262,47 @@ function AdminDriverInfoContent() {
         </div>
       </div>
 
-      {/* 7-Day Totals Summary */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="border rounded-lg p-4">
-          <div className="flex items-center gap-2 mb-1">
-            <Calendar className="w-4 h-4 text-blue-500" />
-            <span className="text-sm text-muted-foreground">Active Days</span>
-          </div>
-          <p className="text-2xl font-bold">{totals.activeDays}<span className="text-sm font-normal text-muted-foreground"> / 7</span></p>
+      {/* 7-Day Summary Cards */}
+      <div className="grid grid-cols-4 md:grid-cols-8 gap-3">
+        <div className="border rounded-lg p-3 text-center">
+          <Calendar className="w-4 h-4 text-blue-500 mx-auto mb-1" />
+          <p className="text-xl font-bold">{totals.activeDays}<span className="text-xs font-normal text-muted-foreground"> / 7</span></p>
+          <span className="text-xs text-muted-foreground">Active Days</span>
         </div>
-        <div className="border rounded-lg p-4">
-          <div className="flex items-center gap-2 mb-1">
-            <Clock className="w-4 h-4 text-green-500" />
-            <span className="text-sm text-muted-foreground">Active Hours</span>
-          </div>
-          <p className="text-2xl font-bold">{totals.activeHours}<span className="text-sm font-normal text-muted-foreground">h</span></p>
+        <div className="border rounded-lg p-3 text-center">
+          <Clock className="w-4 h-4 text-green-500 mx-auto mb-1" />
+          <p className="text-xl font-bold">{totals.activeHours}<span className="text-xs font-normal text-muted-foreground">h</span></p>
+          <span className="text-xs text-muted-foreground">Online</span>
         </div>
-        <div className="border rounded-lg p-4">
-          <div className="flex items-center gap-2 mb-1">
-            <CheckCircle className="w-4 h-4 text-green-500" />
-            <span className="text-sm text-muted-foreground">Rides Accepted</span>
-          </div>
-          <p className="text-2xl font-bold">{totals.accepted}</p>
+        <div className="border rounded-lg p-3 text-center">
+          <Clock className="w-4 h-4 text-gray-400 mx-auto mb-1" />
+          <p className="text-xl font-bold text-muted-foreground">{totals.offlineHours}<span className="text-xs font-normal">h</span></p>
+          <span className="text-xs text-muted-foreground">Offline</span>
         </div>
-        <div className="border rounded-lg p-4">
-          <div className="flex items-center gap-2 mb-1">
-            <XCircle className="w-4 h-4 text-red-500" />
-            <span className="text-sm text-muted-foreground">Cancelled by Driver</span>
-          </div>
-          <p className="text-2xl font-bold">{totals.cancelledByDriver}</p>
+        <div className="border rounded-lg p-3 text-center">
+          <MapPin className="w-4 h-4 text-purple-500 mx-auto mb-1" />
+          <p className="text-xl font-bold">{totals.offered}</p>
+          <span className="text-xs text-muted-foreground">Offered</span>
         </div>
-        <div className="border rounded-lg p-4">
-          <div className="flex items-center gap-2 mb-1">
-            <Car className="w-4 h-4 text-blue-500" />
-            <span className="text-sm text-muted-foreground">Completed</span>
-          </div>
-          <p className="text-2xl font-bold">{totals.completed}</p>
+        <div className="border rounded-lg p-3 text-center">
+          <CheckCircle className="w-4 h-4 text-green-600 mx-auto mb-1" />
+          <p className="text-xl font-bold text-green-700">{totals.accepted}</p>
+          <span className="text-xs text-muted-foreground">Accepted</span>
         </div>
-        <div className="border rounded-lg p-4">
-          <div className="flex items-center gap-2 mb-1">
-            <XCircle className="w-4 h-4 text-orange-500" />
-            <span className="text-sm text-muted-foreground">Cancelled by User</span>
-          </div>
-          <p className="text-2xl font-bold">{totals.cancelledByUser}</p>
+        <div className="border rounded-lg p-3 text-center">
+          <XCircle className="w-4 h-4 text-red-500 mx-auto mb-1" />
+          <p className="text-xl font-bold text-red-600">{totals.declined}</p>
+          <span className="text-xs text-muted-foreground">Declined</span>
         </div>
-        <div className="border rounded-lg p-4">
-          <div className="flex items-center gap-2 mb-1">
-            <Clock className="w-4 h-4 text-gray-400" />
-            <span className="text-sm text-muted-foreground">Offline Hours</span>
-          </div>
-          <p className="text-2xl font-bold">{totals.offlineHours}<span className="text-sm font-normal text-muted-foreground">h</span></p>
+        <div className="border rounded-lg p-3 text-center">
+          <Car className="w-4 h-4 text-blue-500 mx-auto mb-1" />
+          <p className="text-xl font-bold text-blue-700">{totals.completed}</p>
+          <span className="text-xs text-muted-foreground">Completed</span>
         </div>
-        <div className="border rounded-lg p-4">
-          <div className="flex items-center gap-2 mb-1">
-            <DollarSign className="w-4 h-4 text-green-500" />
-            <span className="text-sm text-muted-foreground">7-Day Earnings</span>
-          </div>
-          <p className="text-2xl font-bold">{totals.earnings.toFixed(2)}<span className="text-sm font-normal text-muted-foreground"> GEL</span></p>
+        <div className="border rounded-lg p-3 text-center">
+          <DollarSign className="w-4 h-4 text-green-500 mx-auto mb-1" />
+          <p className="text-xl font-bold">{totals.earnings.toFixed(2)}<span className="text-xs font-normal text-muted-foreground"> GEL</span></p>
+          <span className="text-xs text-muted-foreground">Earnings</span>
         </div>
       </div>
 
@@ -352,12 +336,11 @@ function AdminDriverInfoContent() {
             <thead>
               <tr className="border-b">
                 <th className="text-left py-2 px-2 font-medium">Day</th>
-                <th className="text-center py-2 px-2 font-medium">Active</th>
-                <th className="text-center py-2 px-2 font-medium">Offline</th>
+                <th className="text-center py-2 px-2 font-medium">Hours</th>
+                <th className="text-center py-2 px-2 font-medium">Offered</th>
                 <th className="text-center py-2 px-2 font-medium">Accepted</th>
+                <th className="text-center py-2 px-2 font-medium">Declined</th>
                 <th className="text-center py-2 px-2 font-medium">Completed</th>
-                <th className="text-center py-2 px-2 font-medium">Driver Cancel</th>
-                <th className="text-center py-2 px-2 font-medium">User Cancel</th>
                 <th className="text-right py-2 px-2 font-medium">Earnings</th>
               </tr>
             </thead>
@@ -375,25 +358,24 @@ function AdminDriverInfoContent() {
                       {day.activeHours}h
                     </span>
                   </td>
-                  <td className="text-center py-2 px-2 text-muted-foreground">{day.offlineHours}h</td>
+                  <td className="text-center py-2 px-2">
+                    <span className={day.offered > 0 ? 'font-semibold' : 'text-muted-foreground'}>
+                      {day.offered}
+                    </span>
+                  </td>
                   <td className="text-center py-2 px-2">
                     <span className={day.accepted > 0 ? 'font-semibold text-green-700' : 'text-muted-foreground'}>
                       {day.accepted}
                     </span>
                   </td>
                   <td className="text-center py-2 px-2">
+                    <span className={day.declined > 0 ? 'font-semibold text-red-600' : 'text-muted-foreground'}>
+                      {day.declined}
+                    </span>
+                  </td>
+                  <td className="text-center py-2 px-2">
                     <span className={day.completed > 0 ? 'font-semibold text-blue-700' : 'text-muted-foreground'}>
                       {day.completed}
-                    </span>
-                  </td>
-                  <td className="text-center py-2 px-2">
-                    <span className={day.cancelledByDriver > 0 ? 'font-semibold text-red-600' : 'text-muted-foreground'}>
-                      {day.cancelledByDriver}
-                    </span>
-                  </td>
-                  <td className="text-center py-2 px-2">
-                    <span className={day.cancelledByUser > 0 ? 'font-semibold text-orange-600' : 'text-muted-foreground'}>
-                      {day.cancelledByUser}
                     </span>
                   </td>
                   <td className="text-right py-2 px-2 font-medium">{day.earnings.toFixed(2)}</td>
@@ -404,11 +386,10 @@ function AdminDriverInfoContent() {
               <tr className="border-t-2 font-semibold">
                 <td className="py-2 px-2">Total</td>
                 <td className="text-center py-2 px-2 text-green-700">{totals.activeHours}h</td>
-                <td className="text-center py-2 px-2 text-muted-foreground">{totals.offlineHours}h</td>
+                <td className="text-center py-2 px-2">{totals.offered}</td>
                 <td className="text-center py-2 px-2 text-green-700">{totals.accepted}</td>
+                <td className="text-center py-2 px-2 text-red-600">{totals.declined}</td>
                 <td className="text-center py-2 px-2 text-blue-700">{totals.completed}</td>
-                <td className="text-center py-2 px-2 text-red-600">{totals.cancelledByDriver}</td>
-                <td className="text-center py-2 px-2 text-orange-600">{totals.cancelledByUser}</td>
                 <td className="text-right py-2 px-2">{totals.earnings.toFixed(2)} GEL</td>
               </tr>
             </tfoot>
