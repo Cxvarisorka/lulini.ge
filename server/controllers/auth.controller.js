@@ -4,7 +4,7 @@ const { generateToken } = require('../utils/jwt.utils');
 const AppError = require('../utils/AppError');
 const catchAsync = require('../utils/catchAsync');
 const { OAuth2Client } = require('google-auth-library');
-const { generateOTP, sendVerification, checkVerification } = require('../services/sms.service');
+const { sendVerification } = require('../services/sms.service');
 const appleSignin = require('apple-signin-auth');
 
 // Cookie options
@@ -293,14 +293,13 @@ const sendPhoneOtp = catchAsync(async (req, res, next) => {
     // Delete any existing OTP for this phone
     await OTP.deleteMany({ phone });
 
-    // Send verification via Twilio Verify (or dev fallback)
+    // Send OTP via SMSOffice (or dev fallback)
     const result = await sendVerification(phone);
 
-    // In dev mode (Twilio not configured), save OTP locally
-    if (result.devCode) {
-        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-        await OTP.create({ phone, code: result.devCode, expiresAt });
-    }
+    // Store OTP locally (code comes back from sendVerification in all modes)
+    const otpCode = result.devCode || result.code;
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+    await OTP.create({ phone, code: otpCode, expiresAt });
 
     res.status(200).json({
         success: true,
@@ -340,49 +339,29 @@ const verifyPhoneOtp = catchAsync(async (req, res, next) => {
         return next(new AppError('OTP code is required', 400));
     }
 
-    // Try Twilio Verify first (returns null if not configured)
-    let isValid = await checkVerification(phone, code);
+    // Verify OTP against local DB
+    const otpRecord = await OTP.findOne({ phone, verified: false });
 
-    // Handle Twilio error responses
-    if (isValid && typeof isValid === 'object' && isValid.error) {
-        if (isValid.error === 'expired') {
-            return next(new AppError('OTP has expired. Please request a new code', 400));
-        }
-        if (isValid.error === 'max_attempts') {
-            return next(new AppError('Too many failed attempts. Please request a new code', 400));
-        }
-        return next(new AppError('Verification failed. Please request a new code', 400));
+    if (!otpRecord) {
+        return next(new AppError('OTP not found. Please request a new code', 400));
     }
-
-    if (isValid === null) {
-        // Dev mode - check local OTP DB
-        const otpRecord = await OTP.findOne({ phone, verified: false });
-
-        if (!otpRecord) {
-            return next(new AppError('OTP not found. Please request a new code', 400));
-        }
-        if (otpRecord.expiresAt < new Date()) {
-            await OTP.deleteOne({ _id: otpRecord._id });
-            return next(new AppError('OTP has expired. Please request a new code', 400));
-        }
-        if (otpRecord.attempts >= 3) {
-            await OTP.deleteOne({ _id: otpRecord._id });
-            return next(new AppError('Too many failed attempts. Please request a new code', 400));
-        }
-        const codeMatches = await otpRecord.compareCode(code);
-        if (!codeMatches) {
-            otpRecord.attempts += 1;
-            await otpRecord.save();
-            return next(new AppError('Invalid OTP code', 400));
-        }
-
-        isValid = true;
+    if (otpRecord.expiresAt < new Date()) {
         await OTP.deleteOne({ _id: otpRecord._id });
+        return next(new AppError('OTP has expired. Please request a new code', 400));
     }
-
-    if (!isValid) {
+    if (otpRecord.attempts >= 3) {
+        await OTP.deleteOne({ _id: otpRecord._id });
+        return next(new AppError('Too many failed attempts. Please request a new code', 400));
+    }
+    const codeMatches = await otpRecord.compareCode(code);
+    if (!codeMatches) {
+        otpRecord.attempts += 1;
+        await otpRecord.save();
         return next(new AppError('Invalid OTP code', 400));
     }
+
+    const isValid = true;
+    await OTP.deleteOne({ _id: otpRecord._id });
 
     // OTP verified - find or create user
     let user = await User.findOne({ phone });
@@ -416,6 +395,7 @@ const verifyPhoneOtp = catchAsync(async (req, res, next) => {
         isNewUser = true;
     } else {
         user.isPhoneVerified = true;
+        user.isVerified = true;
         await user.save();
     }
 
@@ -521,14 +501,13 @@ const sendPhoneUpdateOtp = catchAsync(async (req, res, next) => {
     // Delete any existing OTP for this phone
     await OTP.deleteMany({ phone });
 
-    // Send verification via Twilio Verify (or dev fallback)
+    // Send OTP via SMSOffice (or dev fallback)
     const result = await sendVerification(phone);
 
-    // In dev mode, save OTP locally
-    if (result.devCode) {
-        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-        await OTP.create({ phone, code: result.devCode, expiresAt });
-    }
+    // Store OTP locally
+    const otpCode = result.devCode || result.code;
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+    await OTP.create({ phone, code: otpCode, expiresAt });
 
     res.status(200).json({
         success: true,
@@ -546,49 +525,28 @@ const verifyPhoneUpdateOtp = catchAsync(async (req, res, next) => {
         return next(new AppError('Phone number and OTP code are required', 400));
     }
 
-    // Try Twilio Verify first
-    let isValid = await checkVerification(phone, code);
+    // Verify OTP against local DB
+    const otpRecord = await OTP.findOne({ phone });
 
-    // Handle Twilio error responses
-    if (isValid && typeof isValid === 'object' && isValid.error) {
-        if (isValid.error === 'expired') {
-            return next(new AppError('OTP has expired. Please request a new code', 400));
-        }
-        if (isValid.error === 'max_attempts') {
-            return next(new AppError('Too many failed attempts. Please request a new code', 400));
-        }
-        return next(new AppError('Verification failed. Please request a new code', 400));
+    if (!otpRecord) {
+        return next(new AppError('OTP not found. Please request a new code', 400));
     }
-
-    if (isValid === null) {
-        // Dev mode - check local OTP DB
-        const otpRecord = await OTP.findOne({ phone });
-
-        if (!otpRecord) {
-            return next(new AppError('OTP not found. Please request a new code', 400));
-        }
-        if (otpRecord.expiresAt < new Date()) {
-            await OTP.deleteOne({ _id: otpRecord._id });
-            return next(new AppError('OTP has expired. Please request a new code', 400));
-        }
-        if (otpRecord.attempts >= 3) {
-            await OTP.deleteOne({ _id: otpRecord._id });
-            return next(new AppError('Too many failed attempts. Please request a new code', 400));
-        }
-        const codeMatches = await otpRecord.compareCode(code);
-        if (!codeMatches) {
-            otpRecord.attempts += 1;
-            await otpRecord.save();
-            return next(new AppError('Invalid OTP code', 400));
-        }
-
-        isValid = true;
+    if (otpRecord.expiresAt < new Date()) {
         await OTP.deleteOne({ _id: otpRecord._id });
+        return next(new AppError('OTP has expired. Please request a new code', 400));
     }
-
-    if (!isValid) {
+    if (otpRecord.attempts >= 3) {
+        await OTP.deleteOne({ _id: otpRecord._id });
+        return next(new AppError('Too many failed attempts. Please request a new code', 400));
+    }
+    const codeMatches = await otpRecord.compareCode(code);
+    if (!codeMatches) {
+        otpRecord.attempts += 1;
+        await otpRecord.save();
         return next(new AppError('Invalid OTP code', 400));
     }
+
+    await OTP.deleteOne({ _id: otpRecord._id });
 
     // Update user's phone number
     const user = await User.findById(userId);
@@ -598,6 +556,7 @@ const verifyPhoneUpdateOtp = catchAsync(async (req, res, next) => {
 
     user.phone = phone;
     user.isPhoneVerified = true;
+    user.isVerified = true;
     await user.save();
 
     res.status(200).json({

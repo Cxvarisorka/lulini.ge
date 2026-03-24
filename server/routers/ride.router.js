@@ -4,6 +4,7 @@ const {
     createRide,
     adminCreateRide,
     acceptRide,
+    declineRide,
     notifyArrival,
     startRide,
     completeRide,
@@ -13,7 +14,8 @@ const {
     getRide,
     getAllRides,
     getAvailableRides,
-    reviewDriver
+    reviewDriver,
+    receiveLocationBatch
 } = require('../controllers/ride.controller');
 const { protect, authorize, isDriver } = require('../middlewares/auth.middleware');
 const { rideCreateLimiter } = require('../middlewares/rateLimiter');
@@ -27,9 +29,11 @@ router.get('/my', protect, getMyRides);
 router.get('/driver/available', protect, isDriver, getAvailableRides);
 router.get('/driver/my', protect, isDriver, getDriverRides);
 router.patch('/:id/accept', protect, isDriver, acceptRide);
+router.patch('/:id/decline', protect, isDriver, declineRide);
 router.patch('/:id/arrive', protect, isDriver, notifyArrival);
 router.patch('/:id/start', protect, isDriver, startRide);
 router.patch('/:id/complete', protect, isDriver, completeRide);
+router.post('/:id/locations/batch', protect, isDriver, receiveLocationBatch);
 
 // Shared routes
 router.get('/:id', protect, getRide);

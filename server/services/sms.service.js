@@ -1,18 +1,10 @@
-const twilio = require('twilio');
+const https = require('https');
 
-const accountSid = process.env.TWILIO_ACCOUNT_SID;
-const authToken = process.env.TWILIO_AUTH_TOKEN;
-const verifyServiceSid = process.env.TWILIO_VERIFY_SERVICE_SID;
-
-let client = null;
-
-// Initialize Twilio client only if all credentials are configured
-if (accountSid && authToken && verifyServiceSid) {
-    client = twilio(accountSid, authToken);
-}
+const apiKey = process.env.SMS_API;
+const SMS_SENDER = process.env.SMS_SENDER || 'Lulini';
 
 /**
- * Generate a random 6-digit OTP code (dev mode only)
+ * Generate a random 6-digit OTP code
  * @returns {string} 6-digit OTP code
  */
 const generateOTP = () => {
@@ -20,59 +12,88 @@ const generateOTP = () => {
 };
 
 /**
- * Send phone verification via Twilio Verify API
- * @param {string} phone - Phone number to verify (E.164 format)
- * @returns {Promise<object>} { devCode } in dev mode, { sent: true } in production
+ * Format phone number for SMSOffice (international format without + or 00)
+ * e.g. "+995577123456" -> "995577123456"
+ * @param {string} phone
+ * @returns {string}
  */
-const sendVerification = async (phone) => {
-    if (!client) {
-        const code = generateOTP();
-        if (process.env.NODE_ENV !== 'production') {
-            console.warn('Twilio not configured. OTP code:', code);
-        }
-        return { devCode: code };
-    }
-
-    const verification = await client.verify.v2
-        .services(verifyServiceSid)
-        .verifications.create({ to: phone, channel: 'sms' });
-
-    return { sent: true, sid: verification.sid };
+const formatPhone = (phone) => {
+    return phone.replace(/[\s()\-+]/g, '').replace(/^00/, '');
 };
 
 /**
- * Check phone verification via Twilio Verify API
- * @param {string} phone - Phone number to check
- * @param {string} code - OTP code to verify
- * @returns {Promise<boolean|null>} true/false in production, null if Twilio not configured
+ * Send SMS via smsoffice.ge API
+ * @param {string} phone - Phone number
+ * @param {string} content - Message text
+ * @returns {Promise<object>} API response
  */
-const checkVerification = async (phone, code) => {
-    if (!client) {
-        return null; // Caller should check local OTP DB
+const sendSms = (phone, content) => {
+    return new Promise((resolve, reject) => {
+        const destination = formatPhone(phone);
+        const params = new URLSearchParams({
+            key: apiKey,
+            destination,
+            sender: SMS_SENDER,
+            content,
+            urgent: 'true',
+        });
+
+        const url = `https://smsoffice.ge/api/v2/send/?${params.toString()}`;
+
+        https.get(url, (res) => {
+            let data = '';
+            res.on('data', (chunk) => { data += chunk; });
+            res.on('end', () => {
+                try {
+                    const parsed = JSON.parse(data);
+                    resolve(parsed);
+                } catch (e) {
+                    reject(new Error(`SMS API returned invalid JSON: ${data}`));
+                }
+            });
+        }).on('error', reject);
+    });
+};
+
+/**
+ * Send phone verification OTP
+ * @param {string} phone - Phone number to verify
+ * @returns {Promise<object>} { devCode } in dev/no-key mode, { sent: true } in production
+ */
+const sendVerification = async (phone) => {
+    const code = generateOTP();
+
+    if (!apiKey) {
+        console.warn('SMS_API not configured. OTP code:', code);
+        return { devCode: code };
     }
 
-    try {
-        const check = await client.verify.v2
-            .services(verifyServiceSid)
-            .verificationChecks.create({ to: phone, code });
+    const message = `Your Lulini verification code: ${code}`;
 
-        return check.status === 'approved';
+    try {
+        const result = await sendSms(phone, message);
+
+        if (!result.Success) {
+            console.error('SMSOffice send failed:', result.ErrorCode, result.Message);
+            // Fall back to dev mode so the flow doesn't break
+            if (process.env.NODE_ENV !== 'production') {
+                console.warn('Falling back to dev mode. OTP code:', code);
+                return { devCode: code };
+            }
+            throw new Error(`SMS send failed: ${result.Message} (code ${result.ErrorCode})`);
+        }
+
+        return { sent: true, code };
     } catch (error) {
-        console.error('Twilio verify check error:', error.code, error.message);
-        // 20404 = verification not found (expired or already consumed)
-        if (error.code === 20404) {
-            return { error: 'expired' };
+        if (process.env.NODE_ENV !== 'production') {
+            console.warn('SMS send error, falling back to dev mode. OTP code:', code);
+            return { devCode: code };
         }
-        // 60202 = max check attempts reached
-        if (error.code === 60202) {
-            return { error: 'max_attempts' };
-        }
-        return { error: 'failed', message: error.message };
+        throw error;
     }
 };
 
 module.exports = {
     generateOTP,
     sendVerification,
-    checkVerification
 };

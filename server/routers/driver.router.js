@@ -17,7 +17,8 @@ const {
     getDriverReviews,
     getAllDriverStatistics,
     getNearbyDrivers,
-    getDriverActivity
+    getDriverActivity,
+    getDriverOfferStats
 } = require('../controllers/driver.controller');
 
 const { validateUpdateDriverLocation } = require('../middlewares/validators');
@@ -45,6 +46,7 @@ router.post('/', authorize('admin'), createDriver);
 router.get('/', authorize('admin'), getAllDrivers);
 router.get('/:id', authorize('admin'), getDriver);
 router.get('/:id/activity', authorize('admin'), getDriverActivity);
+router.get('/:id/offers', authorize('admin'), getDriverOfferStats);
 router.get('/:id/reviews', getDriverReviews); // Admin or driver can access their own reviews
 router.patch('/:id', authorize('admin'), updateDriver);
 router.post('/:id/photo', authorize('admin'), uploadDriverPhotoMiddleware.single('photo'), uploadDriverPhoto);

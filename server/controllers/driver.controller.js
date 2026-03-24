@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const Driver = require('../models/driver.model');
 const User = require('../models/user.model');
 const Ride = require('../models/ride.model');
+const RideOffer = require('../models/rideOffer.model');
 const DriverActivity = require('../models/driverActivity.model');
 const AppError = require('../utils/AppError');
 const catchAsync = require('../utils/catchAsync');
@@ -372,7 +373,7 @@ const updateDriverStatus = catchAsync(async (req, res, next) => {
 // @route   PATCH /api/drivers/location
 // @access  Private/Driver
 const updateDriverLocation = catchAsync(async (req, res, next) => {
-    const { latitude, longitude } = req.body;
+    const { latitude, longitude, heading, heartbeat } = req.body;
 
     if (latitude == null || longitude == null) {
         return next(new AppError('Latitude and longitude are required', 400));
@@ -418,22 +419,33 @@ const updateDriverLocation = catchAsync(async (req, res, next) => {
 
     const io = req.app.get('io');
     if (io) {
+        // Build location payload — include heading when available for car rotation
+        const locationPayload = { latitude, longitude, ts: Date.now() };
+        if (heading != null && isFinite(heading)) {
+            locationPayload.heading = heading;
+        }
+        if (heartbeat) {
+            locationPayload.type = 'heartbeat';
+        }
+
         // Emit to admin room for real-time tracking
         io.to('admin').emit('driver:locationUpdate', {
             driverId: driver._id,
-            location: { latitude, longitude }
+            location: locationPayload
         });
 
         if (activeRide) {
             io.to(`user:${activeRide.user}`).emit('driver:locationUpdate', {
                 rideId: activeRide._id,
-                location: { latitude, longitude }
+                location: locationPayload
             });
 
-            // Check proximity and auto-notify passenger
-            checkProximityAndNotify(io, latitude, longitude, activeRide).catch(
-                err => console.error('Proximity check error:', err.message)
-            );
+            // Only check proximity for real movement, not heartbeats
+            if (!heartbeat) {
+                checkProximityAndNotify(io, latitude, longitude, activeRide).catch(
+                    err => console.error('Proximity check error:', err.message)
+                );
+            }
         }
     }
 
@@ -612,46 +624,67 @@ const getAllDriverStatistics = catchAsync(async (req, res, next) => {
     const last7Days = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
     const last30Days = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
-    // Single aggregation for ALL drivers — replaces N separate queries
-    const rideStats = await Ride.aggregate([
-        { $match: { driver: { $in: driverIds } } },
-        { $project: { driver: 1, status: 1, endTime: 1, fare: 1, cancelledBy: 1 } },
-        {
-            $group: {
-                _id: '$driver',
-                totalTrips: { $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] } },
-                cancelledTrips: {
-                    $sum: { $cond: [{ $and: [{ $eq: ['$status', 'cancelled'] }, { $eq: ['$cancelledBy', 'driver'] }] }, 1, 0] }
-                },
-                earnings24h: {
-                    $sum: { $cond: [{ $and: [{ $eq: ['$status', 'completed'] }, { $gte: ['$endTime', last24Hours] }] }, '$fare', 0] }
-                },
-                trips24h: {
-                    $sum: { $cond: [{ $and: [{ $eq: ['$status', 'completed'] }, { $gte: ['$endTime', last24Hours] }] }, 1, 0] }
-                },
-                earnings7d: {
-                    $sum: { $cond: [{ $and: [{ $eq: ['$status', 'completed'] }, { $gte: ['$endTime', last7Days] }] }, '$fare', 0] }
-                },
-                trips7d: {
-                    $sum: { $cond: [{ $and: [{ $eq: ['$status', 'completed'] }, { $gte: ['$endTime', last7Days] }] }, 1, 0] }
-                },
-                earnings30d: {
-                    $sum: { $cond: [{ $and: [{ $eq: ['$status', 'completed'] }, { $gte: ['$endTime', last30Days] }] }, '$fare', 0] }
-                },
-                trips30d: {
-                    $sum: { $cond: [{ $and: [{ $eq: ['$status', 'completed'] }, { $gte: ['$endTime', last30Days] }] }, 1, 0] }
-                },
+    // Ride stats and offer stats in parallel
+    const [rideStats, offerStats] = await Promise.all([
+        Ride.aggregate([
+            { $match: { driver: { $in: driverIds } } },
+            { $project: { driver: 1, status: 1, endTime: 1, fare: 1, cancelledBy: 1 } },
+            {
+                $group: {
+                    _id: '$driver',
+                    totalTrips: { $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] } },
+                    cancelledTrips: {
+                        $sum: { $cond: [{ $and: [{ $eq: ['$status', 'cancelled'] }, { $eq: ['$cancelledBy', 'driver'] }] }, 1, 0] }
+                    },
+                    earnings24h: {
+                        $sum: { $cond: [{ $and: [{ $eq: ['$status', 'completed'] }, { $gte: ['$endTime', last24Hours] }] }, '$fare', 0] }
+                    },
+                    trips24h: {
+                        $sum: { $cond: [{ $and: [{ $eq: ['$status', 'completed'] }, { $gte: ['$endTime', last24Hours] }] }, 1, 0] }
+                    },
+                    earnings7d: {
+                        $sum: { $cond: [{ $and: [{ $eq: ['$status', 'completed'] }, { $gte: ['$endTime', last7Days] }] }, '$fare', 0] }
+                    },
+                    trips7d: {
+                        $sum: { $cond: [{ $and: [{ $eq: ['$status', 'completed'] }, { $gte: ['$endTime', last7Days] }] }, 1, 0] }
+                    },
+                    earnings30d: {
+                        $sum: { $cond: [{ $and: [{ $eq: ['$status', 'completed'] }, { $gte: ['$endTime', last30Days] }] }, '$fare', 0] }
+                    },
+                    trips30d: {
+                        $sum: { $cond: [{ $and: [{ $eq: ['$status', 'completed'] }, { $gte: ['$endTime', last30Days] }] }, 1, 0] }
+                    },
+                }
             }
-        }
-    ]).read('secondaryPreferred');
+        ]).read('secondaryPreferred'),
+        // Offer-level stats per driver (last 30 days)
+        RideOffer.aggregate([
+            { $match: { driver: { $in: driverIds }, offeredAt: { $gte: last30Days } } },
+            {
+                $group: {
+                    _id: '$driver',
+                    offered: { $sum: 1 },
+                    accepted: { $sum: { $cond: [{ $eq: ['$status', 'accepted'] }, 1, 0] } },
+                    declined: { $sum: { $cond: [{ $eq: ['$status', 'declined'] }, 1, 0] } },
+                    timedOut: { $sum: { $cond: [{ $eq: ['$status', 'timeout'] }, 1, 0] } },
+                    superseded: { $sum: { $cond: [{ $eq: ['$status', 'superseded'] }, 1, 0] } },
+                    avgResponseMs: { $avg: '$responseTimeMs' }
+                }
+            }
+        ]).read('secondaryPreferred')
+    ]);
 
     // Index by driver ID for O(1) lookup
     const statsMap = new Map(rideStats.map(s => [s._id.toString(), s]));
+    const offerMap = new Map(offerStats.map(s => [s._id.toString(), s]));
 
     const statistics = drivers
         .filter(d => d.user)
         .map(driver => {
             const s = statsMap.get(driver._id.toString()) || {};
+            const o = offerMap.get(driver._id.toString()) || {};
+            const offered = o.offered || 0;
+            const accepted = o.accepted || 0;
             return {
                 driverId: driver._id,
                 name: `${driver.user.firstName} ${driver.user.lastName}`,
@@ -674,6 +707,16 @@ const getAllDriverStatistics = catchAsync(async (req, res, next) => {
                         last24Hours: s.trips24h || 0,
                         last7Days: s.trips7d || 0,
                         last30Days: s.trips30d || 0,
+                    },
+                    // Offer-level metrics (last 30 days)
+                    offers: {
+                        offered,
+                        accepted,
+                        declined: o.declined || 0,
+                        timedOut: o.timedOut || 0,
+                        superseded: o.superseded || 0,
+                        acceptanceRate: offered > 0 ? Math.round((accepted / offered) * 1000) / 10 : null,
+                        avgResponseMs: o.avgResponseMs ? Math.round(o.avgResponseMs) : null
                     }
                 }
             };
@@ -808,22 +851,22 @@ const batchUpdateDriverLocation = catchAsync(async (req, res, next) => {
 
     const io = req.app.get('io');
     if (io) {
+        // Build location payload — include heading when available for car rotation
+        const batchLocationPayload = { latitude: accepted.latitude, longitude: accepted.longitude };
+        if (accepted.heading != null && isFinite(accepted.heading)) {
+            batchLocationPayload.heading = accepted.heading;
+        }
+
         // Emit to admin room for real-time tracking
         io.to('admin').emit('driver:locationUpdate', {
             driverId: driver._id,
-            location: {
-                latitude: accepted.latitude,
-                longitude: accepted.longitude,
-            },
+            location: batchLocationPayload,
         });
 
         if (activeRide) {
             io.to(`user:${activeRide.user}`).emit('driver:locationUpdate', {
                 rideId: activeRide._id,
-                location: {
-                    latitude: accepted.latitude,
-                    longitude: accepted.longitude,
-                },
+                location: batchLocationPayload,
             });
 
             // Check proximity and auto-notify passenger
@@ -872,8 +915,8 @@ const getDriverActivity = catchAsync(async (req, res, next) => {
 
     const sevenDaysAgo = days[0].start;
 
-    // Fetch activity logs and rides in parallel
-    const [activityLogs, rideStats] = await Promise.all([
+    // Fetch activity logs, rides, and offer stats in parallel
+    const [activityLogs, rideStats, offerStats] = await Promise.all([
         DriverActivity.find({
             driver: driverId,
             timestamp: { $gte: sevenDaysAgo }
@@ -889,11 +932,6 @@ const getDriverActivity = catchAsync(async (req, res, next) => {
                 $group: {
                     _id: {
                         $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone }
-                    },
-                    accepted: {
-                        $sum: {
-                            $cond: [{ $ne: ['$status', 'pending'] }, 1, 0]
-                        }
                     },
                     completed: {
                         $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] }
@@ -922,7 +960,7 @@ const getDriverActivity = catchAsync(async (req, res, next) => {
                     cancelledByAdmin: {
                         $sum: {
                             $cond: {
-                                if: { $and: [{ $eq: ['$status', 'cancelled'] }, { $eq: ['$cancelledBy', 'admin'] }] },
+                                if: { $and: [{ $eq: ['$status', 'cancelled'] }, { $in: ['$cancelledBy', ['admin', 'system']] }] },
                                 then: 1,
                                 else: 0
                             }
@@ -933,11 +971,42 @@ const getDriverActivity = catchAsync(async (req, res, next) => {
                     }
                 }
             }
+        ]),
+        // Offer-level stats: how many offers this driver received/accepted/declined/ignored
+        RideOffer.aggregate([
+            {
+                $match: {
+                    driver: new mongoose.Types.ObjectId(driverId),
+                    offeredAt: { $gte: sevenDaysAgo }
+                }
+            },
+            {
+                $group: {
+                    _id: {
+                        $dateToString: { format: '%Y-%m-%d', date: '$offeredAt', timezone }
+                    },
+                    offered: { $sum: 1 },
+                    accepted: {
+                        $sum: { $cond: [{ $eq: ['$status', 'accepted'] }, 1, 0] }
+                    },
+                    declined: {
+                        $sum: { $cond: [{ $eq: ['$status', 'declined'] }, 1, 0] }
+                    },
+                    timedOut: {
+                        $sum: { $cond: [{ $eq: ['$status', 'timeout'] }, 1, 0] }
+                    },
+                    superseded: {
+                        $sum: { $cond: [{ $eq: ['$status', 'superseded'] }, 1, 0] }
+                    },
+                    avgResponseMs: { $avg: '$responseTimeMs' }
+                }
+            }
         ])
     ]);
 
-    // Index ride stats by date string
+    // Index ride stats and offer stats by date string
     const rideStatsMap = new Map(rideStats.map(s => [s._id, s]));
+    const offerStatsMap = new Map(offerStats.map(s => [s._id, s]));
 
     // Compute active hours per day from activity logs
     // Strategy: for each day, find online/offline transitions and sum active time
@@ -983,13 +1052,21 @@ const getDriverActivity = catchAsync(async (req, res, next) => {
         const offlineHours = Math.round(Math.max(0, totalHoursInDay - activeHours) * 10) / 10;
 
         const rs = rideStatsMap.get(dateStr) || {};
+        const os = offerStatsMap.get(dateStr) || {};
 
         return {
             date: dateStr,
             dayLabel,
             activeHours,
             offlineHours,
-            accepted: rs.accepted || 0,
+            // Offer-level metrics (accurate acceptance/rejection tracking)
+            offered: os.offered || 0,
+            accepted: os.accepted || 0,
+            declined: os.declined || 0,
+            timedOut: os.timedOut || 0,
+            superseded: os.superseded || 0,
+            avgResponseMs: os.avgResponseMs ? Math.round(os.avgResponseMs) : null,
+            // Ride-level metrics (post-acceptance outcomes)
             completed: rs.completed || 0,
             cancelled: rs.cancelled || 0,
             cancelledByDriver: rs.cancelledByDriver || 0,
@@ -1003,7 +1080,11 @@ const getDriverActivity = catchAsync(async (req, res, next) => {
     const totals = calendar.reduce((acc, day) => ({
         activeHours: Math.round((acc.activeHours + day.activeHours) * 10) / 10,
         offlineHours: Math.round((acc.offlineHours + day.offlineHours) * 10) / 10,
+        offered: acc.offered + day.offered,
         accepted: acc.accepted + day.accepted,
+        declined: acc.declined + day.declined,
+        timedOut: acc.timedOut + day.timedOut,
+        superseded: acc.superseded + day.superseded,
         completed: acc.completed + day.completed,
         cancelled: acc.cancelled + day.cancelled,
         cancelledByDriver: acc.cancelledByDriver + day.cancelledByDriver,
@@ -1011,7 +1092,12 @@ const getDriverActivity = catchAsync(async (req, res, next) => {
         cancelledByAdmin: acc.cancelledByAdmin + day.cancelledByAdmin,
         earnings: acc.earnings + day.earnings,
         activeDays: acc.activeDays + (day.activeHours > 0 ? 1 : 0)
-    }), { activeHours: 0, offlineHours: 0, accepted: 0, completed: 0, cancelled: 0, cancelledByDriver: 0, cancelledByUser: 0, cancelledByAdmin: 0, earnings: 0, activeDays: 0 });
+    }), { activeHours: 0, offlineHours: 0, offered: 0, accepted: 0, declined: 0, timedOut: 0, superseded: 0, completed: 0, cancelled: 0, cancelledByDriver: 0, cancelledByUser: 0, cancelledByAdmin: 0, earnings: 0, activeDays: 0 });
+
+    // Compute acceptance rate (only meaningful when offers > 0)
+    totals.acceptanceRate = totals.offered > 0
+        ? Math.round((totals.accepted / totals.offered) * 1000) / 10
+        : null;
 
     res.json({
         success: true,
@@ -1030,6 +1116,66 @@ const getDriverActivity = catchAsync(async (req, res, next) => {
             },
             calendar,
             totals
+        }
+    });
+});
+
+// @desc    Get driver offer stats (acceptance/rejection breakdown)
+// @route   GET /api/drivers/:id/offers
+// @access  Private/Admin
+const getDriverOfferStats = catchAsync(async (req, res, next) => {
+    const driverId = req.params.id;
+
+    const driver = await Driver.findById(driverId).select('_id').lean();
+    if (!driver) {
+        return next(new AppError('Driver not found', 404));
+    }
+
+    // Parse optional date range (defaults to last 30 days)
+    const now = new Date();
+    const since = req.query.since ? new Date(req.query.since) : new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+    const [summary, recentOffers] = await Promise.all([
+        RideOffer.aggregate([
+            { $match: { driver: new mongoose.Types.ObjectId(driverId), offeredAt: { $gte: since } } },
+            {
+                $group: {
+                    _id: null,
+                    offered: { $sum: 1 },
+                    accepted: { $sum: { $cond: [{ $eq: ['$status', 'accepted'] }, 1, 0] } },
+                    declined: { $sum: { $cond: [{ $eq: ['$status', 'declined'] }, 1, 0] } },
+                    timedOut: { $sum: { $cond: [{ $eq: ['$status', 'timeout'] }, 1, 0] } },
+                    superseded: { $sum: { $cond: [{ $eq: ['$status', 'superseded'] }, 1, 0] } },
+                    pending: { $sum: { $cond: [{ $eq: ['$status', 'pending'] }, 1, 0] } },
+                    avgResponseMs: { $avg: '$responseTimeMs' }
+                }
+            }
+        ]),
+        // Last 20 offers with ride details for drill-down
+        RideOffer.find({ driver: driverId, offeredAt: { $gte: since } })
+            .sort({ offeredAt: -1 })
+            .limit(20)
+            .populate('ride', 'pickup.address dropoff.address vehicleType quote.totalPrice status')
+            .lean()
+    ]);
+
+    const s = summary[0] || { offered: 0, accepted: 0, declined: 0, timedOut: 0, superseded: 0, pending: 0, avgResponseMs: null };
+
+    res.json({
+        success: true,
+        data: {
+            since: since.toISOString(),
+            summary: {
+                offered: s.offered,
+                accepted: s.accepted,
+                declined: s.declined,
+                timedOut: s.timedOut,
+                superseded: s.superseded,
+                pending: s.pending,
+                acceptanceRate: s.offered > 0 ? Math.round((s.accepted / s.offered) * 1000) / 10 : null,
+                avgResponseMs: s.avgResponseMs ? Math.round(s.avgResponseMs) : null
+            },
+            recentOffers
         }
     });
 });
@@ -1098,5 +1244,6 @@ module.exports = {
     getDriverReviews,
     getAllDriverStatistics,
     getNearbyDrivers,
-    getDriverActivity
+    getDriverActivity,
+    getDriverOfferStats
 };

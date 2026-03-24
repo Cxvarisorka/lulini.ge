@@ -34,10 +34,9 @@ const otpSchema = new mongoose.Schema({
 });
 
 // Hash OTP code before saving (prevent plaintext exposure if DB is compromised)
-otpSchema.pre('save', async function (next) {
-    if (!this.isModified('code') || this.code === 'verified') return next();
+otpSchema.pre('save', async function () {
+    if (!this.isModified('code') || this.code === 'verified') return;
     this.code = await bcrypt.hash(this.code, 6);
-    next();
 });
 
 // Compare a candidate code against the stored hash

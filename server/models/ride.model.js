@@ -193,7 +193,17 @@ const rideSchema = new mongoose.Schema({
     dropoffApproachNotified: {
         type: Boolean,
         default: false
-    }
+    },
+    // Route points recorded during in_progress phase (for ride reconstruction)
+    routePoints: [{
+        lat: Number,
+        lng: Number,
+        heading: Number,
+        speed: Number,
+        accuracy: Number,
+        ts: Date,
+        _id: false,
+    }]
 }, {
     timestamps: true
 });

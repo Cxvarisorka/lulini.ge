@@ -6,6 +6,7 @@ const AppError = require('../utils/AppError');
 const catchAsync = require('../utils/catchAsync');
 const pushService = require('../services/pushNotification.service');
 const { haversineKm } = require('../utils/distance');
+const RideOffer = require('../models/rideOffer.model');
 const { pushIfOffline, emitCritical } = require('../utils/socketHelpers');
 const { isUserOnlineAsync } = require('../socket/presence');
 
@@ -480,7 +481,8 @@ const acceptRide = catchAsync(async (req, res, next) => {
                 params: { driverName }
             } : undefined
         );
-        io.to('admin').emit('ride:accepted', populatedRide);
+        // Exclude the ride user's room to prevent double-delivery if user is also admin
+        io.to('admin').except(`user:${ride.user}`).emit('ride:accepted', populatedRide);
 
         // Broadcast ride:unavailable to ALL connected drivers EXCEPT the one who accepted.
         io.to('drivers:all').except(`driver:${req.user.id}`).emit('ride:unavailable', { rideId: ride._id });
@@ -490,6 +492,36 @@ const acceptRide = catchAsync(async (req, res, next) => {
         success: true,
         message: 'Ride accepted successfully',
         data: { ride: populatedRide }
+    });
+});
+
+// @desc    Decline a ride offer (driver)
+// @route   PATCH /api/rides/:id/decline
+// @access  Private/Driver
+const declineRide = catchAsync(async (req, res, next) => {
+    const driver = await Driver.findOne({ user: req.user.id }).select('_id').lean();
+    if (!driver) {
+        return next(new AppError('Driver profile not found', 404));
+    }
+
+    // Atomically mark only a pending offer as declined
+    const offer = await RideOffer.findOneAndUpdate(
+        { ride: req.params.id, driver: driver._id, status: 'pending' },
+        { status: 'declined', respondedAt: new Date() },
+        { new: true }
+    );
+
+    if (!offer) {
+        return next(new AppError('No pending offer found for this ride', 400));
+    }
+
+    // Calculate response time from when the offer was sent
+    offer.responseTimeMs = offer.respondedAt - offer.offeredAt;
+    await offer.save();
+
+    res.json({
+        success: true,
+        message: 'Ride declined'
     });
 });
 
@@ -573,7 +605,7 @@ const notifyArrival = catchAsync(async (req, res, next) => {
                 data: { rideId: ride._id.toString() }
             } : undefined
         );
-        io.to('admin').emit('ride:arrived', populatedRide);
+        io.to('admin').except(`user:${ride.user}`).emit('ride:arrived', populatedRide);
     }
 
     res.json({
@@ -583,10 +615,20 @@ const notifyArrival = catchAsync(async (req, res, next) => {
     });
 });
 
-// @desc    Start a ride (driver)
+// @desc    Start a ride (driver) — idempotent
 // @route   PATCH /api/rides/:id/start
 // @access  Private/Driver
 const startRide = catchAsync(async (req, res, next) => {
+    const { idempotencyKey } = req.body;
+
+    // Idempotency check — return cached response for duplicate start requests
+    if (idempotencyKey) {
+        const cached = await getIdempotentResponse(`start:${idempotencyKey}`);
+        if (cached) {
+            return res.status(cached.statusCode).json(cached.body);
+        }
+    }
+
     // Get driver profile
     const driver = await Driver.findOne({ user: req.user.id });
     if (!driver) {
@@ -596,7 +638,7 @@ const startRide = catchAsync(async (req, res, next) => {
     // First read the ride to calculate waiting fee (needs arrivalTime)
     const existingRide = await Ride.findOne({
         _id: req.params.id,
-        status: { $in: ['accepted', 'driver_arrived'] },
+        status: { $in: ['accepted', 'driver_arrived', 'in_progress'] },
         driver: driver._id,
     });
 
@@ -610,6 +652,22 @@ const startRide = catchAsync(async (req, res, next) => {
             return next(new AppError('This ride was cancelled due to waiting timeout', 410));
         }
         return next(new AppError('Ride must be in accepted or driver_arrived status to start', 400));
+    }
+
+    // Idempotent: if ride is already in_progress, return success (409 for client to detect)
+    if (existingRide.status === 'in_progress') {
+        const populatedRide = await Ride.findById(existingRide._id)
+            .populate('user', 'firstName lastName email phone')
+            .populate({
+                path: 'driver',
+                populate: { path: 'user', select: 'firstName lastName fullName phone profileImage' }
+            });
+        const body = { success: true, message: 'Ride already in progress', data: { ride: populatedRide } };
+        if (idempotencyKey) {
+            setIdempotentResponse(`start:${idempotencyKey}`, 200, body)
+                .catch(err => console.error('Idempotency cache error:', err.message));
+        }
+        return res.status(200).json(body);
     }
 
     // Calculate waiting fee if driver had arrived and waited
@@ -673,14 +731,22 @@ const startRide = catchAsync(async (req, res, next) => {
                 data: { rideId: ride._id.toString() }
             } : undefined
         );
-        io.to('admin').emit('ride:started', populatedRide);
+        io.to('admin').except(`user:${ride.user}`).emit('ride:started', populatedRide);
     }
 
-    res.json({
+    const responseBody = {
         success: true,
         message: 'Ride started successfully',
         data: { ride: populatedRide }
-    });
+    };
+
+    // Cache response for idempotency replay
+    if (idempotencyKey) {
+        setIdempotentResponse(`start:${idempotencyKey}`, 200, responseBody)
+            .catch(err => console.error('Idempotency cache error:', err.message));
+    }
+
+    res.json(responseBody);
 });
 
 // @desc    Complete a ride (driver)
@@ -811,7 +877,8 @@ const completeRide = catchAsync(async (req, res, next) => {
                 params: { fare: String(finalFare) }
             } : undefined
         );
-        io.to('admin').emit('ride:completed', completedPayload);
+        // Exclude the ride user's room to prevent double-delivery if user is also admin
+        io.to('admin').except(`user:${ride.user}`).emit('ride:completed', completedPayload);
 
         // Notify the driver with updated stats (use post-$inc values, not stale pre-update)
         io.to(`driver:${driver.user}`).emit('ride:completed', {
@@ -967,16 +1034,22 @@ const cancelRide = catchAsync(async (req, res, next) => {
                 data: { rideId: cancelledRide._id.toString() }
             } : undefined
         );
-        io.to('admin').emit('ride:cancelled', populatedRide);
+        // Exclude the ride user's room to prevent double-delivery if user is also admin
+        io.to('admin').except(`user:${cancelledRide.user}`).emit('ride:cancelled', populatedRide);
 
         // Notify driver if assigned
         if (populatedRide.driver && populatedRide.driver.user) {
             io.to(`driver:${populatedRide.driver.user._id}`).emit('ride:cancelled', populatedRide);
         }
 
-        // If ride was pending, notify all drivers so they can clear the request modal
+        // If ride was pending, notify only eligible drivers so they can clear the request modal
         if (wasPending && hadNoDriver) {
-            io.to('drivers:all').emit('ride:cancelled', populatedRide);
+            const eligibleTypes = getEligibleDriverTypes(cancelledRide.vehicleType);
+            let broadcast = io;
+            for (const type of eligibleTypes) {
+                broadcast = broadcast.to(`drivers:${type}`);
+            }
+            broadcast.emit('ride:cancelled', populatedRide);
         }
     }
 
@@ -1312,6 +1385,74 @@ const reviewDriver = catchAsync(async (req, res, next) => {
     });
 });
 
+// @desc    Receive batched ride route locations (from driver app buffer flush)
+// @route   POST /api/rides/:id/locations/batch
+// @access  Private/Driver
+const receiveLocationBatch = catchAsync(async (req, res, next) => {
+    const { points } = req.body;
+
+    if (!Array.isArray(points) || points.length === 0) {
+        return next(new AppError('points array is required', 400));
+    }
+    if (points.length > 50) {
+        return next(new AppError('Maximum 50 points per batch', 400));
+    }
+
+    // Verify ride exists and belongs to this driver
+    const driver = await Driver.findOne({ user: req.user.id }).select('_id').lean();
+    if (!driver) {
+        return next(new AppError('Driver profile not found', 404));
+    }
+
+    const ride = await Ride.findOne({
+        _id: req.params.id,
+        driver: driver._id,
+        status: { $in: ['in_progress', 'completed'] },
+    }).select('_id status').lean();
+
+    if (!ride) {
+        return next(new AppError('Ride not found or not assigned to you', 404));
+    }
+
+    // Validate and filter points
+    const validPoints = points.filter(p =>
+        p && typeof p.lat === 'number' && typeof p.lng === 'number' &&
+        p.lat >= -90 && p.lat <= 90 && p.lng >= -180 && p.lng <= 180 &&
+        typeof p.ts === 'number'
+    );
+
+    if (validPoints.length === 0) {
+        return res.json({ success: true, received: points.length, inserted: 0 });
+    }
+
+    // Store route points in ride document (append to routePoints array)
+    // Using $push with $each for atomic append; $slice prevents unbounded growth
+    await Ride.updateOne(
+        { _id: ride._id },
+        {
+            $push: {
+                routePoints: {
+                    $each: validPoints.map(p => ({
+                        lat: p.lat,
+                        lng: p.lng,
+                        heading: p.heading ?? null,
+                        speed: p.speed ?? null,
+                        accuracy: p.accuracy ?? null,
+                        ts: new Date(p.ts),
+                    })),
+                    $slice: -5000, // Keep last 5000 points max (~4+ hours of ride)
+                }
+            }
+        }
+    );
+
+    res.json({
+        success: true,
+        received: points.length,
+        inserted: validPoints.length,
+    });
+});
+
 // @desc    Auto-expire old pending rides
 // @access  Internal (called by scheduler or on server startup)
 const expireOldRides = async (io) => {
@@ -1472,6 +1613,7 @@ module.exports = {
     createRide,
     adminCreateRide,
     acceptRide,
+    declineRide,
     notifyArrival,
     startRide,
     completeRide,
@@ -1482,6 +1624,7 @@ module.exports = {
     getAllRides,
     getAvailableRides,
     reviewDriver,
+    receiveLocationBatch,
     expireOldRides,
     expireWaitingRides
 };

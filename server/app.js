@@ -29,9 +29,7 @@ const requiredEnvVars = {
 // These are required in production only
 const productionEnvVars = {
     GOOGLE_MAPS_API_KEY: {},
-    TWILIO_ACCOUNT_SID: {},
-    TWILIO_AUTH_TOKEN: {},
-    TWILIO_VERIFY_SERVICE_SID: {},
+    SMS_API: {},
 };
 
 const missingVars = [];
@@ -235,6 +233,7 @@ const PORT = process.env.PORT || 3000;
 
 // Import the ride expiration functions
 const { expireOldRides, expireWaitingRides } = require('./controllers/ride.controller');
+const { startWatchdog } = require('./services/rideWatchdog.service');
 
 // Schedule ride expiration check every minute
 const EXPIRATION_CHECK_INTERVAL = 60 * 1000; // 1 minute
@@ -295,6 +294,9 @@ async function startServer() {
                     }
                 });
             }, WAITING_CHECK_INTERVAL);
+
+            // Start ride tracking watchdog (30s interval — detects stale driver locations)
+            startWatchdog(io);
         }
     });
 }
