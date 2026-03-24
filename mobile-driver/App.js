@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { LogBox, AppState } from 'react-native';
+import { LogBox, AppState, Alert } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { I18nextProvider } from 'react-i18next';
 import * as Notifications from 'expo-notifications';
+import * as Updates from 'expo-updates';
 import * as Sentry from '@sentry/react-native';
 
 // Initialize Sentry — wrapped in try-catch because the native module may not
@@ -63,6 +64,30 @@ export default function App() {
   // Track whether notification permissions were requested to avoid
   // overlapping with location permissions on iOS after splash
   const notifPermRequested = React.useRef(false);
+
+  // Check for OTA updates on launch
+  useEffect(() => {
+    async function checkForUpdates() {
+      try {
+        if (__DEV__) return;
+        const update = await Updates.checkForUpdateAsync();
+        if (update.isAvailable) {
+          await Updates.fetchUpdateAsync();
+          Alert.alert(
+            'განახლება ხელმისაწვდომია',
+            'Lulini Driver-ის ახალი ვერსია მზადაა. გადატვირთეთ განახლების გამოსაყენებლად.',
+            [
+              { text: 'მოგვიანებით', style: 'cancel' },
+              { text: 'გადატვირთვა', onPress: () => Updates.reloadAsync() },
+            ]
+          );
+        }
+      } catch (e) {
+        // Update check failed silently — not critical
+      }
+    }
+    checkForUpdates();
+  }, []);
 
   useEffect(() => {
     if (notifPermRequested.current) return;
