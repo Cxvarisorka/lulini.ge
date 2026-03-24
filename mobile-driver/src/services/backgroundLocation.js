@@ -190,6 +190,9 @@ async function flushBatch() {
 
 // ─── TaskManager task definition ─────────────────────────────────────────────
 // IMPORTANT: This must be called at module load time (outside any component).
+// After app kill + restart by OS, this is the FIRST code that runs.
+// It MUST NOT depend on React state, context, or in-memory singletons
+// that were lost when the process was killed.
 
 TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
   if (error) {
@@ -198,6 +201,23 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
   }
 
   if (!data?.locations?.length) return;
+
+  // Check if there's an active ride — read from disk (not memory)
+  // RideTrackingService may not be initialized after process restart
+  let hasActiveRide = false;
+  try {
+    const { readRideState } = require('./rideStorage');
+    const rideState = await readRideState();
+    hasActiveRide = rideState && rideState.status === 'active';
+
+    // If active ride exists, also forward to RideTrackingService buffer
+    if (hasActiveRide) {
+      const RideTrackingService = require('./RideTrackingService').default;
+      await RideTrackingService.processBackgroundLocations(data.locations);
+    }
+  } catch (_) {
+    // rideStorage or RideTrackingService not available — continue with normal flow
+  }
 
   for (const loc of data.locations) {
     const { coords, timestamp } = loc;
@@ -287,8 +307,8 @@ export async function startBackgroundLocationUpdates(hasActiveRide = false) {
         : 'You are online and receiving ride requests',
       notificationColor: '#171717',
     },
-    // iOS: pause when stationary to save battery
-    pausesUpdatesAutomatically: !hasActiveRide,
+    // iOS: NEVER pause during active ride — default true causes 30-120s gaps at red lights
+    pausesLocationUpdatesAutomatically: !hasActiveRide,
     activityType: Location.ActivityType.AutomotiveNavigation,
   });
 

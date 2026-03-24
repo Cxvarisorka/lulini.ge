@@ -17,6 +17,7 @@ import {
   getBackgroundLocationHealth,
 } from '../services/backgroundLocation';
 import { haversineKm } from '../utils/distance';
+import RideTrackingService from '../services/RideTrackingService';
 
 /**
  * LocationContext — Production-grade driver location tracking
@@ -74,6 +75,15 @@ export const LocationProvider = ({ children }) => {
   const locationRef = useRef(null);
   useEffect(() => { locationRef.current = location; }, [location]);
 
+  // Ref mirror of isTracking — used inside setActiveRide to avoid stale closure
+  const isTrackingRef = useRef(false);
+  useEffect(() => { isTrackingRef.current = isTracking; }, [isTracking]);
+
+  // Foreground watcher heartbeat — tracks last callback timestamp to detect silent death
+  const lastForegroundUpdateRef = useRef(0);
+  // Stale threshold: if watcher hasn't fired in this many ms, consider it dead
+  const FOREGROUND_STALE_MS = 30000;
+
   // Throttle server updates from foreground watcher
   const lastServerUpdate = useRef({ lat: 0, lng: 0, time: 0 });
   // Track background permission status via ref (avoid stale closure in watcher callback)
@@ -99,7 +109,7 @@ export const LocationProvider = ({ children }) => {
     };
   }, []);
 
-  // Re-check permissions and background location health when app returns to foreground
+  // Re-check permissions and background/foreground location health when app returns to foreground
   useEffect(() => {
     const subscription = AppState.addEventListener(
       'change',
@@ -116,8 +126,10 @@ export const LocationProvider = ({ children }) => {
             return;
           }
 
+          if (!isTrackingRef.current) return;
+
           // Health check: if tracking is on, verify background task is alive
-          if (isTracking && bgPermissionRef.current) {
+          if (bgPermissionRef.current) {
             const health = getBackgroundLocationHealth();
             if (health.hasReceivedAny && !health.healthy) {
               console.warn(
@@ -130,16 +142,26 @@ export const LocationProvider = ({ children }) => {
               }
             }
           }
+
+          // Health check: verify foreground watcher is still alive
+          // Android OEMs can silently kill watchPositionAsync while the background service survives
+          const fgAge = Date.now() - lastForegroundUpdateRef.current;
+          if (lastForegroundUpdateRef.current > 0 && fgAge > FOREGROUND_STALE_MS) {
+            console.warn(
+              `[Location] Foreground watcher stale (${Math.round(fgAge / 1000)}s) — restarting`,
+            );
+            await restartForegroundWatcher();
+          }
         }
       },
     );
     return () => subscription.remove();
-  }, [isTracking]);
+  }, []);
 
-  // Watchdog timer: periodically verify background location is delivering
-  // while tracking is active. Restarts the task if it has gone silent.
+  // Watchdog timer: periodically verify both background and foreground location are delivering.
+  // Restarts whichever subsystem has gone silent.
   useEffect(() => {
-    if (!isTracking || !bgPermissionRef.current) {
+    if (!isTracking) {
       if (healthCheckTimerRef.current) {
         clearInterval(healthCheckTimerRef.current);
         healthCheckTimerRef.current = null;
@@ -148,18 +170,33 @@ export const LocationProvider = ({ children }) => {
     }
 
     healthCheckTimerRef.current = setInterval(async () => {
-      const health = getBackgroundLocationHealth();
-      if (health.hasReceivedAny && !health.healthy) {
-        console.warn(
-          `[Location] Watchdog: background stale (${health.lastUpdateAge}s) — restarting`,
-        );
-        try {
-          await startBackgroundLocationUpdates(!!activeRideRef.current);
-        } catch (e) {
-          console.warn('[Location] Watchdog restart failed:', e.message);
+      // Check background task health
+      if (bgPermissionRef.current) {
+        const health = getBackgroundLocationHealth();
+        if (health.hasReceivedAny && !health.healthy) {
+          console.warn(
+            `[Location] Watchdog: background stale (${health.lastUpdateAge}s) — restarting`,
+          );
+          try {
+            await startBackgroundLocationUpdates(!!activeRideRef.current);
+          } catch (e) {
+            console.warn('[Location] Watchdog restart failed:', e.message);
+          }
         }
       }
-    }, 60000); // Check every 60s
+
+      // Check foreground watcher health — this is the critical fix for the
+      // "driver map freezes but backend still receives location" bug.
+      // Android OEMs can silently kill watchPositionAsync while the background
+      // foreground service (with notification) survives.
+      const fgAge = Date.now() - lastForegroundUpdateRef.current;
+      if (lastForegroundUpdateRef.current > 0 && fgAge > FOREGROUND_STALE_MS) {
+        console.warn(
+          `[Location] Watchdog: foreground watcher stale (${Math.round(fgAge / 1000)}s) — restarting`,
+        );
+        await restartForegroundWatcher();
+      }
+    }, 30000); // Check every 30s (was 60s — tighter for foreground watcher)
 
     return () => {
       if (healthCheckTimerRef.current) {
@@ -310,6 +347,85 @@ export const LocationProvider = ({ children }) => {
     } catch (_) {}
   };
 
+  // ─── Foreground watcher (extracted so it can be restarted independently) ──
+
+  const startForegroundWatcher = async (hasActiveRide) => {
+    // Remove previous watcher if any
+    if (locationSubscription.current) {
+      locationSubscription.current.remove();
+      locationSubscription.current = null;
+    }
+
+    locationSubscription.current = await Location.watchPositionAsync(
+      {
+        accuracy: Location.Accuracy.High,
+        timeInterval: hasActiveRide ? 3000 : 10000,
+        distanceInterval: hasActiveRide ? 5 : 10,
+      },
+      (newLocation) => {
+        // Record heartbeat — watchdog uses this to detect silent watcher death
+        lastForegroundUpdateRef.current = Date.now();
+
+        const coords = {
+          latitude: newLocation.coords.latitude,
+          longitude: newLocation.coords.longitude,
+          heading: newLocation.coords.heading ?? null,
+          speed: newLocation.coords.speed ?? null,
+          accuracy: newLocation.coords.accuracy ?? null,
+        };
+
+        // Client-side spoofing check
+        if (
+          Platform.OS === 'android' &&
+          newLocation.mocked
+        ) {
+          console.warn('[Location] Mock location detected in foreground');
+          return;
+        }
+
+        // Speed validation
+        const last = lastServerUpdate.current;
+        if (last.lat !== 0) {
+          const timeDelta = (Date.now() - last.time) / 1000;
+          if (timeDelta > 1) {
+            const dist = haversineKm(
+              last.lat,
+              last.lng,
+              coords.latitude,
+              coords.longitude,
+            );
+            const speed = (dist / timeDelta) * 3600;
+            if (speed > MAX_SPEED_KMH) {
+              console.warn(
+                `[Location] Foreground speed ${speed.toFixed(0)} km/h — skipping`,
+              );
+              return;
+            }
+          }
+        }
+
+        setLocation(coords);
+
+        // Always send to server from foreground watcher.
+        // Background task also sends when active, but Android OEMs frequently
+        // kill the background service silently. The server-side throttle and
+        // the MIN_MOVEMENT_METERS/MIN_SERVER_UPDATE_INTERVAL guards here
+        // prevent duplicate spam. This guarantees location reaches passengers.
+        updateLocationOnServer(coords);
+      },
+    );
+  };
+
+  // Restart only the foreground watcher (preserves background task)
+  const restartForegroundWatcher = async () => {
+    try {
+      const hasActiveRide = !!activeRideRef.current;
+      await startForegroundWatcher(hasActiveRide);
+    } catch (e) {
+      console.warn('[Location] Foreground watcher restart failed:', e.message);
+    }
+  };
+
   // ─── Start tracking (foreground watcher + background task) ──────────────
 
   const startTracking = async () => {
@@ -374,7 +490,13 @@ export const LocationProvider = ({ children }) => {
             // expo-notifications may not be available — proceed anyway
           }
         }
-        await startBackgroundLocationUpdates(hasActiveRide);
+        // Wrap in try-catch so background task failure doesn't prevent foreground watcher
+        try {
+          await startBackgroundLocationUpdates(hasActiveRide);
+        } catch (bgErr) {
+          console.warn('[Location] Background task start failed — foreground watcher will handle server updates:', bgErr.message);
+          bgPermissionRef.current = false; // Fall back to foreground-only server updates
+        }
       } else {
         // Background not granted — foreground watcher will handle server updates instead
         console.warn('[Location] Background permission not granted — using foreground-only tracking');
@@ -387,59 +509,7 @@ export const LocationProvider = ({ children }) => {
       }
 
       // Start foreground watcher for UI updates (map marker position, heading)
-      locationSubscription.current = await Location.watchPositionAsync(
-        {
-          accuracy: Location.Accuracy.High,
-          timeInterval: hasActiveRide ? 3000 : 10000,
-          distanceInterval: hasActiveRide ? 5 : 10,
-        },
-        (newLocation) => {
-          const coords = {
-            latitude: newLocation.coords.latitude,
-            longitude: newLocation.coords.longitude,
-            heading: newLocation.coords.heading ?? null,
-            speed: newLocation.coords.speed ?? null,
-            accuracy: newLocation.coords.accuracy ?? null,
-          };
-
-          // Client-side spoofing check
-          if (
-            Platform.OS === 'android' &&
-            newLocation.mocked
-          ) {
-            console.warn('[Location] Mock location detected in foreground');
-            return;
-          }
-
-          // Speed validation
-          const last = lastServerUpdate.current;
-          if (last.lat !== 0) {
-            const timeDelta = (Date.now() - last.time) / 1000;
-            if (timeDelta > 1) {
-              const dist = haversineKm(
-                last.lat,
-                last.lng,
-                coords.latitude,
-                coords.longitude,
-              );
-              const speed = (dist / timeDelta) * 3600;
-              if (speed > MAX_SPEED_KMH) {
-                console.warn(
-                  `[Location] Foreground speed ${speed.toFixed(0)} km/h — skipping`,
-                );
-                return;
-              }
-            }
-          }
-
-          setLocation(coords);
-
-          // Send to server if background isn't handling it
-          if (!bgPermissionRef.current) {
-            updateLocationOnServer(coords);
-          }
-        },
-      );
+      await startForegroundWatcher(hasActiveRide);
 
       setIsTracking(true);
       return true;
@@ -506,10 +576,29 @@ export const LocationProvider = ({ children }) => {
   const setActiveRide = async (ride) => {
     const hadRide = !!activeRideRef.current;
     const hasRide = !!ride;
+    const prevRideId = activeRideRef.current?._id;
     activeRideRef.current = ride;
 
+    // Start/stop RideTrackingService for in_progress rides
+    const rideTracker = RideTrackingService.getInstance();
+    const rideId = ride?._id || ride?.id;
+    const isInProgress = ride?.status === 'in_progress';
+
+    if (isInProgress && rideId && !rideTracker.isTracking) {
+      // Ride just started — activate ride tracking service
+      rideTracker.startRide(rideId).catch((e) =>
+        console.warn('[Location] RideTrackingService start failed:', e.message),
+      );
+    } else if (!hasRide && rideTracker.isTracking) {
+      // Ride ended — stop ride tracking service
+      rideTracker.endRide().catch((e) =>
+        console.warn('[Location] RideTrackingService end failed:', e.message),
+      );
+    }
+
     // Restart tracking with different accuracy if ride state changed
-    if (hadRide !== hasRide && isTracking) {
+    // Use ref instead of state to avoid stale closure from useMemo
+    if (hadRide !== hasRide && isTrackingRef.current) {
       await stopTracking();
       await startTracking();
     }
@@ -549,6 +638,11 @@ export const LocationProvider = ({ children }) => {
   // ─── Full cleanup for logout ───────────────────────────────────────────
 
   const cleanupForLogout = useCallback(async () => {
+    // Stop ride tracking service if active
+    const rideTracker = RideTrackingService.getInstance();
+    if (rideTracker.isTracking) {
+      await rideTracker.endRide().catch(() => {});
+    }
     await stopTracking();
     await clearRetryQueue();
     if (healthCheckTimerRef.current) {
@@ -560,6 +654,7 @@ export const LocationProvider = ({ children }) => {
     setError(null);
     setPermissionStatus(null);
     lastServerUpdate.current = { lat: 0, lng: 0, time: 0 };
+    lastForegroundUpdateRef.current = 0;
     // [H7 FIX] Reset all refs to prevent stale state on next login
     isShowingAlert.current = false;
     activeRideRef.current = null;

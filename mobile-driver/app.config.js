@@ -33,7 +33,7 @@ export default {
         NSLocationWhenInUseUsageDescription: 'Lulini Driver needs your location to show your position on the map and match you with nearby ride requests.',
         NSLocationAlwaysAndWhenInUseUsageDescription: 'Lulini Driver needs your location in the background to accept ride requests and navigate to passengers.',
         NSLocationAlwaysUsageDescription: 'Lulini Driver needs your location in the background to accept ride requests and navigate to passengers.',
-        UIBackgroundModes: ['location', 'fetch'],
+        UIBackgroundModes: ['location', 'fetch', 'remote-notification'],
         ITSAppUsesNonExemptEncryption: false
       },
       // Only configure Google Maps SDK on iOS if a valid API key is provided.
@@ -46,7 +46,6 @@ export default {
       } : {})
     },
     android: {
-      versionCode: 3,
       adaptiveIcon: {
         foregroundImage: './assets/adaptive-icon.png',
         backgroundColor: '#000000'
@@ -79,7 +78,8 @@ export default {
           locationAlwaysPermission: 'Lulini Driver needs your location in the background to accept ride requests and navigate to passengers.',
           locationWhenInUsePermission: 'Lulini Driver needs your location to show your position on the map and match you with nearby ride requests.',
           isIosBackgroundLocationEnabled: true,
-          isAndroidBackgroundLocationEnabled: true
+          isAndroidBackgroundLocationEnabled: true,
+          isAndroidForegroundServiceEnabled: true
         }
       ],
       [

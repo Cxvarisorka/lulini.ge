@@ -10,6 +10,7 @@
       "channel": "development"
     },
     "preview": {
+      "autoIncrement": true,
       "distribution": "store",
       "android": {
         "buildType": "app-bundle"

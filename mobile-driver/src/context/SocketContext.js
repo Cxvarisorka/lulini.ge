@@ -5,6 +5,7 @@ import * as SecureStore from 'expo-secure-store';
 import * as Notifications from 'expo-notifications';
 import { useAuth } from './AuthContext';
 import { rideAPI } from '../services/api';
+import RideTrackingService from '../services/RideTrackingService';
 
 const SocketContext = createContext();
 
@@ -348,6 +349,14 @@ export const SocketProvider = ({ children }) => {
 
       socketRef.current = socketInstance;
       setSocket(socketInstance);
+
+      // Wire RideTrackingService socket emitter — allows ride tracking to
+      // send volatile location events through the existing socket connection
+      RideTrackingService.getInstance().setSocketEmitter((event, data) => {
+        if (socketInstance.connected) {
+          socketInstance.volatile.emit(event, data);
+        }
+      });
     } catch (error) {
       console.error('[Socket] Connection setup failed:', error.message);
     }
@@ -360,6 +369,8 @@ export const SocketProvider = ({ children }) => {
       setSocket(null);
       setIsConnected(false);
       wasConnectedRef.current = false;
+      // Clear ride tracking socket emitter
+      RideTrackingService.getInstance().setSocketEmitter(null);
     }
   };
 

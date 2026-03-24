@@ -68,11 +68,20 @@ export const rideAPI = {
   getMyRides: (params = {}) => api.get('/rides/driver/my', { params }),
   getAvailableRides: () => api.get('/rides/driver/available'),
   acceptRide: (rideId) => api.patch(`/rides/${rideId}/accept`),
+  declineRide: (rideId) => api.patch(`/rides/${rideId}/decline`),
   notifyArrival: (rideId) => api.patch(`/rides/${rideId}/arrive`),
-  startRide: (rideId) => api.patch(`/rides/${rideId}/start`),
+  // Idempotent ride start — includes idempotency key to handle network retries
+  startRide: (rideId, idempotencyKey) => api.patch(`/rides/${rideId}/start`, {
+    ...(idempotencyKey ? { idempotencyKey } : {}),
+  }),
   completeRide: (rideId, fare) => api.patch(`/rides/${rideId}/complete`, { fare }),
   cancelRide: (rideId, reason) => api.patch(`/rides/${rideId}/cancel`, { reason }),
   getRideById: (rideId) => api.get(`/rides/${rideId}`),
+  // Ride location batch — send buffered route points for ride reconstruction
+  sendLocationBatch: (rideId, points, meta = {}) => api.post(`/rides/${rideId}/locations/batch`, {
+    points,
+    ...meta,
+  }),
 };
 
 export default api;
