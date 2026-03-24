@@ -14,12 +14,14 @@ import {
   Animated,
   PanResponder,
 } from 'react-native';
+import { useKeepAwake } from 'expo-keep-awake';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import MapView from '../components/map/MapViewWrapper';
 import Marker from '../components/map/MarkerWrapper';
+import AnimatedMarker from '../components/map/AnimatedMarkerWrapper';
 import Polyline from '../components/map/PolylineWrapper';
 import { markerImages } from '../components/map/markerImages';
 import { mapStyle } from '../components/map/mapStyle';
@@ -29,17 +31,24 @@ import { useSocket } from '../context/SocketContext';
 import { useAuth } from '../context/AuthContext';
 import { useMap } from '../context/MapContext';
 import { rideAPI } from '../services/api';
-import { getDirections } from '../services/googleMaps';
+import { getNavigationRoute, getManeuverIcon, getManeuverInstruction, formatDistance as formatNavDistance } from '../services/directions';
 import { colors, shadows, radius, spacing, useTypography } from '../theme/colors';
 import { safeFitToCoordinates, safeAnimateToRegion } from '../utils/mapSafety';
+import { haversineM } from '../utils/distance';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+
+// Navigation camera constants
+const NAV_ZOOM = 16.5;
+const NAV_PITCH = 45;
+const NAV_CAMERA_DURATION = 800;
 
 // Bottom sheet snap points
 const COLLAPSED_HEIGHT = 76; // Just enough for the go online button
 const EXPANDED_HEIGHT = SCREEN_HEIGHT * 0.55;
 
 export default function HomeScreen({ navigation }) {
+  useKeepAwake();
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const mapRef = useRef(null);
@@ -56,6 +65,15 @@ export default function HomeScreen({ navigation }) {
   const [accepting, setAccepting] = useState(false);
   const [isExpanded, setIsExpanded] = useState(true);
   const [routePolyline, setRoutePolyline] = useState([]);
+  const [routeInfo, setRouteInfo] = useState(null); // { distance, duration, distanceText, durationText }
+  const [followMode, setFollowMode] = useState(false); // Camera follows driver during nav
+  const [routeSteps, setRouteSteps] = useState([]);
+  const [currentStepIdx, setCurrentStepIdx] = useState(0);
+  const currentStepIdxRef = useRef(0);
+
+  // Full route stored separately — routePolyline is the trimmed (ahead-of-car) version
+  const fullRouteRef = useRef([]);
+  useEffect(() => { currentStepIdxRef.current = currentStepIdx; }, [currentStepIdx]);
 
   // Animated value for bottom sheet position (0 = collapsed, 1 = expanded)
   const sheetAnim = useRef(new Animated.Value(1)).current;
@@ -158,18 +176,44 @@ export default function HomeScreen({ navigation }) {
     if (hasFitted.current) return;
     const coords = [];
     if (location) coords.push({ latitude: location.latitude, longitude: location.longitude });
-    if (activeRide.pickup?.lat) coords.push({ latitude: activeRide.pickup.lat, longitude: activeRide.pickup.lng });
-    if (activeRide.dropoff?.lat) coords.push({ latitude: activeRide.dropoff.lat, longitude: activeRide.dropoff.lng });
-    activeRide.stops?.forEach(s => {
-      if (s.lat) coords.push({ latitude: s.lat, longitude: s.lng });
-    });
+
+    if (isBuiltinMap) {
+      // Built-in nav: fit to car + current target only
+      if (activeRide.status === 'in_progress' && activeRide.dropoff?.lat) {
+        coords.push({ latitude: activeRide.dropoff.lat, longitude: activeRide.dropoff.lng });
+      } else if (activeRide.pickup?.lat) {
+        coords.push({ latitude: activeRide.pickup.lat, longitude: activeRide.pickup.lng });
+      }
+    } else {
+      // External nav: fit to all points
+      if (activeRide.pickup?.lat) coords.push({ latitude: activeRide.pickup.lat, longitude: activeRide.pickup.lng });
+      if (activeRide.dropoff?.lat) coords.push({ latitude: activeRide.dropoff.lat, longitude: activeRide.dropoff.lng });
+      activeRide.stops?.forEach(s => {
+        if (s.lat) coords.push({ latitude: s.lat, longitude: s.lng });
+      });
+    }
+
     if (coords.length >= 2) {
       hasFitted.current = true;
       safeFitToCoordinates(mapRef, coords, {
         edgePadding: { top: 80, right: 40, bottom: 40, left: 40 },
       });
     }
-  }, [activeRide, location]);
+  }, [activeRide?._id, activeRide?.status, location, isBuiltinMap]);
+
+  // Re-fit map when ride status transitions (accepted → in_progress)
+  // so the view switches from car→pickup to car→dropoff
+  const prevStatusRef = useRef(null);
+  useEffect(() => {
+    if (!activeRide || !isBuiltinMap) {
+      prevStatusRef.current = null;
+      return;
+    }
+    if (prevStatusRef.current && prevStatusRef.current !== activeRide.status) {
+      hasFitted.current = false; // Force re-fit on status change
+    }
+    prevStatusRef.current = activeRide.status;
+  }, [activeRide?.status, isBuiltinMap]);
 
   // Fetch route polyline for built-in navigation overlay on HomeScreen
   // Only refetch when ride status/ID changes — not on every GPS tick (directions are cached anyway)
@@ -177,7 +221,12 @@ export default function HomeScreen({ navigation }) {
   useEffect(() => {
     if (!isBuiltinMap || !activeRide || !location) {
       setRoutePolyline([]);
+      setRouteInfo(null);
+      setRouteSteps([]);
+      setCurrentStepIdx(0);
+      fullRouteRef.current = [];
       routeFetchedForRef.current = null;
+      setFollowMode(false);
       return;
     }
     const key = `${activeRide._id}:${activeRide.status}`;
@@ -195,7 +244,7 @@ export default function HomeScreen({ navigation }) {
           target = { latitude: activeRide.dropoff.lat, longitude: activeRide.dropoff.lng };
         }
         if (!target) return;
-        const result = await getDirections(
+        const result = await getNavigationRoute(
           { latitude: location.latitude, longitude: location.longitude },
           target,
         );
@@ -204,7 +253,17 @@ export default function HomeScreen({ navigation }) {
             latitude: Array.isArray(p) ? p[0] : p.latitude,
             longitude: Array.isArray(p) ? p[1] : p.longitude,
           }));
+          fullRouteRef.current = coords;
           setRoutePolyline(coords);
+          setRouteInfo({
+            distance: result.distance,
+            duration: result.duration,
+            distanceText: result.distanceText,
+            durationText: result.durationText,
+          });
+          setRouteSteps(result.steps || []);
+          setCurrentStepIdx(0);
+          setFollowMode(true); // Enter follow mode when route loads
         }
       } catch (e) {
         if (__DEV__) console.warn('[HomeScreen] Failed to fetch route:', e.message);
@@ -212,6 +271,70 @@ export default function HomeScreen({ navigation }) {
     })();
     return () => { mounted = false; };
   }, [isBuiltinMap, activeRide?.status, activeRide?._id, location]);
+
+  // ─── Trim polyline behind car as driver moves ────────────────────────
+  // Find the closest point on the route to the driver, remove everything before it
+  useEffect(() => {
+    if (!location || fullRouteRef.current.length < 2 || !isBuiltinMap || !activeRide) return;
+
+    const route = fullRouteRef.current;
+    const driverLat = location.latitude;
+    const driverLng = location.longitude;
+
+    // Find closest point index on the route
+    let closestIdx = 0;
+    let closestDist = Infinity;
+    for (let i = 0; i < route.length; i++) {
+      const d = haversineM(driverLat, driverLng, route[i].latitude, route[i].longitude);
+      if (d < closestDist) {
+        closestDist = d;
+        closestIdx = i;
+      }
+    }
+
+    // Only trim if driver is within 100m of the route (avoids trimming on deviation)
+    if (closestDist < 100) {
+      // Insert driver's current position as the first point for a smooth line
+      const trimmed = [
+        { latitude: driverLat, longitude: driverLng },
+        ...route.slice(closestIdx + 1),
+      ];
+      setRoutePolyline(trimmed);
+    }
+  }, [location?.latitude, location?.longitude, isBuiltinMap, activeRide]);
+
+  // ─── Step advancement for turn-by-turn instructions ────────────────
+  useEffect(() => {
+    if (!location || routeSteps.length === 0) return;
+    const stepIdx = currentStepIdxRef.current;
+    if (stepIdx < routeSteps.length - 1) {
+      const nextStep = routeSteps[stepIdx + 1];
+      const dist = haversineM(
+        location.latitude, location.longitude,
+        nextStep.maneuver.location[0], nextStep.maneuver.location[1],
+      );
+      if (dist < 30) {
+        setCurrentStepIdx(stepIdx + 1);
+      }
+    }
+  }, [location?.latitude, location?.longitude, routeSteps]);
+
+  // ─── Camera follow mode during active navigation ────────────────────
+  useEffect(() => {
+    if (!followMode || !location || !mapRef.current || !isBuiltinMap || !activeRide) return;
+
+    try {
+      mapRef.current.animateCamera({
+        center: { latitude: location.latitude, longitude: location.longitude },
+        zoom: NAV_ZOOM,
+        pitch: NAV_PITCH,
+        heading: (location.heading != null && isFinite(location.heading) && location.heading >= 0)
+          ? location.heading : 0,
+      }, { duration: NAV_CAMERA_DURATION });
+    } catch {
+      // Fallback — animateCamera not available
+    }
+  }, [location?.latitude, location?.longitude, followMode, isBuiltinMap, activeRide]);
 
   // [H6 FIX] Prevent double-tap race condition with toggling ref
   const togglingRef = useRef(false);
@@ -280,8 +403,11 @@ export default function HomeScreen({ navigation }) {
 
   const handleDeclineRide = () => {
     if (!newRideRequest) return;
+    const rideId = newRideRequest._id;
     setShowRideRequest(false);
     clearRideRequest();
+    // Fire-and-forget: record the decline on the server for accurate stats
+    rideAPI.declineRide(rideId).catch(() => {});
   };
 
   const handleMyLocation = useCallback(() => {
@@ -353,6 +479,17 @@ export default function HomeScreen({ navigation }) {
     },
   ], [stats.last24Hours?.earnings, stats.last24Hours?.trips, stats.total?.earnings, t]);
 
+  // Navigation instruction for turn-by-turn banner
+  const currentNavStep = routeSteps[currentStepIdx] || null;
+  const navStepDistance = useMemo(() => {
+    if (!location || !routeSteps[currentStepIdx + 1]) return null;
+    const nextStep = routeSteps[currentStepIdx + 1];
+    return haversineM(
+      location.latitude, location.longitude,
+      nextStep.maneuver.location[0], nextStep.maneuver.location[1],
+    );
+  }, [location?.latitude, location?.longitude, routeSteps, currentStepIdx]);
+
   return (
     <View style={styles.container}>
       {/* Full-screen Map */}
@@ -365,42 +502,64 @@ export default function HomeScreen({ navigation }) {
         showsMyLocationButton={false}
         showsCompass={false}
         toolbarEnabled={false}
+        onPanDrag={() => { if (followMode) setFollowMode(false); }}
       >
-        {/* Driver location marker */}
+        {/* Driver location marker — rotated with GPS heading */}
+        {/* iOS: AnimatedMarker required — Apple Maps ignores coordinate updates on static Marker with tracksViewChanges=false */}
+        {/* Android: static Marker works fine with tracksViewChanges=false on Google Maps */}
         {location && (
-          <Marker
-            coordinate={{ latitude: location.latitude, longitude: location.longitude }}
-            image={activeRide ? markerImages.carAssigned : markerImages.car}
-            tracksViewChanges={false}
-            anchor={{ x: 0.5, y: 0.5 }}
-          />
+          Platform.OS === 'ios' ? (
+            <AnimatedMarker
+              coordinate={{ latitude: location.latitude, longitude: location.longitude }}
+              image={activeRide ? markerImages.carAssigned : markerImages.car}
+              flat={true}
+              rotation={location.heading != null && isFinite(location.heading) && location.heading >= 0 ? location.heading : 0}
+              tracksViewChanges={false}
+              anchor={{ x: 0.5, y: 0.5 }}
+            />
+          ) : (
+            <Marker
+              coordinate={{ latitude: location.latitude, longitude: location.longitude }}
+              image={activeRide ? markerImages.carAssigned : markerImages.car}
+              flat={true}
+              rotation={location.heading != null && isFinite(location.heading) && location.heading >= 0 ? location.heading : 0}
+              tracksViewChanges={false}
+              anchor={{ x: 0.5, y: 0.5 }}
+            />
+          )
         )}
-        {/* Active ride markers */}
-        {activeRide?.pickup?.lat && (
+        {/* Active ride markers:
+             Built-in nav: accepted/driver_arrived → pickup only, in_progress → dropoff only
+             External nav: show all markers always */}
+        {activeRide?.pickup?.lat &&
+          (!isBuiltinMap || activeRide.status === 'accepted' || activeRide.status === 'driver_arrived') ? (
           <Marker
             coordinate={{ latitude: activeRide.pickup.lat, longitude: activeRide.pickup.lng }}
             image={markerImages.pickup}
             tracksViewChanges={false}
             anchor={{ x: 0.5, y: 1 }}
           />
-        )}
-        {activeRide?.stops?.map((stop, i) => stop.lat && (
-          <Marker
-            key={`stop-${i}`}
-            coordinate={{ latitude: stop.lat, longitude: stop.lng }}
-            image={markerImages.stopSmall[Math.min(i + 1, 9)]}
-            tracksViewChanges={false}
-            anchor={{ x: 0.5, y: 1 }}
-          />
-        ))}
-        {activeRide?.dropoff?.lat && (
+        ) : null}
+        {(!isBuiltinMap || activeRide?.status !== 'in_progress') ? (
+          activeRide?.stops?.map((stop, i) => stop.lat ? (
+            <Marker
+              key={`stop-${i}`}
+              coordinate={{ latitude: stop.lat, longitude: stop.lng }}
+              image={markerImages.stopSmall[Math.min(i + 1, 9)]}
+              tracksViewChanges={false}
+              anchor={{ x: 0.5, y: 1 }}
+            />
+          ) : null)
+        ) : null}
+        {activeRide?.dropoff?.lat &&
+          (!isBuiltinMap || activeRide.status === 'in_progress') ? (
           <Marker
             coordinate={{ latitude: activeRide.dropoff.lat, longitude: activeRide.dropoff.lng }}
             image={markerImages.dropoff}
             tracksViewChanges={false}
             anchor={{ x: 0.5, y: 1 }}
           />
-        )}
+        ) : null}
         {/* Route polyline for built-in navigation */}
         {routePolyline.length > 1 && (
           <Polyline
@@ -457,26 +616,63 @@ export default function HomeScreen({ navigation }) {
         )}
       </View>
 
-      {/* Active ride banner — built-in navigation: tap to view ride details */}
+      {/* Active ride banner — navigation instructions + destination + ETA */}
       {isBuiltinMap && activeRide && (
         <TouchableOpacity
           style={[styles.rideDetailBanner, { top: insets.top + 80 }]}
           onPress={() => navigation.navigate('RideDetail', { rideId: activeRide._id })}
           activeOpacity={0.85}
         >
+          {/* Turn-by-turn instruction row */}
+          {currentNavStep && (
+            <View style={styles.navInstructionRow}>
+              <View style={styles.navManeuverIcon}>
+                <Ionicons
+                  name={getManeuverIcon(currentNavStep.maneuver.type, currentNavStep.maneuver.modifier)}
+                  size={22}
+                  color={colors.primaryForeground}
+                />
+              </View>
+              <Text style={styles.navInstructionText} numberOfLines={1} ellipsizeMode="tail">
+                {getManeuverInstruction(currentNavStep, t)}
+              </Text>
+              {navStepDistance !== null && (
+                <Text style={styles.navStepDistance}>{formatNavDistance(navStepDistance)}</Text>
+              )}
+            </View>
+          )}
+          {/* Destination + ETA row */}
           <View style={styles.rideDetailBannerContent}>
             <Ionicons
-              name={activeRide.status === 'in_progress' ? 'car' : 'navigate'}
+              name={activeRide.status === 'in_progress' ? 'flag' : 'navigate'}
               size={20}
               color={colors.primaryForeground}
             />
-            <Text style={styles.rideDetailBannerText} numberOfLines={1}>
-              {activeRide.status === 'in_progress'
-                ? (activeRide.dropoff?.address || t('rides.dropoff'))
-                : (activeRide.pickup?.address || t('rides.pickup'))}
-            </Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rideDetailBannerText} numberOfLines={1}>
+                {activeRide.status === 'in_progress'
+                  ? (activeRide.dropoff?.address || t('rides.dropoff'))
+                  : (activeRide.pickup?.address || t('rides.pickup'))}
+              </Text>
+              {routeInfo && (
+                <Text style={styles.rideDetailBannerEta} numberOfLines={1}>
+                  {routeInfo.distanceText} · {routeInfo.durationText}
+                </Text>
+              )}
+            </View>
             <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.7)" />
           </View>
+        </TouchableOpacity>
+      )}
+
+      {/* Recenter button — appears when user pans away during follow mode */}
+      {isBuiltinMap && activeRide && !followMode && (
+        <TouchableOpacity
+          style={[styles.recenterFab, { top: insets.top + (currentNavStep ? 195 : routeInfo ? 145 : 125) }]}
+          onPress={() => setFollowMode(true)}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="compass" size={22} color={colors.primary} />
         </TouchableOpacity>
       )}
 
@@ -888,22 +1084,67 @@ const createStyles = (typography) => StyleSheet.create({
     left: spacing.lg,
     right: spacing.lg,
     zIndex: 10,
+    backgroundColor: colors.primary,
+    borderRadius: radius.lg,
+    overflow: 'hidden',
+    ...shadows.md,
+  },
+  navInstructionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    gap: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.15)',
+  },
+  navManeuverIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.md,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  navInstructionText: {
+    ...typography.bodySmall,
+    fontWeight: '700',
+    color: colors.primaryForeground,
+    flex: 1,
+  },
+  navStepDistance: {
+    ...typography.bodySmall,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.8)',
   },
   rideDetailBannerContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.primary,
-    borderRadius: radius.lg,
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.lg,
     gap: spacing.sm,
-    ...shadows.md,
   },
   rideDetailBannerText: {
     ...typography.bodySmall,
     fontWeight: '600',
     color: colors.primaryForeground,
-    flex: 1,
+  },
+  rideDetailBannerEta: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.8)',
+    marginTop: 2,
+  },
+  recenterFab: {
+    position: 'absolute',
+    right: spacing.lg,
+    zIndex: 10,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...shadows.md,
   },
 
   // My Location FAB

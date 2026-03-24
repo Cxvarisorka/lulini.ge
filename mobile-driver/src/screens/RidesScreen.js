@@ -26,14 +26,16 @@ import { colors, shadows, radius, spacing, useTypography } from '../theme/colors
 export default function RidesScreen({ navigation }) {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
-  const { activeRides, addActiveRide, loadAllRides, loadMoreRides, hasMoreRides } = useDriver();
-  const { newRideRequest, clearRideRequest } = useSocket();
+  const { isOnline, activeRides, addActiveRide, loadAllRides, loadMoreRides, hasMoreRides } = useDriver();
+  const { socket, newRideRequest, clearRideRequest } = useSocket();
   const typography = useTypography();
   const styles = useMemo(() => createStyles(typography), [typography]);
   const [refreshing, setRefreshing] = useState(false);
   const [accepting, setAccepting] = useState(false);
+  const [acceptingRideId, setAcceptingRideId] = useState(null);
   const [selectedFilter, setSelectedFilter] = useState('active');
   const [allRides, setAllRides] = useState([]);
+  const [incomingRides, setIncomingRides] = useState([]);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
 
@@ -53,6 +55,55 @@ export default function RidesScreen({ navigation }) {
     if (sortBy !== 'newest') count++;
     return count;
   }, [minPrice, maxPrice, dateRange, sortBy]);
+
+  // Fetch incoming (available) rides from server
+  const loadIncomingRides = useCallback(async () => {
+    if (!isOnline) {
+      setIncomingRides([]);
+      return;
+    }
+    try {
+      const response = await rideAPI.getAvailableRides();
+      if (response.data.success) {
+        setIncomingRides(response.data.data.rides || []);
+      }
+    } catch (error) {
+      if (__DEV__) console.warn('[RidesScreen] Failed to load incoming rides:', error.message);
+    }
+  }, [isOnline]);
+
+  // Refresh incoming rides when socket events fire
+  useEffect(() => {
+    if (!socket || selectedFilter !== 'incoming') return;
+
+    const refreshIncoming = () => loadIncomingRides();
+
+    socket.on('ride:request', refreshIncoming);
+    socket.on('ride:unavailable', refreshIncoming);
+    socket.on('ride:cancelled', refreshIncoming);
+    socket.on('ride:expired', refreshIncoming);
+
+    return () => {
+      socket.off('ride:request', refreshIncoming);
+      socket.off('ride:unavailable', refreshIncoming);
+      socket.off('ride:cancelled', refreshIncoming);
+      socket.off('ride:expired', refreshIncoming);
+    };
+  }, [socket, selectedFilter, loadIncomingRides]);
+
+  // Load incoming rides when tab is selected or driver goes online
+  // Also load on mount to show badge count
+  useEffect(() => {
+    if (isOnline) {
+      loadIncomingRides();
+    }
+  }, [isOnline, loadIncomingRides]);
+
+  useEffect(() => {
+    if (selectedFilter === 'incoming') {
+      loadIncomingRides();
+    }
+  }, [selectedFilter, loadIncomingRides]);
 
   const loadRides = useCallback(async (forceRefresh = false) => {
     setLoading(true);
@@ -87,18 +138,23 @@ export default function RidesScreen({ navigation }) {
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
       loadRides();
+      if (isOnline) loadIncomingRides();
     });
     return unsubscribe;
-  }, [navigation, loadRides]);
+  }, [navigation, loadRides, isOnline, loadIncomingRides]);
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadRides(true);
+    if (selectedFilter === 'incoming') {
+      await loadIncomingRides();
+    } else {
+      await loadRides(true);
+    }
     setRefreshing(false);
   };
 
   const handleLoadMore = useCallback(async () => {
-    if (loadingMore || selectedFilter === 'active' || !hasMoreRides) return;
+    if (loadingMore || selectedFilter === 'active' || selectedFilter === 'incoming' || !hasMoreRides) return;
     setLoadingMore(true);
     try {
       const { rides: newRides } = await loadMoreRides();
@@ -156,6 +212,37 @@ export default function RidesScreen({ navigation }) {
       setAccepting(false);
     }
   };
+
+  const handleAcceptIncomingRide = useCallback(async (ride) => {
+    setAcceptingRideId(ride._id);
+    try {
+      const response = await rideAPI.acceptRide(ride._id);
+      if (response.data.success) {
+        const acceptedRide = response.data.data.ride;
+        addActiveRide(acceptedRide);
+        // Remove from incoming list
+        setIncomingRides(prev => prev.filter(r => r._id !== ride._id));
+        // Clear modal if it was showing this ride
+        if (newRideRequest?._id === ride._id) {
+          clearRideRequest();
+        }
+        Alert.alert(
+          t('rides.rideAccepted'),
+          t('rides.navigateToRide'),
+          [{ text: t('common.ok'), onPress: () => navigation.navigate('RideDetail', { rideId: ride._id }) }]
+        );
+      } else {
+        Alert.alert(t('common.error'), t('errors.tryAgain'));
+      }
+    } catch (error) {
+      const msg = error.response?.data?.message || t('rides.rideAlreadyTaken');
+      Alert.alert(t('common.error'), msg);
+      // Refresh list - ride may have been taken
+      loadIncomingRides();
+    } finally {
+      setAcceptingRideId(null);
+    }
+  }, [addActiveRide, clearRideRequest, loadIncomingRides, navigation, newRideRequest, t]);
 
   const handleDeclineRide = () => {
     clearRideRequest();
@@ -217,6 +304,90 @@ export default function RidesScreen({ navigation }) {
       </View>
     </TouchableOpacity>
   ), [styles, navigation, t]);
+
+  const renderIncomingRideItem = useCallback(({ item }) => (
+    <View style={styles.rideCard}>
+      <View style={styles.rideHeader}>
+        <View style={[styles.statusBadge, { backgroundColor: `${colors.status.pending}15` }]}>
+          <View style={[styles.statusDot, { backgroundColor: colors.status.pending }]} />
+          <Text style={[styles.statusText, { color: colors.status.pending }]} numberOfLines={1}>
+            {t('rides.pending')}
+          </Text>
+        </View>
+        <Text style={styles.fareText}>{item.quote?.totalPrice?.toFixed(2)} ₾</Text>
+      </View>
+
+      <View style={styles.locationContainer}>
+        <View style={styles.locationRow}>
+          <View style={[styles.locationDot, { backgroundColor: colors.success }]} />
+          <Text style={styles.locationText} numberOfLines={1}>
+            {item.pickup?.address}
+          </Text>
+        </View>
+
+        {item.stops?.length > 0 && item.stops.map((stop, index) => (
+          <React.Fragment key={`stop-${index}`}>
+            <View style={styles.locationLine} />
+            <View style={styles.locationRow}>
+              <View style={[styles.locationDot, { backgroundColor: colors.stop }]} />
+              <Text style={styles.locationText} numberOfLines={1}>
+                {stop.address}
+              </Text>
+            </View>
+          </React.Fragment>
+        ))}
+
+        <View style={styles.locationLine} />
+
+        <View style={styles.locationRow}>
+          <View style={[styles.locationDot, { backgroundColor: colors.destructive }]} />
+          <Text style={styles.locationText} numberOfLines={1}>
+            {item.dropoff?.address}
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.incomingRideDetails}>
+        <View style={styles.incomingDetailChip}>
+          <Ionicons name="navigate-outline" size={14} color={colors.mutedForeground} />
+          <Text style={styles.rideMetaText}>{item.quote?.distanceText}</Text>
+        </View>
+        <View style={styles.incomingDetailChip}>
+          <Ionicons name="time-outline" size={14} color={colors.mutedForeground} />
+          <Text style={styles.rideMetaText}>{item.quote?.durationText}</Text>
+        </View>
+        {item.vehicleType && (
+          <View style={styles.incomingDetailChip}>
+            <Ionicons name="car-outline" size={14} color={colors.mutedForeground} />
+            <Text style={styles.rideMetaText}>{t(`rides.${item.vehicleType}`)}</Text>
+          </View>
+        )}
+      </View>
+
+      {item.driverEarnings != null && (
+        <View style={styles.earningsRow}>
+          <Text style={styles.earningsLabel}>{t('rides.yourEarnings')}</Text>
+          <Text style={styles.earningsValue}>{item.driverEarnings.toFixed(2)} ₾</Text>
+        </View>
+      )}
+
+      <TouchableOpacity
+        style={[styles.acceptIncomingButton, acceptingRideId === item._id && styles.acceptButtonDisabled]}
+        onPress={() => handleAcceptIncomingRide(item)}
+        disabled={acceptingRideId === item._id}
+        activeOpacity={0.7}
+      >
+        {acceptingRideId === item._id ? (
+          <ActivityIndicator color={colors.primaryForeground} size="small" />
+        ) : (
+          <>
+            <Ionicons name="checkmark-circle" size={20} color={colors.primaryForeground} />
+            <Text style={styles.acceptIncomingText}>{t('rides.acceptRide')}</Text>
+          </>
+        )}
+      </TouchableOpacity>
+    </View>
+  ), [styles, t, acceptingRideId, handleAcceptIncomingRide]);
 
   const applyAdvancedFilters = useCallback((rides) => {
     let filtered = [...rides];
@@ -284,6 +455,7 @@ export default function RidesScreen({ navigation }) {
   };
 
   const filters = [
+    { key: 'incoming', label: t('rides.incomingTab'), icon: 'radio', badge: incomingRides.length || null },
     { key: 'active', label: t('rides.activeTab'), icon: 'flash' },
     { key: 'all', label: t('rides.allTab'), icon: 'list' },
     { key: 'completed', label: t('rides.completedTab'), icon: 'checkmark-circle' },
@@ -338,6 +510,17 @@ export default function RidesScreen({ navigation }) {
               >
                 {filter.label}
               </Text>
+              {filter.badge > 0 && (
+                <View style={[
+                  styles.tabBadge,
+                  selectedFilter === filter.key && styles.tabBadgeActive,
+                ]}>
+                  <Text style={[
+                    styles.tabBadgeText,
+                    selectedFilter === filter.key && styles.tabBadgeTextActive,
+                  ]}>{filter.badge > 9 ? '9+' : filter.badge}</Text>
+                </View>
+              )}
             </TouchableOpacity>
           ))}
         </ScrollView>
@@ -345,43 +528,77 @@ export default function RidesScreen({ navigation }) {
 
       {/* Content */}
       <View style={styles.content}>
-        {ridesToDisplay.length === 0 && !loading ? (
-          <View style={styles.emptyContainer}>
-            <View style={styles.emptyIcon}>
-              <Ionicons name="car-outline" size={48} color={colors.mutedForeground} />
-            </View>
-            <Text style={styles.emptyTitle} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.8}>
-              {selectedFilter === 'active' ? t('home.noActiveRides') : t('rides.noRidesFound')}
-            </Text>
-            <Text style={styles.emptySubtitle} numberOfLines={2}>
-              {selectedFilter === 'active'
-                ? t('home.waitingForRides') || 'Waiting for ride requests'
-                : t('rides.tryDifferentFilter') || 'Try a different filter'}
-            </Text>
-          </View>
-        ) : (
-          <FlatList
-            data={ridesToDisplay}
-            renderItem={renderRideItem}
-            keyExtractor={(item) => item._id}
-            contentContainerStyle={styles.list}
-            ListFooterComponent={loadingMore ? (
-              <View style={styles.footerLoader}>
-                <ActivityIndicator size="small" color={colors.primary} />
+        {selectedFilter === 'incoming' ? (
+          // Incoming rides tab
+          incomingRides.length === 0 && !loading ? (
+            <View style={styles.emptyContainer}>
+              <View style={styles.emptyIcon}>
+                <Ionicons name={isOnline ? 'radio-outline' : 'cloud-offline-outline'} size={48} color={colors.mutedForeground} />
               </View>
-            ) : null}
-            onEndReached={handleLoadMore}
-            onEndReachedThreshold={0.3}
-            refreshControl={
-              <RefreshControl
-                refreshing={refreshing}
-                onRefresh={onRefresh}
-                colors={[colors.primary]}
-                tintColor={colors.primary}
-              />
-            }
-            showsVerticalScrollIndicator={false}
-          />
+              <Text style={styles.emptyTitle} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.8}>
+                {t('rides.noIncomingRides')}
+              </Text>
+              <Text style={styles.emptySubtitle} numberOfLines={2}>
+                {isOnline ? t('rides.waitingForRequests') : t('rides.goOnlineToSeeRides')}
+              </Text>
+            </View>
+          ) : (
+            <FlatList
+              data={incomingRides}
+              renderItem={renderIncomingRideItem}
+              keyExtractor={(item) => item._id}
+              contentContainerStyle={styles.list}
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={onRefresh}
+                  colors={[colors.primary]}
+                  tintColor={colors.primary}
+                />
+              }
+              showsVerticalScrollIndicator={false}
+            />
+          )
+        ) : (
+          // Other tabs (active, all, completed, cancelled)
+          ridesToDisplay.length === 0 && !loading ? (
+            <View style={styles.emptyContainer}>
+              <View style={styles.emptyIcon}>
+                <Ionicons name="car-outline" size={48} color={colors.mutedForeground} />
+              </View>
+              <Text style={styles.emptyTitle} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.8}>
+                {selectedFilter === 'active' ? t('home.noActiveRides') : t('rides.noRidesFound')}
+              </Text>
+              <Text style={styles.emptySubtitle} numberOfLines={2}>
+                {selectedFilter === 'active'
+                  ? t('home.waitingForRides') || 'Waiting for ride requests'
+                  : t('rides.tryDifferentFilter') || 'Try a different filter'}
+              </Text>
+            </View>
+          ) : (
+            <FlatList
+              data={ridesToDisplay}
+              renderItem={renderRideItem}
+              keyExtractor={(item) => item._id}
+              contentContainerStyle={styles.list}
+              ListFooterComponent={loadingMore ? (
+                <View style={styles.footerLoader}>
+                  <ActivityIndicator size="small" color={colors.primary} />
+                </View>
+              ) : null}
+              onEndReached={handleLoadMore}
+              onEndReachedThreshold={0.3}
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={onRefresh}
+                  colors={[colors.primary]}
+                  tintColor={colors.primary}
+                />
+              }
+              showsVerticalScrollIndicator={false}
+            />
+          )
         )}
 
         {loading && (
@@ -791,6 +1008,76 @@ const createStyles = (typography) => StyleSheet.create({
   rideMetaText: {
     ...typography.captionSmall,
     color: colors.mutedForeground,
+  },
+  tabBadge: {
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    marginLeft: 2,
+  },
+  tabBadgeActive: {
+    backgroundColor: colors.primaryForeground,
+  },
+  tabBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.primaryForeground,
+  },
+  tabBadgeTextActive: {
+    color: colors.primary,
+  },
+  incomingRideDetails: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  incomingDetailChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: colors.muted,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.full,
+  },
+  earningsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    backgroundColor: `${colors.success}10`,
+    borderRadius: radius.md,
+    marginBottom: spacing.md,
+  },
+  earningsLabel: {
+    ...typography.captionSmall,
+    color: colors.mutedForeground,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  earningsValue: {
+    ...typography.bodyMedium,
+    fontWeight: '700',
+    color: colors.success,
+  },
+  acceptIncomingButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.md,
+    borderRadius: radius.lg,
+    backgroundColor: colors.success,
+    gap: spacing.sm,
+  },
+  acceptIncomingText: {
+    ...typography.button,
+    color: colors.primaryForeground,
   },
   footerLoader: {
     paddingVertical: spacing.lg,

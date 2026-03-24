@@ -302,6 +302,7 @@ export default function RideDetailScreen({ navigation, route }) {
       navigation.navigate('Navigation', {
         destination: { latitude: lat, longitude: lng, address },
         origin: location ? { latitude: location.latitude, longitude: location.longitude } : null,
+        ride,
       });
     } else {
       navigateTo(lat, lng, address, t);
