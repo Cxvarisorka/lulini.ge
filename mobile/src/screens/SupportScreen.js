@@ -11,6 +11,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
+import { showCrisp } from '../services/crisp';
 import { colors, shadows, radius, spacing, useTypography } from '../theme/colors';
 
 export default function SupportScreen({ navigation }) {
@@ -64,9 +65,9 @@ const typography = useTypography();
     {
       icon: 'chatbubble',
       label: t('support.liveChat'),
-      subtitle: t('common.comingSoon', { defaultValue: 'Coming Soon' }),
+      subtitle: t('support.chatWithUs', { defaultValue: 'Chat with us' }),
       color: colors.info,
-      onPress: () => Alert.alert(t('common.comingSoon', { defaultValue: 'Coming Soon' }), t('common.comingSoonDesc', { defaultValue: 'This feature is not available yet.' })),
+      onPress: () => showCrisp(),
     },
     {
       icon: 'mail',
@@ -145,7 +146,7 @@ const typography = useTypography();
           <Text style={styles.sectionTitle}>{t('support.reportIssue')}</Text>
           <TouchableOpacity
             style={styles.reportCard}
-            onPress={() => Alert.alert(t('support.reportIssue'), t('support.reportDescription'))}
+            onPress={() => showCrisp()}
           >
             <View style={styles.reportContent}>
               <Ionicons name="warning" size={28} color={colors.warning} />

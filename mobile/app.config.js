@@ -17,7 +17,6 @@ export default {
     ios: {
       supportsTablet: true,
       bundleIdentifier: "com.lulini.mobile",
-      buildNumber: "4",
       usesAppleSignIn: true,
       config: {
         googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY || ""
@@ -28,7 +27,6 @@ export default {
       }
     },
     android: {
-      versionCode: 3,
       adaptiveIcon: {
         foregroundImage: "./assets/adaptive-icon.png",
         backgroundColor: "#000000"
@@ -56,6 +54,10 @@ export default {
       favicon: "./assets/favicon.png"
     },
     plugins: [
+      ["react-native-crisp-chat-sdk", {
+        websiteId: "452c4830-69b7-4085-b0f4-45f84b7eafca",
+      }],
+      "expo-font",
       "expo-secure-store",
       [
         "expo-location",

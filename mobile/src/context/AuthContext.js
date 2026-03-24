@@ -7,6 +7,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import { authAPI, setOnUnauthorized } from '../services/api';
 import { GOOGLE_CONFIG } from '../config/google.config';
+import { setUserInfo as setCrispUser, resetCrispSession } from '../services/crisp';
 import { registerForPushNotifications, unregisterPushToken } from '../services/pushNotifications';
 import { clearAllCaches } from '../services/googleMaps';
 import i18n from '../i18n';
@@ -112,10 +113,17 @@ export const AuthProvider = ({ children }) => {
     return () => { isCancelled = true; };
   }, []);
 
-  // Register push token when user authenticates
+  // Register push token and sync Crisp user info when user authenticates
   useEffect(() => {
     if (user) {
       registerForPushNotifications(i18n.language).catch(() => {});
+      // Sync user info to Crisp live chat (no-op in Expo Go)
+      setCrispUser({
+        id: user._id || user.id,
+        name: [user.firstName, user.lastName].filter(Boolean).join(' '),
+        email: user.email,
+        phone: user.phone,
+      });
     }
   }, [user]);
 
@@ -337,6 +345,8 @@ export const AuthProvider = ({ children }) => {
       await AsyncStorage.removeItem('@rides_cache').catch(() => {});
       // L12: Clear map caches on logout
       clearAllCaches();
+      // Reset Crisp chat session so next user gets fresh chat (no-op in Expo Go)
+      resetCrispSession();
       setUser(null);
     }
   }, []);

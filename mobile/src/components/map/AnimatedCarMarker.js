@@ -84,6 +84,7 @@ const AnimatedCarMarker = memo(
   ({ coordinate, isAssigned = false }) => {
     const lat = coordinate?.latitude;
     const lng = coordinate?.longitude;
+    const serverHeading = coordinate?.heading; // from server GPS data
     const isValid = isFinite(lat) && isFinite(lng);
 
     const markerRef = useRef(null);
@@ -135,15 +136,22 @@ const AnimatedCarMarker = memo(
         }
       }
 
+      // Use GPS-derived bearing for significant movement, fall back to server heading
+      let newBearing = null;
       if (distKm >= MIN_HEADING_KM) {
-        const newBearing = calcBearing(prev, { latitude: lat, longitude: lng });
+        newBearing = calcBearing(prev, { latitude: lat, longitude: lng });
+      } else if (serverHeading != null && isFinite(serverHeading) && serverHeading >= 0) {
+        // Server GPS heading available — use it for short movements
+        newBearing = serverHeading;
+      }
+
+      if (newBearing !== null) {
         const smoothTarget = shortestRotation(headingTarget.current, newBearing);
         headingTarget.current = smoothTarget;
 
         if (isIOS) {
           setIosRotation(smoothTarget);
         } else {
-          // Animate rotation smoothly on Android/Google Maps
           androidRotationValue.current = smoothTarget;
           Animated.timing(androidRotation, {
             toValue: smoothTarget,
@@ -191,6 +199,7 @@ const AnimatedCarMarker = memo(
   (prev, next) =>
     prev.coordinate?.latitude === next.coordinate?.latitude &&
     prev.coordinate?.longitude === next.coordinate?.longitude &&
+    prev.coordinate?.heading === next.coordinate?.heading &&
     prev.isAssigned === next.isAssigned
 );
 

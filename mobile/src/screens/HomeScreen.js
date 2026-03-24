@@ -9,6 +9,7 @@ import {
   Animated,
   Easing,
   Alert,
+  Linking,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -275,27 +276,13 @@ export default function HomeScreen({ navigation }) {
           </View>
         </View>
 
-        {/* Kutaisi City Image */}
-        <View style={styles.section}>
-          <AnimatedCard delay={350}>
-            <View style={styles.cityImageCard}>
-              <Image
-                source={require('../../assets/beka-kutaisi-5740980_1920.jpg')}
-                style={styles.cityImage}
-                resizeMode="cover"
-              />
-              <View style={styles.cityImageOverlay}>
-                <Ionicons name="location" size={16} color="#fff" />
-                <Text style={styles.cityImageText}>Kutaisi, Georgia</Text>
-              </View>
-            </View>
-          </AnimatedCard>
-        </View>
 
-        {/* Support Card with 3D Effect */}
-        <View>
+        {/* Help Center */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle} numberOfLines={1}>{t('drawer.helpCenter')}</Text>
+
           <AnimatedCard
-            delay={450}
+            delay={350}
             onPress={() => navigation.navigate('Support')}
           >
             <View style={styles.supportCard}>
@@ -307,6 +294,43 @@ export default function HomeScreen({ navigation }) {
                 <Text style={styles.supportSubtitle} numberOfLines={1}>{t('support.available247')}</Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color={colors.mutedForeground} />
+            </View>
+          </AnimatedCard>
+        </View>
+
+        {/* Follow Us */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle} numberOfLines={1}>{t('home.followUs')}</Text>
+
+          <AnimatedCard
+            delay={400}
+            onPress={() => Linking.openURL('https://www.facebook.com/profile.php?id=61577178682828')}
+          >
+            <View style={styles.socialLinkCard}>
+              <View style={[styles.socialLinkIcon, { backgroundColor: '#1877F220' }]}>
+                <Ionicons name="logo-facebook" size={22} color="#1877F2" />
+              </View>
+              <View style={styles.supportContent}>
+                <Text style={styles.supportTitle} numberOfLines={1}>Facebook</Text>
+                <Text style={styles.supportSubtitle} numberOfLines={1}>Lulini Taxi</Text>
+              </View>
+              <Ionicons name="open-outline" size={18} color={colors.mutedForeground} />
+            </View>
+          </AnimatedCard>
+
+          <AnimatedCard
+            delay={450}
+            onPress={() => Linking.openURL('https://www.instagram.com/lulinitaxi/')}
+          >
+            <View style={styles.socialLinkCard}>
+              <View style={[styles.socialLinkIcon, { backgroundColor: '#E440A220' }]}>
+                <Ionicons name="logo-instagram" size={22} color="#E4405F" />
+              </View>
+              <View style={styles.supportContent}>
+                <Text style={styles.supportTitle} numberOfLines={1}>Instagram</Text>
+                <Text style={styles.supportSubtitle} numberOfLines={1}>@lulinitaxi</Text>
+              </View>
+              <Ionicons name="open-outline" size={18} color={colors.mutedForeground} />
             </View>
           </AnimatedCard>
         </View>
@@ -488,33 +512,6 @@ const createStyles = (typography) => StyleSheet.create({
     color: colors.foreground,
     textAlign: 'center',
   },
-  cityImageCard: {
-    borderRadius: radius.lg,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  cityImage: {
-    width: '100%',
-    height: 160,
-  },
-  cityImageOverlay: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-  },
-  cityImageText: {
-    ...typography.bodySmall,
-    fontWeight: '600',
-    color: '#fff',
-    marginLeft: 6,
-  },
   supportCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -523,6 +520,25 @@ const createStyles = (typography) => StyleSheet.create({
     padding: spacing.lg,
     borderWidth: 1,
     borderColor: colors.border,
+    marginBottom: spacing.sm,
+  },
+  socialLinkCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.background,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: spacing.sm,
+  },
+  socialLinkIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.full,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: spacing.md,
   },
   supportIcon: {
     width: 40,

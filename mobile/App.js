@@ -8,6 +8,7 @@ import * as Notifications from 'expo-notifications';
 import * as Updates from 'expo-updates';
 import * as Sentry from '@sentry/react-native';
 
+
 // Initialize Sentry — wrapped in try-catch because the native module may not
 // be linked yet (stale prebuild, Expo Go, or first build after adding Sentry).
 try {
@@ -96,6 +97,7 @@ function App() {
               <AuthProvider>
                 <NetworkProvider>
                 <SocketProvider>
+
                   <ConnectionStatusBar />
                   <StatusBar style="dark" />
                   <AppNavigator />
