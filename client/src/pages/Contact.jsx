@@ -48,8 +48,8 @@ export function Contact() {
     {
       icon: Phone,
       title: t('contactPage.info.phone'),
-      value: '+1 (234) 567-890',
-      link: 'tel:+1234567890'
+      value: '322 11 88 11',
+      link: 'tel:322118811'
     },
     {
       icon: MapPin,

@@ -425,7 +425,7 @@ export function Home() {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl mx-auto">
             {[
-              { icon: Phone, key: 'call', link: 'tel:+995322112424' },
+              { icon: Phone, key: 'call', link: 'tel:322118811' },
               { icon: Smartphone, key: 'email', link: 'mailto:info@lulini.ge' },
               { icon: Headphones, key: 'app' }
             ].map(({ icon: Icon, key, link }, index) => (

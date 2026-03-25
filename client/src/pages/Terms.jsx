@@ -70,7 +70,7 @@ export function Terms() {
             <p>These Terms are governed by the laws of Georgia. Any disputes shall be resolved in the courts of Tbilisi, Georgia.</p>
 
             <h2 className="text-xl font-semibold mt-8">14. Contact Us</h2>
-            <p>If you have questions about these Terms, contact us at <a href="mailto:support@lulini.ge" className="text-purple-600 hover:underline">support@lulini.ge</a>.</p>
+            <p>If you have questions about these Terms, contact us at <a href="mailto:info@lulini.ge" className="text-purple-600 hover:underline">info@lulini.ge</a>.</p>
           </div>
         </div>
       </main>

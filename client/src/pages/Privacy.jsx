@@ -52,7 +52,7 @@ export function Privacy() {
             <p>We retain your account and ride data for as long as your account is active. You may request deletion of your account and associated data by contacting us.</p>
 
             <h2 className="text-xl font-semibold mt-8">7. Your Rights</h2>
-            <p>You have the right to access, correct, or delete your personal data. You can manage location permissions through your device settings. To exercise these rights, contact us at <a href="mailto:support@lulini.ge" className="text-purple-600 hover:underline">support@lulini.ge</a>.</p>
+            <p>You have the right to access, correct, or delete your personal data. You can manage location permissions through your device settings. To exercise these rights, contact us at <a href="mailto:info@lulini.ge" className="text-purple-600 hover:underline">info@lulini.ge</a>.</p>
 
             <h2 className="text-xl font-semibold mt-8">8. Children's Privacy</h2>
             <p>Our services are not directed to children under 18. We do not knowingly collect personal information from children.</p>
@@ -61,7 +61,7 @@ export function Privacy() {
             <p>We may update this Privacy Policy from time to time. We will notify you of significant changes through the app or by email.</p>
 
             <h2 className="text-xl font-semibold mt-8">10. Contact Us</h2>
-            <p>If you have questions about this Privacy Policy, contact us at <a href="mailto:support@lulini.ge" className="text-purple-600 hover:underline">support@lulini.ge</a>.</p>
+            <p>If you have questions about this Privacy Policy, contact us at <a href="mailto:info@lulini.ge" className="text-purple-600 hover:underline">info@lulini.ge</a>.</p>
           </div>
         </div>
       </main>

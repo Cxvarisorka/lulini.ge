@@ -58,9 +58,9 @@ const typography = useTypography();
     {
       icon: 'call',
       label: t('support.callUs'),
-      subtitle: '+995 555 123 456',
+      subtitle: '322 11 88 11',
       color: colors.success,
-      onPress: () => safeLinkOpen('tel:+995555123456'),
+      onPress: () => safeLinkOpen('tel:322118811'),
     },
     {
       icon: 'chatbubble',
@@ -72,9 +72,9 @@ const typography = useTypography();
     {
       icon: 'mail',
       label: t('support.emailUs'),
-      subtitle: 'support@lulini.ge',
+      subtitle: 'info@lulini.ge',
       color: colors.warning,
-      onPress: () => safeLinkOpen('mailto:support@lulini.ge'),
+      onPress: () => safeLinkOpen('mailto:info@lulini.ge'),
     },
   ];
 
