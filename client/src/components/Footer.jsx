@@ -26,7 +26,7 @@ export function Footer() {
   return (
     <footer className="bg-purple-gradient-dark text-white">
       <div className="container mx-auto px-4 py-12">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-8">
           {/* Brand */}
           <div className="space-y-4 md:col-span-1">
             <Link to="/" className="inline-block">
@@ -71,14 +71,31 @@ export function Footer() {
             </ul>
           </div>
 
+          {/* Support */}
+          <div className="space-y-4">
+            <h4 className="font-semibold text-sm uppercase tracking-wider text-white/90">{t('header.nav.support')}</h4>
+            <ul className="space-y-2.5 text-sm text-white/60">
+              <li>
+                <Link to="/support" className="hover:text-white transition-colors">
+                  {t('header.nav.support')}
+                </Link>
+              </li>
+              <li>
+                <Link to="/contact" className="hover:text-white transition-colors">
+                  {t('footer.contact')}
+                </Link>
+              </li>
+            </ul>
+          </div>
+
           {/* Contact */}
           <div className="space-y-4">
             <h4 className="font-semibold text-sm uppercase tracking-wider text-white/90">{t('footer.contact')}</h4>
             <ul className="space-y-2.5 text-sm text-white/60">
               <li className="flex items-center gap-2">
                 <Phone className="h-4 w-4 shrink-0" />
-                <a href="tel:+995322112424" className="hover:text-white transition-colors">
-                  +995 32 2 11 24 24
+                <a href="tel:322118811" className="hover:text-white transition-colors">
+                  322 11 88 11
                 </a>
               </li>
               <li className="flex items-center gap-2">

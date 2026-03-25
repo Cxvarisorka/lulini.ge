@@ -46,7 +46,7 @@ export function Header() {
     { key: 'passengers', href: '/#passengers' },
     { key: 'drivers', href: '/#drivers' },
     { key: 'faq', href: '/#faq' },
-    { key: 'contact', href: '/contact', isRoute: true },
+    { key: 'support', href: '/support', isRoute: true },
     { key: 'careers', href: '/careers', isRoute: true }
   ];
 

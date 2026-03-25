@@ -63,6 +63,7 @@ const notificationRouter = require('./routers/notification.router');
 const settingsRouter = require('./routers/settings.router');
 const waitlistRouter = require('./routers/waitlist.router');
 const paymentRouter = require('./routers/payment.router');
+const supportRouter = require('./routers/support.router');
 
 const app = express();
 const server = http.createServer(app);
@@ -199,6 +200,7 @@ app.use('/api/notifications', notificationRouter);
 app.use('/api/settings', settingsRouter);
 app.use('/api/waitlist', waitlistRouter);
 app.use('/api/payments', paymentRouter);
+app.use('/api/support', supportRouter);
 
 // Health check (verifies DB connectivity for load balancer routing)
 app.get('/health', (req, res) => {

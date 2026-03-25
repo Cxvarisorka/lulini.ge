@@ -27,7 +27,8 @@
       "faq": "FAQ",
       "contact": "Contact",
       "careers": "Careers",
-      "signIn": "Sign In"
+      "signIn": "Sign In",
+      "support": "Support"
     }
   },
   "hero": {
@@ -199,7 +200,7 @@
       "methods": {
         "call": {
           "title": "Call Us",
-          "value": "+995 32 2 11 24 24"
+          "value": "322 11 88 11"
         },
         "email": {
           "title": "Email Us",
@@ -239,7 +240,7 @@
       "title": "Ready to Start Your Journey?",
       "subtitle": "Book a taxi today and get where you need to go in Georgia",
       "bookTaxi": "Book a Taxi",
-      "phone": "+995 555 123 456"
+      "phone": "322 11 88 11"
     }
   },
   "contact": {
@@ -311,6 +312,47 @@
       "sendAnother": "Send Another Message"
     }
   },
+  "supportPage": {
+    "hero": {
+      "title": "How Can We Help?",
+      "subtitle": "Having an issue or a question? Our support team is here to assist you."
+    },
+    "quickHelp": {
+      "email": "Email Support",
+      "phone": "Call Us",
+      "faq": "FAQ",
+      "faqValue": "Check common questions"
+    },
+    "categories": {
+      "ride_issue": "Ride Issue",
+      "payment": "Payment",
+      "account": "Account",
+      "driver_feedback": "Driver Feedback",
+      "app_bug": "App Bug",
+      "suggestion": "Suggestion",
+      "other": "Other"
+    },
+    "form": {
+      "title": "Submit a Support Request",
+      "description": "Describe your issue and we'll get back to you as soon as possible.",
+      "categoryLabel": "What is this about?",
+      "selectCategory": "Please select a category",
+      "name": "Full Name",
+      "namePlaceholder": "Enter your full name",
+      "email": "Email Address",
+      "emailPlaceholder": "Enter your email",
+      "subject": "Subject",
+      "subjectPlaceholder": "Brief description of your issue",
+      "message": "Message",
+      "messagePlaceholder": "Please describe your issue in detail...",
+      "submit": "Submit Request",
+      "sending": "Submitting...",
+      "successTitle": "Request Submitted!",
+      "successMessage": "Thank you for reaching out. Our support team will review your request and respond within 24 hours.",
+      "submitAnother": "Submit Another Request",
+      "error": "Something went wrong. Please try again."
+    }
+  },
   "careers": {
     "hero": {
       "title": "Drive with Lulini",
@@ -368,7 +410,7 @@
       "subtitle": "Join thousands of drivers who earn with Lulini",
       "button": "Apply Now",
       "callUs": "Or call us directly",
-      "phone": "+995 32 2 11 24 24"
+      "phone": "322 11 88 11"
     }
   },
   "profile": {

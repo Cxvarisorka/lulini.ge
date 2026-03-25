@@ -8,6 +8,7 @@ import { Careers } from './pages/Careers';
 import { Privacy } from './pages/Privacy';
 import { Terms } from './pages/Terms';
 import { SignIn } from './pages/SignIn';
+import { Support } from './pages/Support';
 import { UserProfile } from './pages/UserProfile';
 import { AdminProvider } from './context/AdminContext';
 import { UserProvider } from './context/UserContext';
@@ -46,6 +47,7 @@ function AppContent() {
             <Route path="/careers" element={<Careers />} />
             <Route path="/privacy" element={<Privacy />} />
             <Route path="/terms" element={<Terms />} />
+            <Route path="/support" element={<Support />} />
             <Route path="/signin" element={<SignIn />} />
             <Route path="/profile" element={<ProtectedRoute><UserProfile /></ProtectedRoute>} />
 
