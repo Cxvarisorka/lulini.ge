@@ -1,16 +1,26 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Loader2, Plus, Edit, Trash2, Check, X, User, Car, BarChart3, Camera } from 'lucide-react';
+import { Loader2, Plus, Edit, Trash2, Check, X, User, Car, BarChart3, Camera, Clock, CheckCircle, XCircle, Eye, ChevronDown } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { driverService } from '../../services/driver';
 import { useAdmin } from '../../context/AdminContext';
 import ErrorBoundary from '../../components/ErrorBoundary';
 
+const VEHICLE_TYPES = ['economy', 'comfort', 'business', 'van', 'minibus'];
+
 function AdminDriversContent() {
   const { t } = useTranslation();
   const { socket } = useAdmin();
   const [drivers, setDrivers] = useState([]);
+  const [pendingDrivers, setPendingDrivers] = useState([]);
+  const [activeTab, setActiveTab] = useState('drivers'); // 'drivers' | 'pending'
   const [loading, setLoading] = useState(true);
+  const [pendingLoading, setPendingLoading] = useState(true);
+  const [approvingId, setApprovingId] = useState(null);
+  const [showApproveModal, setShowApproveModal] = useState(null); // driver object or null
+  const [approveVehicleType, setApproveVehicleType] = useState('economy');
+  const [rejectReason, setRejectReason] = useState('');
+  const [showRejectModal, setShowRejectModal] = useState(null); // driver._id or null
   const [showModal, setShowModal] = useState(false);
   const [editingDriver, setEditingDriver] = useState(null);
   const [formData, setFormData] = useState({
@@ -35,11 +45,13 @@ function AdminDriversContent() {
 
   useEffect(() => {
     fetchDrivers();
+    fetchPendingDrivers();
 
     if (socket) {
       socket.on('driver:updated', handleDriverUpdate);
       socket.on('driver:deleted', handleDriverDelete);
       socket.on('driver:statusChanged', handleDriverStatusChange);
+      socket.on('driver:approved', () => { fetchPendingDrivers(); fetchDrivers(); });
     }
 
     return () => {
@@ -47,6 +59,7 @@ function AdminDriversContent() {
         socket.off('driver:updated', handleDriverUpdate);
         socket.off('driver:deleted', handleDriverDelete);
         socket.off('driver:statusChanged', handleDriverStatusChange);
+        socket.off('driver:approved');
       }
     };
   }, [socket]);
@@ -65,6 +78,63 @@ function AdminDriversContent() {
       setDrivers([]);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchPendingDrivers = async () => {
+    setPendingLoading(true);
+    try {
+      const response = await driverService.getPending();
+      if (response.success && Array.isArray(response.data.drivers)) {
+        setPendingDrivers(response.data.drivers);
+      } else {
+        setPendingDrivers([]);
+      }
+    } catch (error) {
+      console.error('Error fetching pending drivers:', error);
+      setPendingDrivers([]);
+    } finally {
+      setPendingLoading(false);
+    }
+  };
+
+  const handleApprove = async (driverId) => {
+    setApprovingId(driverId);
+    try {
+      const response = await driverService.approve(driverId, {
+        approved: true,
+        vehicleType: approveVehicleType,
+      });
+      if (response.success) {
+        setPendingDrivers((prev) => prev.filter((d) => d._id !== driverId));
+        setDrivers((prev) => [response.data.driver, ...prev]);
+        setShowApproveModal(null);
+        alert('Driver approved successfully!');
+      }
+    } catch (error) {
+      alert(error.message || 'Failed to approve driver');
+    } finally {
+      setApprovingId(null);
+    }
+  };
+
+  const handleReject = async (driverId) => {
+    setApprovingId(driverId);
+    try {
+      const response = await driverService.approve(driverId, {
+        approved: false,
+        rejectionReason: rejectReason.trim() || 'Application did not meet requirements',
+      });
+      if (response.success) {
+        setPendingDrivers((prev) => prev.filter((d) => d._id !== driverId));
+        setRejectReason('');
+        setShowRejectModal(null);
+        alert('Driver registration rejected');
+      }
+    } catch (error) {
+      alert(error.message || 'Failed to reject driver');
+    } finally {
+      setApprovingId(null);
     }
   };
 
@@ -90,9 +160,7 @@ function AdminDriversContent() {
 
     try {
       if (editingDriver) {
-        console.log('Updating driver with data:', formData);
         const response = await driverService.update(editingDriver._id, formData);
-        console.log('Update response:', response);
         if (response.success) {
           setDrivers((prev) =>
             prev.map((d) => (d._id === editingDriver._id ? response.data.driver : d))
@@ -102,9 +170,7 @@ function AdminDriversContent() {
           setShowModal(false);
         }
       } else {
-        console.log('Creating driver with data:', formData);
         const response = await driverService.create(formData);
-        console.log('Create response:', response);
         if (response.success) {
           setDrivers((prev) => [response.data.driver, ...prev]);
           alert('Driver created successfully!');
@@ -113,8 +179,6 @@ function AdminDriversContent() {
         }
       }
     } catch (error) {
-      console.error('Error saving driver:', error);
-      console.error('Error details:', error.stack);
       alert(error.message || 'Failed to save driver');
     } finally {
       setSubmitting(false);
@@ -158,6 +222,10 @@ function AdminDriversContent() {
   };
 
   const toggleActive = async (driver) => {
+    const action = driver.isActive ? 'deactivate' : 'activate';
+    const driverName = `${driver.user?.firstName || ''} ${driver.user?.lastName || ''}`.trim() || 'this driver';
+    if (!confirm(`Are you sure you want to ${action} ${driverName}?`)) return;
+
     try {
       const response = await driverService.update(driver._id, { isActive: !driver.isActive });
       if (response.success) {
@@ -252,6 +320,260 @@ function AdminDriversContent() {
           Add Driver
         </button>
       </div>
+
+      {/* Main Tabs: Drivers / Pending */}
+      <div className="flex gap-4 border-b">
+        <button
+          onClick={() => setActiveTab('drivers')}
+          className={`px-4 py-2 -mb-px flex items-center gap-2 ${
+            activeTab === 'drivers'
+              ? 'border-b-2 border-primary text-primary font-medium'
+              : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <Car className="w-4 h-4" />
+          Active Drivers ({drivers.length})
+        </button>
+        <button
+          onClick={() => setActiveTab('pending')}
+          className={`px-4 py-2 -mb-px flex items-center gap-2 ${
+            activeTab === 'pending'
+              ? 'border-b-2 border-primary text-primary font-medium'
+              : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <Clock className="w-4 h-4" />
+          Pending Registration
+          {pendingDrivers.length > 0 && (
+            <span className="bg-orange-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
+              {pendingDrivers.length}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {/* ─── Pending Drivers Tab ─── */}
+      {activeTab === 'pending' && (
+        <div>
+          {pendingLoading ? (
+            <div className="flex items-center justify-center h-32">
+              <Loader2 className="w-6 h-6 animate-spin" />
+            </div>
+          ) : pendingDrivers.length === 0 ? (
+            <div className="text-center py-12">
+              <CheckCircle className="w-12 h-12 mx-auto text-green-500 mb-4" />
+              <p className="text-muted-foreground">No pending registrations</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {pendingDrivers.map((driver) => {
+                const user = driver.user || {};
+                const vehicle = driver.vehicle || {};
+                const docs = driver.documents || {};
+                return (
+                  <div key={driver._id} className="border rounded-lg p-6">
+                    <div className="flex justify-between items-start mb-4">
+                      <div className="flex items-center gap-3">
+                        {user.profileImage ? (
+                          <img src={user.profileImage} alt="" className="w-12 h-12 rounded-full object-cover" />
+                        ) : (
+                          <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center">
+                            <User className="w-6 h-6 text-orange-600" />
+                          </div>
+                        )}
+                        <div>
+                          <h3 className="font-semibold">{user.firstName || ''} {user.lastName || ''}</h3>
+                          <p className="text-sm text-muted-foreground">{user.email || ''}</p>
+                          <p className="text-sm text-muted-foreground">{driver.phone || user.phone || ''}</p>
+                        </div>
+                      </div>
+                      <span className="px-3 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
+                        Pending Review
+                      </span>
+                    </div>
+
+                    {/* Vehicle Info */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 p-3 bg-secondary/50 rounded-lg text-sm">
+                      <div>
+                        <span className="text-muted-foreground block">Vehicle</span>
+                        <span className="font-medium">{vehicle.make} {vehicle.model} ({vehicle.year})</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground block">Plate</span>
+                        <span className="font-mono font-medium">{vehicle.licensePlate}</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground block">Color</span>
+                        <span className="font-medium">{vehicle.color}</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground block">License #</span>
+                        <span className="font-mono font-medium">{driver.licenseNumber}</span>
+                      </div>
+                    </div>
+
+                    {/* Uploaded Documents/Photos */}
+                    {Object.keys(docs).some((k) => docs[k]) && (
+                      <div className="mb-4">
+                        <p className="text-sm font-medium mb-2">Uploaded Photos</p>
+                        <div className="flex gap-2 flex-wrap">
+                          {Object.entries(docs).map(([key, url]) =>
+                            url ? (
+                              <a key={key} href={url} target="_blank" rel="noopener noreferrer"
+                                className="block w-24 h-20 rounded-lg overflow-hidden border hover:ring-2 hover:ring-primary transition-all">
+                                <img src={url} alt={key} className="w-full h-full object-cover" />
+                                <span className="text-[10px] text-center block bg-black/60 text-white -mt-5 relative py-0.5">{key}</span>
+                              </a>
+                            ) : null
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Applied Date */}
+                    <p className="text-xs text-muted-foreground mb-4">
+                      Applied: {new Date(driver.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    </p>
+
+                    {/* Action Buttons */}
+                    <div className="flex gap-3 pt-4 border-t">
+                      <button
+                        onClick={() => {
+                          setApproveVehicleType(vehicle.type || 'economy');
+                          setShowApproveModal(driver);
+                        }}
+                        disabled={approvingId === driver._id}
+                        className="flex-1 inline-flex items-center justify-center px-4 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium"
+                      >
+                        {approvingId === driver._id ? (
+                          <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                        ) : (
+                          <CheckCircle className="w-4 h-4 mr-2" />
+                        )}
+                        Approve
+                      </button>
+                      <button
+                        onClick={() => {
+                          setRejectReason('');
+                          setShowRejectModal(driver._id);
+                        }}
+                        disabled={approvingId === driver._id}
+                        className="flex-1 inline-flex items-center justify-center px-4 py-2.5 border border-red-300 text-red-600 rounded-lg hover:bg-red-50 disabled:opacity-50 font-medium"
+                      >
+                        <XCircle className="w-4 h-4 mr-2" />
+                        Reject
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Reject Modal — enter rejection reason */}
+          {showRejectModal && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+              <div className="bg-background rounded-lg max-w-md w-full p-6">
+                <h2 className="text-lg font-bold mb-1">Reject Driver Registration</h2>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Provide a reason so the driver knows how to improve their application.
+                </p>
+
+                <div className="mb-4">
+                  <label className="block text-sm font-medium mb-2">
+                    Rejection Reason <span className="text-muted-foreground font-normal">(optional)</span>
+                  </label>
+                  <textarea
+                    value={rejectReason}
+                    onChange={(e) => setRejectReason(e.target.value)}
+                    placeholder="e.g. Vehicle photos are unclear. Please resubmit with better quality images."
+                    rows={4}
+                    className="w-full px-3 py-2 border rounded-lg resize-none text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    If left blank, a generic rejection message will be sent.
+                  </p>
+                </div>
+
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => {
+                      setShowRejectModal(null);
+                      setRejectReason('');
+                    }}
+                    className="flex-1 px-4 py-2 border rounded-lg hover:bg-secondary"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => handleReject(showRejectModal)}
+                    disabled={approvingId === showRejectModal}
+                    className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+                  >
+                    {approvingId === showRejectModal ? (
+                      <Loader2 className="w-4 h-4 animate-spin mx-auto" />
+                    ) : (
+                      'Confirm Rejection'
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Approve Modal — select vehicle type */}
+          {showApproveModal && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+              <div className="bg-background rounded-lg max-w-md w-full p-6">
+                <h2 className="text-lg font-bold mb-1">Approve Driver</h2>
+                <p className="text-sm text-muted-foreground mb-4">
+                  {showApproveModal.user?.firstName} {showApproveModal.user?.lastName} — {showApproveModal.vehicle?.make} {showApproveModal.vehicle?.model}
+                </p>
+
+                <div className="mb-4">
+                  <label className="block text-sm font-medium mb-2">Assign Vehicle Type *</label>
+                  <select
+                    value={approveVehicleType}
+                    onChange={(e) => setApproveVehicleType(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  >
+                    {VEHICLE_TYPES.map((vt) => (
+                      <option key={vt} value={vt}>{vt.charAt(0).toUpperCase() + vt.slice(1)}</option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Based on vehicle inspection, assign the appropriate category.
+                  </p>
+                </div>
+
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setShowApproveModal(null)}
+                    className="flex-1 px-4 py-2 border rounded-lg hover:bg-secondary"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => handleApprove(showApproveModal._id)}
+                    disabled={approvingId === showApproveModal._id}
+                    className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+                  >
+                    {approvingId === showApproveModal._id ? (
+                      <Loader2 className="w-4 h-4 animate-spin mx-auto" />
+                    ) : (
+                      'Confirm Approval'
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ─── Active Drivers Tab ─── */}
+      {activeTab === 'drivers' && (
+      <div>
 
       {/* Filter Tabs */}
       <div className="flex gap-2 border-b">
@@ -386,6 +708,9 @@ function AdminDriversContent() {
           <Car className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
           <p className="text-muted-foreground">No drivers found</p>
         </div>
+      )}
+
+      </div>
       )}
 
       {/* Add/Edit Modal */}

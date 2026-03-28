@@ -86,6 +86,20 @@ export const driverService = {
     return apiRequest(`/drivers/${id}/reviews`);
   },
 
+  // Get pending driver registrations (Admin)
+  getPending: async () => {
+    return apiRequest('/drivers/admin/pending');
+  },
+
+  // Approve or reject a driver registration (Admin)
+  approve: async (id, data) => {
+    return apiRequest(`/drivers/admin/${id}/approve`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+  },
+
   // Upload driver photo (Admin)
   uploadPhoto: async (id, file) => {
     const formData = new FormData();
