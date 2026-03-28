@@ -24,7 +24,7 @@ const registerToken = catchAsync(async (req, res, next) => {
     const updateFields = {};
 
     // Update preferred language if provided
-    if (language && ['en', 'es', 'ru', 'ka'].includes(language)) {
+    if (language && ['en', 'ka'].includes(language)) {
         updateFields.preferredLanguage = language;
     }
 

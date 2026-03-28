@@ -1,4 +1,7 @@
 const User = require('../models/user.model');
+const Driver = require('../models/driver.model');
+const Ride = require('../models/ride.model');
+const RideOffer = require('../models/rideOffer.model');
 const OTP = require('../models/otp.model');
 const { generateToken } = require('../utils/jwt.utils');
 const AppError = require('../utils/AppError');
@@ -6,6 +9,14 @@ const catchAsync = require('../utils/catchAsync');
 const { OAuth2Client } = require('google-auth-library');
 const { sendVerification } = require('../services/sms.service');
 const appleSignin = require('apple-signin-auth');
+const { invalidateUser, invalidateDriver } = require('../utils/authCache');
+const analytics = require('../services/analytics.service');
+const EmailOTP = require('../models/emailOtp.model');
+const emailService = require('../services/email.service');
+
+function generateEmailCode() {
+    return String(Math.floor(100000 + Math.random() * 900000));
+}
 
 // Cookie options
 const isProduction = process.env.NODE_ENV === 'production';
@@ -24,11 +35,17 @@ const sendTokenResponse = (user, statusCode, res, message, isNewUser = false) =>
 
     res.cookie('token', token, cookieOptions);
 
+    // Flag when user is missing first/last name (e.g. Apple Sign-In placeholder)
+    const hasName = !!(user.firstName && user.firstName.trim().length >= 2
+        && user.lastName && user.lastName.trim().length >= 2);
+    const requiresName = !hasName;
+
     res.status(statusCode).json({
         success: true,
         message,
         token, // Include token in response body for mobile clients
         isNewUser,
+        requiresName,
         data: {
             user: {
                 id: user._id,
@@ -48,24 +65,40 @@ const sendTokenResponse = (user, statusCode, res, message, isNewUser = false) =>
     });
 };
 
-// @desc    Register user (traditional)
+// @desc    Register user (traditional — requires verified email)
 // @route   POST /api/auth/register
 const register = catchAsync(async (req, res, next) => {
     const { firstName, lastName, email, password, phone } = req.body;
 
-    const existingUser = await User.findOne({ email });
+    const normalizedEmail = email?.toLowerCase().trim();
+
+    const existingUser = await User.findOne({ email: normalizedEmail });
     if (existingUser) {
         return next(new AppError('User already exists with this email', 400));
     }
 
+    // Verify that the email was verified via OTP
+    const verifiedRecord = await EmailOTP.findOne({
+        email: normalizedEmail,
+        purpose: 'verification',
+        code: 'verified',
+    });
+    if (!verifiedRecord) {
+        return next(new AppError('Please verify your email address first', 400));
+    }
+    await EmailOTP.deleteOne({ _id: verifiedRecord._id });
+
     const user = await User.create({
         firstName,
         lastName,
-        email,
+        email: normalizedEmail,
         password,
         phone,
-        provider: 'local'
+        provider: 'local',
+        isVerified: true,
     });
+
+    analytics.trackEvent(user._id, analytics.EVENTS.ACCOUNT_REGISTERED, { provider: 'local' });
 
     sendTokenResponse(user, 201, res, 'User registered successfully');
 });
@@ -112,6 +145,8 @@ const login = catchAsync(async (req, res, next) => {
         await user.save({ validateBeforeSave: false });
     }
 
+    analytics.trackEvent(user._id, analytics.EVENTS.ACCOUNT_LOGGED_IN, { provider: 'local' });
+
     sendTokenResponse(user, 200, res, 'Login successful');
 });
 
@@ -139,8 +174,12 @@ const getMe = catchAsync(async (req, res, next) => {
         return next(new AppError('User not found', 404));
     }
 
+    const hasName = !!(user.firstName && user.firstName.trim().length >= 2
+        && user.lastName && user.lastName.trim().length >= 2);
+
     res.json({
         success: true,
+        requiresName: !hasName,
         data: {
             user: {
                 id: user._id,
@@ -458,6 +497,56 @@ const appleTokenAuth = catchAsync(async (req, res, next) => {
     sendTokenResponse(user, 200, res, 'Apple login successful', isNewUser);
 });
 
+// @desc    Update user profile (firstName, lastName)
+// @route   PATCH /api/auth/profile
+const updateProfile = catchAsync(async (req, res, next) => {
+    const { firstName, lastName } = req.body;
+    const userId = req.user.id;
+
+    if (!firstName || !lastName) {
+        return next(new AppError('First name and last name are required', 400));
+    }
+
+    if (firstName.trim().length < 2 || lastName.trim().length < 2) {
+        return next(new AppError('First name and last name must be at least 2 characters each', 400));
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+        return next(new AppError('User not found', 404));
+    }
+
+    user.firstName = firstName.trim();
+    user.lastName = lastName.trim();
+    // Clear legacy fullName if it was a placeholder
+    if (user.fullName === 'Apple User') {
+        user.fullName = undefined;
+    }
+    await user.save();
+
+    invalidateUser(userId);
+
+    res.status(200).json({
+        success: true,
+        message: 'Profile updated successfully',
+        data: {
+            user: {
+                id: user._id,
+                firstName: user.firstName,
+                lastName: user.lastName,
+                email: user.email,
+                phone: user.phone,
+                role: user.role,
+                avatar: user.avatar,
+                isVerified: user.isVerified,
+                isPhoneVerified: user.isPhoneVerified,
+                hasCompletedOnboarding: user.hasCompletedOnboarding,
+                createdAt: user.createdAt
+            }
+        }
+    });
+});
+
 // @desc    Complete onboarding
 // @route   POST /api/auth/complete-onboarding
 const completeOnboarding = catchAsync(async (req, res, next) => {
@@ -580,9 +669,9 @@ const verifyPhoneUpdateOtp = catchAsync(async (req, res, next) => {
     });
 });
 
-// @desc    Update user email
-// @route   PATCH /api/auth/email
-const updateEmail = catchAsync(async (req, res, next) => {
+// @desc    Send email verification code (authenticated — for adding/updating email)
+// @route   POST /api/auth/email/send-code
+const sendEmailCode = catchAsync(async (req, res, next) => {
     const { email } = req.body;
     const userId = req.user.id;
 
@@ -595,8 +684,78 @@ const updateEmail = catchAsync(async (req, res, next) => {
         return next(new AppError('Please provide a valid email address', 400));
     }
 
+    const normalizedEmail = email.toLowerCase().trim();
+
     // Check if email is already used by another user
-    const existingUser = await User.findOne({ email, _id: { $ne: userId } });
+    const existingUser = await User.findOne({ email: normalizedEmail, _id: { $ne: userId } });
+    if (existingUser) {
+        return next(new AppError('This email is already registered to another account', 400));
+    }
+
+    // Block re-verification if user already has this email verified
+    const currentUser = await User.findById(userId).select('email isVerified firstName preferredLanguage').lean();
+    if (currentUser && currentUser.email === normalizedEmail && currentUser.isVerified) {
+        return next(new AppError('This email is already verified', 400));
+    }
+
+    // Delete any existing codes for this email + user
+    await EmailOTP.deleteMany({ email: normalizedEmail, userId });
+
+    const code = generateEmailCode();
+    await EmailOTP.create({
+        email: normalizedEmail,
+        code,
+        userId,
+        purpose: 'update',
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
+    });
+
+    const lang = currentUser?.preferredLanguage || 'en';
+    await emailService.sendVerificationEmail(normalizedEmail, currentUser?.firstName, code, lang);
+
+    res.status(200).json({
+        success: true,
+        message: 'Verification code sent to your email',
+    });
+});
+
+// @desc    Verify email code and update email (authenticated)
+// @route   POST /api/auth/email/verify-code
+const verifyEmailCode = catchAsync(async (req, res, next) => {
+    const { email, code } = req.body;
+    const userId = req.user.id;
+
+    if (!email || !code) {
+        return next(new AppError('Email and verification code are required', 400));
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    const record = await EmailOTP.findOne({ email: normalizedEmail, userId, purpose: 'update' });
+
+    if (!record) {
+        return next(new AppError('Verification code not found. Please request a new one', 400));
+    }
+    if (record.expiresAt < new Date()) {
+        await EmailOTP.deleteOne({ _id: record._id });
+        return next(new AppError('Verification code has expired. Please request a new one', 400));
+    }
+    if (record.attempts >= 5) {
+        await EmailOTP.deleteOne({ _id: record._id });
+        return next(new AppError('Too many failed attempts. Please request a new code', 400));
+    }
+
+    const codeMatches = await record.compareCode(code);
+    if (!codeMatches) {
+        record.attempts += 1;
+        await record.save();
+        return next(new AppError('Invalid verification code', 400));
+    }
+
+    await EmailOTP.deleteOne({ _id: record._id });
+
+    // Re-check uniqueness (race-condition guard)
+    const existingUser = await User.findOne({ email: normalizedEmail, _id: { $ne: userId } });
     if (existingUser) {
         return next(new AppError('This email is already registered to another account', 400));
     }
@@ -606,12 +765,13 @@ const updateEmail = catchAsync(async (req, res, next) => {
         return next(new AppError('User not found', 404));
     }
 
-    user.email = email.toLowerCase().trim();
+    user.email = normalizedEmail;
+    user.isVerified = true;
     await user.save();
 
     res.status(200).json({
         success: true,
-        message: 'Email updated successfully',
+        message: 'Email verified and updated successfully',
         data: {
             user: {
                 id: user._id,
@@ -624,9 +784,287 @@ const updateEmail = catchAsync(async (req, res, next) => {
                 isVerified: user.isVerified,
                 isPhoneVerified: user.isPhoneVerified,
                 hasCompletedOnboarding: user.hasCompletedOnboarding,
-                createdAt: user.createdAt
+                createdAt: user.createdAt,
+            },
+        },
+    });
+});
+
+// @desc    Send email verification code (unauthenticated — for registration)
+// @route   POST /api/auth/email/send-verification
+const sendEmailVerification = catchAsync(async (req, res, next) => {
+    const { email, language } = req.body;
+
+    if (!email) {
+        return next(new AppError('Email is required', 400));
+    }
+
+    const emailRegex = /^\S+@\S+\.\S+$/;
+    if (!emailRegex.test(email)) {
+        return next(new AppError('Please provide a valid email address', 400));
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // Check if email is already registered
+    const existingUser = await User.findOne({ email: normalizedEmail });
+    if (existingUser) {
+        return next(new AppError('This email is already registered', 400));
+    }
+
+    // Delete any existing codes for this email (no userId for registration)
+    await EmailOTP.deleteMany({ email: normalizedEmail, purpose: 'verification' });
+
+    const code = generateEmailCode();
+    await EmailOTP.create({
+        email: normalizedEmail,
+        code,
+        purpose: 'verification',
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+    });
+
+    const lang = (language === 'ka' || language === 'en') ? language : 'en';
+    await emailService.sendVerificationEmail(normalizedEmail, null, code, lang);
+
+    res.status(200).json({
+        success: true,
+        message: 'Verification code sent to your email',
+    });
+});
+
+// @desc    Verify email code for registration (unauthenticated)
+// @route   POST /api/auth/email/verify-registration
+const verifyEmailForRegistration = catchAsync(async (req, res, next) => {
+    const { email, code } = req.body;
+
+    if (!email || !code) {
+        return next(new AppError('Email and verification code are required', 400));
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    const record = await EmailOTP.findOne({ email: normalizedEmail, purpose: 'verification' });
+
+    if (!record) {
+        return next(new AppError('Verification code not found. Please request a new one', 400));
+    }
+    if (record.expiresAt < new Date()) {
+        await EmailOTP.deleteOne({ _id: record._id });
+        return next(new AppError('Verification code has expired. Please request a new one', 400));
+    }
+    if (record.attempts >= 5) {
+        await EmailOTP.deleteOne({ _id: record._id });
+        return next(new AppError('Too many failed attempts. Please request a new code', 400));
+    }
+
+    const codeMatches = await record.compareCode(code);
+    if (!codeMatches) {
+        record.attempts += 1;
+        await record.save();
+        return next(new AppError('Invalid verification code', 400));
+    }
+
+    // Mark as verified — keep the record so register can check it
+    record.attempts = 0;
+    record.expiresAt = new Date(Date.now() + 15 * 60 * 1000); // extend 15 min for registration
+    record.purpose = 'verification';
+    // Store a flag on the document so register() can confirm verification
+    record.code = 'verified';
+    await EmailOTP.updateOne({ _id: record._id }, {
+        $set: { code: 'verified', expiresAt: record.expiresAt }
+    });
+
+    res.status(200).json({
+        success: true,
+        message: 'Email verified successfully',
+        emailVerified: true,
+    });
+});
+
+// @desc    Schedule account deletion (30-day grace period)
+// @route   DELETE /api/auth/account
+//
+// For local-auth accounts the caller must supply their current password so the
+// action cannot be triggered by a stolen JWT alone.
+// OAuth/phone accounts only need the authenticated session (token is enough).
+//
+// What happens immediately (grace period, NOT hard-delete):
+//   1. Active/pending rides are cancelled and drivers are notified via socket.
+//   2. Completed rides are anonymised (PII removed, kept for analytics).
+//   3. If the user is a driver: driver marked inactive + offline.
+//   4. Push-notification device tokens are cleared.
+//   5. User is marked isDeleted=true + deletionScheduledAt=now+30days.
+//   6. Auth cache is invalidated so future requests are rejected immediately.
+//   7. A socket event forces any connected clients to sign out.
+//
+// Hard-delete happens when a scheduled job (or admin tooling) finds records
+// where deletionScheduledAt <= now. That job should delete the User document
+// and the Driver document (if any).  A cancel endpoint lets users reverse the
+// decision during the grace period.
+const deleteAccount = catchAsync(async (req, res, next) => {
+    const userId = req.user.id;
+    const { password } = req.body;
+
+    // Fetch the full document (not lean) so we can call .save() and comparePassword()
+    const user = await User.findById(userId);
+    if (!user) {
+        return next(new AppError('User not found', 404));
+    }
+
+    // Local accounts require password confirmation to prevent account takeover
+    // via a stolen JWT.
+    if (user.provider === 'local') {
+        if (!password) {
+            return next(new AppError('Password confirmation is required to delete a local account', 400));
+        }
+        const isMatch = await user.comparePassword(password);
+        if (!isMatch) {
+            return next(new AppError('Incorrect password', 401));
+        }
+    }
+
+    const io = req.app.get('io');
+
+    // --- 1. Cancel active / pending rides ---
+    // Statuses that represent an in-flight ride the passenger still has open.
+    const activeStatuses = ['pending', 'accepted', 'driver_arrived', 'in_progress'];
+    const activeRides = await Ride.find({ user: userId, status: { $in: activeStatuses } });
+
+    for (const ride of activeRides) {
+        ride.status = 'cancelled';
+        ride.cancelledBy = 'user';
+        ride.cancellationReason = 'other';
+        ride.cancellationNote = 'Account deleted by user';
+        await ride.save({ validateBeforeSave: false });
+
+        // Cancel any pending offers for this ride so drivers aren't shown ghost rides
+        await RideOffer.updateMany(
+            { ride: ride._id, status: 'pending' },
+            { status: 'superseded', respondedAt: new Date() }
+        );
+
+        // Notify the assigned driver (if any) that the ride is gone
+        if (ride.driver && io) {
+            // driver.user is the User ID; ride.driver is the Driver document ID.
+            // We use the Driver model to resolve the user ID for the socket room.
+            const driverDoc = await Driver.findById(ride.driver).select('user').lean();
+            if (driverDoc) {
+                io.to(`driver:${driverDoc.user}`).emit('ride:cancelled', {
+                    rideId: ride._id,
+                    reason: 'Passenger account deleted'
+                });
             }
         }
+    }
+
+    // --- 2. Anonymise completed rides (keep for analytics) ---
+    await Ride.updateMany(
+        { user: userId, status: 'completed' },
+        {
+            $set: {
+                passengerName: 'Deleted User',
+                passengerPhone: ''
+            }
+        }
+    );
+
+    // --- 3. Deactivate driver profile (if user is also a driver) ---
+    const driverDoc = await Driver.findOne({ user: userId });
+    if (driverDoc) {
+        driverDoc.isActive = false;
+        driverDoc.status = 'offline';
+        await driverDoc.save({ validateBeforeSave: false });
+        invalidateDriver(userId);
+
+        if (io) {
+            // Remove the driver from the online pool visible to the admin dashboard
+            io.to('admin').emit('driver:statusChanged', {
+                driverId: driverDoc._id,
+                status: 'offline',
+                isActive: false
+            });
+        }
+    }
+
+    // --- 4. Clear device tokens (stop push notifications during grace period) ---
+    user.deviceTokens = [];
+
+    // --- 5. Soft-delete: mark for deletion, disable account immediately ---
+    const GRACE_PERIOD_DAYS = 30;
+    user.isDeleted = true;
+    user.deletionScheduledAt = new Date(Date.now() + GRACE_PERIOD_DAYS * 24 * 60 * 60 * 1000);
+    await user.save({ validateBeforeSave: false });
+
+    // --- 6. Invalidate auth cache so the user is rejected on next request ---
+    invalidateUser(userId);
+
+    // --- 7. Force-disconnect connected socket clients ---
+    if (io) {
+        io.to(`user:${userId}`).emit('account:deleted', {
+            message: 'Your account has been scheduled for deletion. You have been signed out.',
+            deletionScheduledAt: user.deletionScheduledAt
+        });
+    }
+
+    // Clear the auth cookie so the browser session ends immediately
+    res.cookie('token', '', {
+        ...cookieOptions,
+        expires: new Date(0),
+        maxAge: 0
+    });
+
+    analytics.trackEvent(userId, analytics.EVENTS.ACCOUNT_DELETED, { gracePeriodDays: GRACE_PERIOD_DAYS });
+
+    res.status(200).json({
+        success: true,
+        message: `Your account has been scheduled for deletion. You have ${GRACE_PERIOD_DAYS} days to cancel this request. All active rides have been cancelled.`,
+        deletionScheduledAt: user.deletionScheduledAt
+    });
+});
+
+// @desc    Cancel a scheduled account deletion (within the 30-day grace period)
+// @route   DELETE /api/auth/account/cancel
+//
+// Note: The protect middleware rejects isDeleted accounts, so the user must
+// supply their token BEFORE the grace period expires.  We re-enable the account
+// only when deletionScheduledAt is still in the future.
+const cancelAccountDeletion = catchAsync(async (req, res, next) => {
+    const userId = req.user.id;
+
+    // protect middleware already rejects isDeleted users, but we look up the raw
+    // document here in case someone bypasses cache (belt-and-suspenders).
+    const user = await User.findById(userId);
+    if (!user) {
+        return next(new AppError('User not found', 404));
+    }
+
+    if (!user.isDeleted || !user.deletionScheduledAt) {
+        return next(new AppError('No pending account deletion found for this account', 400));
+    }
+
+    if (user.deletionScheduledAt <= new Date()) {
+        return next(new AppError('The deletion grace period has expired. This account can no longer be recovered.', 410));
+    }
+
+    // Restore the account
+    user.isDeleted = false;
+    user.deletionScheduledAt = null;
+    await user.save({ validateBeforeSave: false });
+
+    // Re-activate driver profile if one exists
+    const driverDoc = await Driver.findOne({ user: userId });
+    if (driverDoc) {
+        driverDoc.isActive = true;
+        await driverDoc.save({ validateBeforeSave: false });
+        invalidateDriver(userId);
+    }
+
+    // Invalidate the stale cache entry so the restored user can log in immediately
+    invalidateUser(userId);
+
+    res.status(200).json({
+        success: true,
+        message: 'Account deletion has been cancelled. Your account has been fully restored.'
     });
 });
 
@@ -645,5 +1083,11 @@ module.exports = {
     completeOnboarding,
     sendPhoneUpdateOtp,
     verifyPhoneUpdateOtp,
-    updateEmail
+    sendEmailCode,
+    verifyEmailCode,
+    sendEmailVerification,
+    verifyEmailForRegistration,
+    updateProfile,
+    deleteAccount,
+    cancelAccountDeletion
 };

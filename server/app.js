@@ -12,6 +12,14 @@ const Sentry = require('@sentry/node');
 const { globalLimiter } = require('./middlewares/rateLimiter');
 require('dotenv').config();
 
+// ── 1. Validate environment variables FIRST — before any other initialisation.
+//       Exits the process immediately if required vars are missing.
+const { validateEnv } = require('./utils/validateEnv');
+validateEnv();
+
+// ── 2. Structured logger — replaces scattered console.* calls.
+const logger = require('./utils/logger');
+
 // Sentry error tracking (must init before other middleware)
 if (process.env.SENTRY_DSN) {
     Sentry.init({
@@ -19,34 +27,6 @@ if (process.env.SENTRY_DSN) {
         environment: process.env.NODE_ENV || 'development',
         tracesSampleRate: 0.1,
     });
-}
-
-// Validate critical environment variables at startup
-const requiredEnvVars = {
-    JWT_SECRET: { minLength: 32 },
-    MONGODB_URI: {},
-};
-// These are required in production only
-const productionEnvVars = {
-    GOOGLE_MAPS_API_KEY: {},
-    SMS_API: {},
-};
-
-const missingVars = [];
-const allRequired = process.env.NODE_ENV === 'production'
-    ? { ...requiredEnvVars, ...productionEnvVars }
-    : requiredEnvVars;
-
-for (const [name, opts] of Object.entries(allRequired)) {
-    if (!process.env[name]) {
-        missingVars.push(name);
-    } else if (opts.minLength && process.env[name].length < opts.minLength) {
-        missingVars.push(`${name} (too short, min ${opts.minLength} chars)`);
-    }
-}
-if (missingVars.length > 0) {
-    console.error(`FATAL: Missing or invalid environment variables:\n  - ${missingVars.join('\n  - ')}`);
-    process.exit(1);
 }
 
 const connectDB = require('./configs/db.config');
@@ -64,6 +44,10 @@ const settingsRouter = require('./routers/settings.router');
 const waitlistRouter = require('./routers/waitlist.router');
 const paymentRouter = require('./routers/payment.router');
 const supportRouter = require('./routers/support.router');
+const safetyRouter = require('./routers/safety.router');
+const chatRouter = require('./routers/chat.router');
+const favoritesRouter = require('./routers/favorites.router');
+const receiptRouter = require('./routers/receipt.router');
 
 const app = express();
 const server = http.createServer(app);
@@ -111,9 +95,9 @@ async function setupRedisAdapter() {
             const subClient = pubClient.duplicate();
             await subClient.connect();
             io.adapter(createAdapter(pubClient, subClient));
-            console.log('Socket.io Redis adapter enabled');
+            logger.info('Socket.io Redis adapter enabled', 'redis');
         } catch (err) {
-            console.error('Redis adapter setup failed, running in single-process mode:', err.message);
+            logger.error('Redis adapter setup failed, running in single-process mode', 'redis', err);
         }
     }
 }
@@ -201,6 +185,10 @@ app.use('/api/settings', settingsRouter);
 app.use('/api/waitlist', waitlistRouter);
 app.use('/api/payments', paymentRouter);
 app.use('/api/support', supportRouter);
+app.use('/api/safety', safetyRouter);
+app.use('/api/chat', chatRouter);
+app.use('/api/favorites', favoritesRouter);
+app.use('/api/receipts', receiptRouter);
 
 // Health check (verifies DB connectivity for load balancer routing)
 app.get('/health', (req, res) => {
@@ -234,17 +222,23 @@ app.use(globalErrorHandler);
 const PORT = process.env.PORT || 3000;
 
 // Import the ride expiration functions
-const { expireOldRides, expireWaitingRides } = require('./controllers/ride.controller');
+const { expireOldRides, expireWaitingRides, broadcastScheduledRides } = require('./controllers/ride.controller');
 const { startWatchdog } = require('./services/rideWatchdog.service');
+const { runHardDeleteJob } = require('./jobs/hardDelete');
 
 // Schedule ride expiration check every minute
 const EXPIRATION_CHECK_INTERVAL = 60 * 1000; // 1 minute
 // Schedule waiting expiration check every 15 seconds (for 3-minute timeout accuracy)
 const WAITING_CHECK_INTERVAL = 15 * 1000; // 15 seconds
+// Check for scheduled rides ready to broadcast every minute
+const SCHEDULED_RIDE_CHECK_INTERVAL = 60 * 1000; // 1 minute
 
 // Track interval IDs for graceful shutdown cleanup
 let expirationIntervalId = null;
 let waitingIntervalId = null;
+let scheduledRideIntervalId = null;
+let hardDeleteIntervalId = null;
+
 
 // In PM2 cluster mode, only run background jobs on instance 0 to avoid duplicate work.
 // When using the separate worker.js process, set DISABLE_BACKGROUND_JOBS=true.
@@ -262,20 +256,23 @@ async function startServer() {
     initSocket(io);
 
     server.listen(PORT, () => {
-        console.log(`Server is running on port ${PORT}${process.env.NODE_APP_INSTANCE ? ` (instance ${process.env.NODE_APP_INSTANCE})` : ''}`);
+        logger.info(
+            `Server is running on port ${PORT}${process.env.NODE_APP_INSTANCE ? ` (instance ${process.env.NODE_APP_INSTANCE})` : ''}`,
+            'startup'
+        );
 
         if (backgroundJobsEnabled) {
             // Run initial expiration check on startup
             expireOldRides(io).then(result => {
                 if (result.expired > 0) {
-                    console.log(`Expired ${result.expired} old ride requests on startup`);
+                    logger.info(`Expired ${result.expired} old ride requests on startup`, 'scheduler');
                 }
             });
 
             // Run initial waiting expiration check on startup
             expireWaitingRides(io).then(result => {
                 if (result.cancelled > 0) {
-                    console.log(`Cancelled ${result.cancelled} rides due to waiting timeout on startup`);
+                    logger.info(`Cancelled ${result.cancelled} rides due to waiting timeout on startup`, 'scheduler');
                 }
             });
 
@@ -283,7 +280,7 @@ async function startServer() {
             expirationIntervalId = setInterval(() => {
                 expireOldRides(io).then(result => {
                     if (result.expired > 0) {
-                        console.log(`Expired ${result.expired} old ride requests`);
+                        logger.info(`Expired ${result.expired} old ride requests`, 'scheduler');
                     }
                 });
             }, EXPIRATION_CHECK_INTERVAL);
@@ -292,19 +289,40 @@ async function startServer() {
             waitingIntervalId = setInterval(() => {
                 expireWaitingRides(io).then(result => {
                     if (result.cancelled > 0) {
-                        console.log(`Cancelled ${result.cancelled} rides due to waiting timeout`);
+                        logger.info(`Cancelled ${result.cancelled} rides due to waiting timeout`, 'scheduler');
                     }
                 });
             }, WAITING_CHECK_INTERVAL);
 
+            // Broadcast scheduled rides approaching their start time (every minute)
+            broadcastScheduledRides(io).catch(() => {});
+            scheduledRideIntervalId = setInterval(() => {
+                broadcastScheduledRides(io).catch(() => {});
+            }, SCHEDULED_RIDE_CHECK_INTERVAL);
+
             // Start ride tracking watchdog (30s interval — detects stale driver locations)
             startWatchdog(io);
+
+            // Hard-delete accounts whose 30-day grace period has elapsed (daily)
+            const HARD_DELETE_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
+            runHardDeleteJob().then(result => {
+                if (result.deleted > 0 || result.errors > 0) {
+                    logger.info(`Startup run: deleted=${result.deleted}, errors=${result.errors}`, 'hardDelete');
+                }
+            }).catch(err => logger.error('Startup run failed', 'hardDelete', err));
+            hardDeleteIntervalId = setInterval(() => {
+                runHardDeleteJob().then(result => {
+                    if (result.deleted > 0 || result.errors > 0) {
+                        logger.info(`Daily run: deleted=${result.deleted}, errors=${result.errors}`, 'hardDelete');
+                    }
+                }).catch(err => logger.error('Daily run failed', 'hardDelete', err));
+            }, HARD_DELETE_INTERVAL);
         }
     });
 }
 
 startServer().catch(err => {
-    console.error('Failed to start server:', err);
+    logger.error('Failed to start server', 'startup', err);
     process.exit(1);
 });
 
@@ -314,36 +332,38 @@ let isShuttingDown = false;
 function gracefulShutdown(signal) {
     if (isShuttingDown) return;
     isShuttingDown = true;
-    console.log(`\n${signal} received. Starting graceful shutdown...`);
+    logger.info(`${signal} received. Starting graceful shutdown...`, 'shutdown');
 
     // Stop accepting new connections
     server.close(() => {
-        console.log('HTTP server closed');
+        logger.info('HTTP server closed', 'shutdown');
     });
 
     // Clear scheduled intervals
     if (expirationIntervalId) clearInterval(expirationIntervalId);
     if (waitingIntervalId) clearInterval(waitingIntervalId);
+    if (scheduledRideIntervalId) clearInterval(scheduledRideIntervalId);
+    if (hardDeleteIntervalId) clearInterval(hardDeleteIntervalId);
 
     // Disconnect all sockets gracefully
     io.emit('server:shutdown', { message: 'Server is restarting' });
     io.close(() => {
-        console.log('Socket.io server closed');
+        logger.info('Socket.io server closed', 'shutdown');
     });
 
     // Close MongoDB connection
     const mongoose = require('mongoose');
     mongoose.connection.close().then(() => {
-        console.log('MongoDB connection closed');
+        logger.info('MongoDB connection closed', 'shutdown');
         process.exit(0);
     }).catch((err) => {
-        console.error('Error closing MongoDB connection:', err.message);
+        logger.error('Error closing MongoDB connection', 'shutdown', err);
         process.exit(1);
     });
 
     // Force exit after 10s if graceful shutdown hangs
     setTimeout(() => {
-        console.error('Graceful shutdown timed out, forcing exit');
+        logger.error('Graceful shutdown timed out, forcing exit', 'shutdown');
         process.exit(1);
     }, 10000).unref();
 }
@@ -352,8 +372,8 @@ process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 // Catch unhandled promise rejections and uncaught exceptions
-process.on('unhandledRejection', (reason, promise) => {
-    console.error('Unhandled Rejection:', reason);
+process.on('unhandledRejection', (reason) => {
+    logger.error('Unhandled Rejection', 'process', reason);
     try {
         const Sentry = require('@sentry/node');
         Sentry.captureException(reason);
@@ -361,7 +381,7 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 process.on('uncaughtException', (error) => {
-    console.error('Uncaught Exception:', error);
+    logger.error('Uncaught Exception', 'process', error);
     try {
         const Sentry = require('@sentry/node');
         Sentry.captureException(error);

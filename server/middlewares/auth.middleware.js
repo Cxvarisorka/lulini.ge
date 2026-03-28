@@ -38,6 +38,13 @@ const protect = catchAsync(async (req, res, next) => {
         return next(new AppError('User not found', 401));
     }
 
+    // Reject accounts that have been soft-deleted during the grace period.
+    // Exception: allow the cancel-deletion endpoint through so users can
+    // recover their account before the hard-delete job runs.
+    if (user.isDeleted && req.path !== '/account/cancel') {
+        return next(new AppError('This account has been scheduled for deletion and is no longer accessible', 403));
+    }
+
     // Add `id` alias for compatibility (lean objects don't have Mongoose virtuals)
     user.id = user._id.toString();
 

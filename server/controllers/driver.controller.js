@@ -9,6 +9,7 @@ const catchAsync = require('../utils/catchAsync');
 const { haversineKm } = require('../utils/distance');
 const pushService = require('../services/pushNotification.service');
 const { pushIfOffline } = require('../utils/socketHelpers');
+const analytics = require('../services/analytics.service');
 
 // Proximity thresholds (km)
 const APPROACH_NOTIFY_KM = 0.5;  // 500m — notify passenger that driver is approaching
@@ -323,10 +324,12 @@ const updateDriverStatus = catchAsync(async (req, res, next) => {
         DriverActivity.create({ driver: driver._id, type: 'online' }).catch(err =>
             console.error('Failed to log driver activity:', err.message)
         );
+        analytics.trackEvent(req.user.id, analytics.EVENTS.DRIVER_WENT_ONLINE, { driverId: driver._id.toString() });
     } else if (status === 'offline' && previousStatus !== 'offline') {
         DriverActivity.create({ driver: driver._id, type: 'offline' }).catch(err =>
             console.error('Failed to log driver activity:', err.message)
         );
+        analytics.trackEvent(req.user.id, analytics.EVENTS.DRIVER_WENT_OFFLINE, { driverId: driver._id.toString() });
     }
 
     // Emit socket event and manage driver room membership
@@ -1228,6 +1231,262 @@ const uploadDriverPhoto = catchAsync(async (req, res, next) => {
     });
 });
 
+// @desc    Self-register as a driver (user must already be authenticated)
+// @route   POST /api/drivers/register
+// @access  Private (any authenticated user without an existing driver profile)
+const registerDriver = catchAsync(async (req, res, next) => {
+    const userId = req.user._id || req.user.id;
+
+    // Accept both nested `vehicle` object and flat fields from the mobile app.
+    // Vehicle type is NOT set by the driver — admin assigns it after inspection.
+    const vehicleMake = req.body.vehicleMake || req.body.vehicle?.make;
+    const vehicleModel = req.body.vehicleModel || req.body.vehicle?.model;
+    const vehicleYear = req.body.vehicleYear || req.body.vehicle?.year;
+    const licensePlate = req.body.licensePlate || req.body.vehicle?.licensePlate;
+    const vehicleColor = req.body.vehicleColor || req.body.vehicle?.color;
+
+    // Phone and licenseNumber are optional — use the user's phone from their account
+    const userDoc = await User.findById(userId).select('phone').lean();
+    const phone = req.body.phone || userDoc?.phone || 'pending';
+    const licenseNumber = req.body.licenseNumber || licensePlate || 'pending';
+
+    if (!vehicleMake || !vehicleModel || !vehicleYear || !licensePlate || !vehicleColor) {
+        return next(new AppError('Vehicle make, model, year, licensePlate, and color are required', 400));
+    }
+
+    // One driver profile per user
+    const existingProfile = await Driver.findOne({ user: userId }).select('_id').lean();
+    if (existingProfile) {
+        return next(new AppError('You already have a driver profile', 409));
+    }
+
+    // License number uniqueness
+    const existingLicense = await Driver.findOne({ licenseNumber }).select('_id').lean();
+    if (existingLicense) {
+        return next(new AppError('A driver with this license number already exists', 409));
+    }
+
+    // Vehicle type defaults to 'economy' — admin will assign the correct type
+    // after inspecting the vehicle photos.
+    const vehicle = {
+        type: 'economy',
+        make: vehicleMake,
+        model: vehicleModel,
+        year: parseInt(vehicleYear, 10),
+        licensePlate: licensePlate.toUpperCase(),
+        color: vehicleColor,
+    };
+
+    // Create the pending driver profile — isApproved and isActive are false by default
+    const driver = await Driver.create({
+        user: userId,
+        phone,
+        licenseNumber,
+        vehicle,
+        isApproved: false,
+        isActive: false
+    });
+
+    // Do NOT promote to role=driver yet — they stay as 'user' until admin approves.
+    // This prevents the socket reconnect loop (isDriver middleware rejects unapproved).
+
+    const populatedDriver = await Driver.findById(driver._id)
+        .populate('user', 'firstName lastName email phone');
+
+    const { trackEvent, EVENTS } = require('../services/analytics.service');
+    trackEvent(userId, EVENTS.DRIVER_REGISTERED, { licenseNumber, vehicleType: vehicle.type });
+
+    res.status(201).json({
+        success: true,
+        message: 'Driver application submitted. Your profile is pending admin approval.',
+        data: { driver: populatedDriver }
+    });
+});
+
+// Allowed document field names in the driver.documents sub-document
+// Includes original types + new car photo types for vehicle inspection
+const VALID_DOCUMENT_TYPES = [
+    'licenseImage', 'vehicleRegistration', 'insurance',
+    'driverLicense', 'front', 'back', 'left', 'right', 'inside'
+];
+
+// @desc    Upload a document for the driver profile (works for unapproved drivers too)
+// @route   POST /api/drivers/documents/:type
+// @access  Private (must have a driver profile — approved or not)
+const uploadDriverDocument = catchAsync(async (req, res, next) => {
+    const { type } = req.params;
+
+    if (!VALID_DOCUMENT_TYPES.includes(type)) {
+        return next(new AppError(
+            `Invalid document type. Allowed types: ${VALID_DOCUMENT_TYPES.join(', ')}`,
+            400
+        ));
+    }
+
+    if (!req.file) {
+        return next(new AppError('Please upload a file', 400));
+    }
+
+    const userId = req.user._id || req.user.id;
+
+    // Allow unapproved drivers to upload documents so they can complete their application
+    const driver = await Driver.findOne({ user: userId });
+    if (!driver) {
+        return next(new AppError('Driver profile not found. Please register as a driver first.', 404));
+    }
+
+    // The Cloudinary URL is provided by multer-storage-cloudinary on req.file
+    const secureUrl = req.file.secure_url || req.file.url;
+
+    driver.documents[type] = secureUrl;
+    await driver.save();
+
+    const { trackEvent, EVENTS } = require('../services/analytics.service');
+    trackEvent(userId, EVENTS.DRIVER_DOCUMENT_UPLOADED, { documentType: type });
+
+    res.json({
+        success: true,
+        message: `Document '${type}' uploaded successfully`,
+        data: {
+            documentType: type,
+            url: secureUrl,
+            documents: driver.documents
+        }
+    });
+});
+
+// @desc    Get pending driver registrations (unapproved)
+// @route   GET /api/drivers/admin/pending
+// @access  Private/Admin
+const getPendingDrivers = catchAsync(async (req, res) => {
+    const drivers = await Driver.find({ isApproved: false })
+        .populate('user', 'firstName lastName email phone profileImage createdAt')
+        .sort({ createdAt: -1 });
+
+    res.json({
+        success: true,
+        count: drivers.length,
+        data: { drivers }
+    });
+});
+
+// @desc    Approve or reject a pending driver registration
+// @route   PATCH /api/drivers/admin/:id/approve
+// @access  Private/Admin
+// Body: { approved: true/false, vehicleType?: string, rejectionReason?: string }
+const approveDriver = catchAsync(async (req, res, next) => {
+    const { approved, vehicleType, rejectionReason } = req.body;
+
+    if (approved === undefined) {
+        return next(new AppError('approved field is required (true or false)', 400));
+    }
+
+    const driver = await Driver.findById(req.params.id).populate('user');
+    if (!driver) {
+        return next(new AppError('Driver not found', 404));
+    }
+
+    if (approved) {
+        driver.isApproved = true;
+        driver.isActive = true;
+        // Admin assigns the vehicle type after inspecting photos
+        if (vehicleType) {
+            driver.vehicle.type = vehicleType;
+        }
+        await driver.save();
+
+        // Promote user role to 'driver' so they can access the main app
+        if (driver.user && driver.user.role !== 'driver') {
+            driver.user.role = 'driver';
+            await driver.user.save({ validateBeforeSave: false });
+        }
+
+        // Notify the driver via push notification
+        if (driver.user) {
+            pushService.sendToUser(
+                driver.user._id.toString(),
+                'driver_approved_title',
+                'driver_approved_body',
+                { type: 'driver_approved' }
+            ).catch(() => {});
+        }
+
+        // Emit to admin room
+        const io = req.app.get('io');
+        if (io) {
+            io.to('admin').emit('driver:approved', { driverId: driver._id });
+            io.to(`user:${driver.user._id}`).emit('driver:approved', {
+                driverId: driver._id,
+                message: 'Your driver account has been approved!'
+            });
+        }
+    } else {
+        // Rejection — keep profile but mark not approved
+        driver.isApproved = false;
+        driver.isActive = false;
+        if (rejectionReason) {
+            driver.rejectionReason = rejectionReason;
+        }
+        await driver.save();
+
+        if (driver.user) {
+            pushService.sendToUser(
+                driver.user._id.toString(),
+                'driver_rejected_title',
+                'driver_rejected_body',
+                { type: 'driver_rejected', reason: rejectionReason || '' }
+            ).catch(() => {});
+        }
+    }
+
+    const updatedDriver = await Driver.findById(driver._id)
+        .populate('user', 'firstName lastName email phone profileImage');
+
+    res.json({
+        success: true,
+        message: approved ? 'Driver approved successfully' : 'Driver registration rejected',
+        data: { driver: updatedDriver }
+    });
+});
+
+// @desc    Get onboarding status for the current user (works for unapproved drivers)
+// @route   GET /api/drivers/onboarding-status
+// @access  Private (any authenticated user)
+const getOnboardingStatus = catchAsync(async (req, res) => {
+    const userId = req.user._id || req.user.id;
+
+    const driver = await Driver.findOne({ user: userId })
+        .select('isApproved isActive vehicle documents')
+        .lean();
+
+    if (!driver) {
+        return res.json({
+            success: true,
+            data: { status: 'not_started', hasDriverProfile: false }
+        });
+    }
+
+    // Check if documents have been uploaded
+    const docs = driver.documents || {};
+    const hasDocuments = !!(docs.driverLicense || docs.front);
+
+    let status = 'pending'; // profile created, waiting for approval
+    if (driver.isApproved) {
+        status = 'approved';
+    }
+
+    res.json({
+        success: true,
+        data: {
+            status,
+            hasDriverProfile: true,
+            isApproved: driver.isApproved,
+            hasDocuments,
+            vehicle: driver.vehicle,
+        }
+    });
+});
+
 module.exports = {
     createDriver,
     getAllDrivers,
@@ -1245,5 +1504,10 @@ module.exports = {
     getAllDriverStatistics,
     getNearbyDrivers,
     getDriverActivity,
-    getDriverOfferStats
+    getDriverOfferStats,
+    registerDriver,
+    uploadDriverDocument,
+    getPendingDrivers,
+    approveDriver,
+    getOnboardingStatus
 };

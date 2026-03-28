@@ -9,6 +9,10 @@ const { haversineKm } = require('../utils/distance');
 const RideOffer = require('../models/rideOffer.model');
 const { pushIfOffline, emitCritical } = require('../utils/socketHelpers');
 const { isUserOnlineAsync } = require('../socket/presence');
+const analytics = require('../services/analytics.service');
+const { maskPhone } = require('../utils/phoneMask');
+const RideShare = require('../models/rideShare.model');
+const emailService = require('../services/email.service');
 
 // Proximity threshold: driver must be within this distance to confirm arrival/completion
 const ARRIVAL_PROXIMITY_KM = 0.5; // 500 meters
@@ -115,7 +119,8 @@ const createRide = catchAsync(async (req, res, next) => {
         passengerPhone,
         paymentMethod,
         paymentId,
-        notes
+        notes,
+        scheduledFor
     } = req.body;
 
     // Validate required fields
@@ -179,6 +184,24 @@ const createRide = catchAsync(async (req, res, next) => {
         ? stops.filter(s => s && s.lat && s.lng && s.address).slice(0, 2)
         : [];
 
+    // Validate scheduledFor if provided (must be in the future, max 7 days ahead)
+    let scheduledForDate = null;
+    let isScheduledRide = false;
+    if (scheduledFor) {
+        scheduledForDate = new Date(scheduledFor);
+        if (isNaN(scheduledForDate.getTime())) {
+            return next(new AppError('scheduledFor must be a valid date', 400));
+        }
+        if (scheduledForDate <= new Date()) {
+            return next(new AppError('scheduledFor must be a future date and time', 400));
+        }
+        const maxSchedule = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+        if (scheduledForDate > maxSchedule) {
+            return next(new AppError('Rides can only be scheduled up to 7 days in advance', 400));
+        }
+        isScheduledRide = true;
+    }
+
     // Create the ride
     const ride = await Ride.create({
         user: req.user.id,
@@ -192,7 +215,9 @@ const createRide = catchAsync(async (req, res, next) => {
         paymentMethod: paymentMethod || 'cash',
         notes,
         status: 'pending',
-        expiresAt
+        expiresAt,
+        scheduledFor: scheduledForDate,
+        isScheduled: isScheduledRide
     });
 
     // Link pre-paid card payment to this ride
@@ -209,9 +234,10 @@ const createRide = catchAsync(async (req, res, next) => {
     // Populate user in-place (avoids re-fetching the ride from DB)
     await ride.populate('user', 'firstName lastName email phone');
 
-    // Broadcast to eligible driver type rooms only (O(1) — no DB query needed)
+    // Scheduled rides are NOT broadcast to drivers immediately —
+    // the scheduler will broadcast them when scheduledFor is within 10 minutes.
     const io = req.app.get('io');
-    if (io) {
+    if (io && !isScheduledRide) {
         const eligibleTypes = getEligibleDriverTypes(vehicleType);
         let broadcast = io.to('admin');
         for (const type of eligibleTypes) {
@@ -230,7 +256,7 @@ const createRide = catchAsync(async (req, res, next) => {
 
     const responseBody = {
         success: true,
-        message: 'Ride requested successfully',
+        message: isScheduledRide ? 'Ride scheduled successfully' : 'Ride requested successfully',
         data: { ride }
     };
 
@@ -243,30 +269,40 @@ const createRide = catchAsync(async (req, res, next) => {
     // Return response immediately — don't wait for push notifications
     res.status(201).json(responseBody);
 
-    // Fire-and-forget: query drivers + send push notifications after response
-    setImmediate(async () => {
-        try {
-            const onlineDrivers = await Driver.find({
-                status: 'online',
-                isActive: true,
-                isApproved: true,
-                'vehicle.type': { $in: getEligibleDriverTypes(vehicleType) }
-            }).select('user').lean();
-
-            const driverUserIds = onlineDrivers.map(d => d.user.toString());
-            if (driverUserIds.length > 0) {
-                await pushService.sendToUsers(
-                    driverUserIds,
-                    'ride_request_title',
-                    'ride_request_body',
-                    { rideId: ride._id.toString(), channelId: 'ride-requests' },
-                    { address: pickup?.address || '' }
-                );
-            }
-        } catch (err) {
-            console.error('Push error (createRide):', err.message);
-        }
+    // Analytics
+    analytics.trackEvent(req.user.id, isScheduledRide ? analytics.EVENTS.RIDE_SCHEDULED : analytics.EVENTS.RIDE_REQUESTED, {
+        rideId: ride._id.toString(),
+        vehicleType,
+        fare: ride.quote?.totalPrice,
+        scheduledFor: scheduledForDate ? scheduledForDate.toISOString() : null
     });
+
+    // Fire-and-forget: push notifications — skip for scheduled rides (drivers notified later)
+    if (!isScheduledRide) {
+        setImmediate(async () => {
+            try {
+                const onlineDrivers = await Driver.find({
+                    status: 'online',
+                    isActive: true,
+                    isApproved: true,
+                    'vehicle.type': { $in: getEligibleDriverTypes(vehicleType) }
+                }).select('user').lean();
+
+                const driverUserIds = onlineDrivers.map(d => d.user.toString());
+                if (driverUserIds.length > 0) {
+                    await pushService.sendToUsers(
+                        driverUserIds,
+                        'ride_request_title',
+                        'ride_request_body',
+                        { rideId: ride._id.toString(), channelId: 'ride-requests' },
+                        { address: pickup?.address || '' }
+                    );
+                }
+            } catch (err) {
+                console.error('Push error (createRide):', err.message);
+            }
+        });
+    }
 });
 
 // @desc    Create a ride request on behalf of a caller (admin/dispatcher)
@@ -467,7 +503,8 @@ const acceptRide = catchAsync(async (req, res, next) => {
             ? `${populatedRide.driver.user.firstName || ''} ${populatedRide.driver.user.lastName || ''}`.trim()
             : '';
 
-        // Notify user + admin with push fallback for passenger
+        // Notify user + admin with push fallback for passenger.
+        // Passenger receives the full ride object (their own phone is not masked).
         emitCritical(
             io,
             `user:${ride.user}`,
@@ -484,14 +521,27 @@ const acceptRide = catchAsync(async (req, res, next) => {
         // Exclude the ride user's room to prevent double-delivery if user is also admin
         io.to('admin').except(`user:${ride.user}`).emit('ride:accepted', populatedRide);
 
-        // Broadcast ride:unavailable to ALL connected drivers EXCEPT the one who accepted.
+        // Send a copy to the accepting driver with passenger phone masked
+        const rideForDriver = populatedRide.toObject();
+        if (rideForDriver.user) {
+            rideForDriver.user.phone = maskPhone(rideForDriver.user.phone);
+        }
+        io.to(`driver:${req.user.id}`).emit('ride:accepted', rideForDriver);
+
+        // Broadcast ride:unavailable to ALL other connected drivers
         io.to('drivers:all').except(`driver:${req.user.id}`).emit('ride:unavailable', { rideId: ride._id });
+    }
+
+    // Return a masked copy of the ride to the driver making the HTTP request
+    const rideResponseForDriver = populatedRide.toObject();
+    if (rideResponseForDriver.user) {
+        rideResponseForDriver.user.phone = maskPhone(rideResponseForDriver.user.phone);
     }
 
     res.json({
         success: true,
         message: 'Ride accepted successfully',
-        data: { ride: populatedRide }
+        data: { ride: rideResponseForDriver }
     });
 });
 
@@ -835,6 +885,14 @@ const completeRide = catchAsync(async (req, res, next) => {
         return next(new AppError('Ride transition failed — status may have changed', 409));
     }
 
+    // Expire any live ride-share documents for this ride — set TTL to endTime + 1 hour
+    // so the MongoDB TTL index cleans them up automatically.
+    const rideShareExpiry = new Date(ride.endTime.getTime() + 60 * 60 * 1000);
+    RideShare.updateMany(
+        { ride: ride._id },
+        { $set: { expiresAt: rideShareExpiry } }
+    ).catch(err => console.error('[completeRide] RideShare expiry update failed:', err.message));
+
     // Update driver stats atomically (prevents race conditions on concurrent completions)
     await Driver.updateOne(
         { _id: driver._id },
@@ -845,7 +903,7 @@ const completeRide = catchAsync(async (req, res, next) => {
     );
 
     const populatedRide = await Ride.findById(ride._id)
-        .populate('user', 'firstName lastName email phone')
+        .populate('user', 'firstName lastName email phone preferredLanguage')
         .populate({
             path: 'driver',
             populate: {
@@ -902,6 +960,76 @@ const completeRide = catchAsync(async (req, res, next) => {
         { rideId: ride._id.toString() },
         { fare: String(finalFare) }
     ).catch(err => console.error('Push error (completeRide/driver):', err.message));
+
+    analytics.trackEvent(req.user.id, analytics.EVENTS.RIDE_COMPLETED, {
+        rideId: ride._id.toString(),
+        fare: finalFare,
+        vehicleType: ride.vehicleType,
+        durationSeconds: ride.endTime && ride.startTime
+            ? Math.round((new Date(ride.endTime) - new Date(ride.startTime)) / 1000)
+            : null
+    });
+
+    // Send receipt email to passenger (fire-and-forget)
+    if (populatedRide.user?.email) {
+        const baseFare = ride.quote?.basePrice ?? 0;
+        const distanceCharge = Math.max(0, finalFare - baseFare - (ride.waitingFee || 0));
+        let durationSeconds = null;
+        if (ride.startTime && ride.endTime) {
+            durationSeconds = Math.round((new Date(ride.endTime) - new Date(ride.startTime)) / 1000);
+        }
+        const fmtDuration = (s) => {
+            if (!s || s <= 0) return null;
+            const h = Math.floor(s / 3600);
+            const m = Math.floor((s % 3600) / 60);
+            return h > 0 ? `${h}h ${m}m` : `${m}m`;
+        };
+        const fmtDistance = (meters) => {
+            if (!meters || meters <= 0) return null;
+            if (meters < 1000) return `${Math.round(meters)}m`;
+            return `${(meters / 1000).toFixed(1)} km`;
+        };
+
+        const receiptData = {
+            receiptId: ride._id,
+            ride: {
+                vehicleType: ride.vehicleType,
+                pickup: ride.pickup,
+                dropoff: ride.dropoff,
+                stops: ride.stops || [],
+                distance: {
+                    formatted: ride.quote?.distanceText || fmtDistance(ride.quote?.distance),
+                },
+                duration: {
+                    formatted: durationSeconds ? fmtDuration(durationSeconds) : (ride.quote?.durationText || null),
+                },
+            },
+            driver: populatedRide.driver ? {
+                name: `${populatedRide.driver.user?.firstName || ''} ${populatedRide.driver.user?.lastName || ''}`.trim(),
+                vehicle: populatedRide.driver.vehicle || null,
+            } : null,
+            passenger: {
+                name: `${populatedRide.user.firstName || ''} ${populatedRide.user.lastName || ''}`.trim(),
+            },
+            fare: {
+                total: finalFare,
+                breakdown: {
+                    baseFare,
+                    distanceCharge: Math.round(distanceCharge * 100) / 100,
+                    waitingFee: ride.waitingFee || 0,
+                },
+                paymentMethod: ride.paymentMethod,
+            },
+            timestamps: {
+                requested: ride.createdAt,
+                rideCompleted: ride.endTime,
+            },
+        };
+
+        const receiptLang = populatedRide.user.preferredLanguage || 'en';
+        emailService.sendReceiptEmail(populatedRide.user.email, receiptData, receiptLang)
+            .catch(err => console.error('[completeRide] Receipt email failed:', err.message));
+    }
 
     res.json({
         success: true,
@@ -1063,6 +1191,12 @@ const cancelRide = catchAsync(async (req, res, next) => {
         ).catch(err => console.error('Push error (cancelRide/driver):', err.message));
     }
 
+    analytics.trackEvent(req.user.id, analytics.EVENTS.RIDE_CANCELLED, {
+        rideId: cancelledRide._id.toString(),
+        cancelledBy,
+        reason: reason || null
+    });
+
     res.json({
         success: true,
         message: 'Ride cancelled successfully',
@@ -1098,13 +1232,22 @@ const getMyRides = catchAsync(async (req, res, next) => {
         Ride.countDocuments(query)
     ]);
 
+    // Mask driver phone numbers before returning to passenger
+    const maskedRides = rides.map(ride => {
+        const rideData = ride.toObject();
+        if (rideData.driver && rideData.driver.user) {
+            rideData.driver.user.phone = maskPhone(rideData.driver.user.phone);
+        }
+        return rideData;
+    });
+
     res.json({
         success: true,
-        count: rides.length,
+        count: maskedRides.length,
         total,
         page: pageNum,
         pages: Math.ceil(total / limitNum),
-        data: { rides }
+        data: { rides: maskedRides }
     });
 });
 
@@ -1135,13 +1278,22 @@ const getDriverRides = catchAsync(async (req, res, next) => {
         Ride.countDocuments(query)
     ]);
 
+    // Mask passenger phone numbers before returning to driver
+    const maskedRides = rides.map(ride => {
+        const rideData = ride.toObject();
+        if (rideData.user) {
+            rideData.user.phone = maskPhone(rideData.user.phone);
+        }
+        return rideData;
+    });
+
     res.json({
         success: true,
-        count: rides.length,
+        count: maskedRides.length,
         total,
         page: pageNum,
         pages: Math.ceil(total / limitNum),
-        data: { rides }
+        data: { rides: maskedRides }
     });
 });
 
@@ -1172,9 +1324,23 @@ const getRide = catchAsync(async (req, res, next) => {
         return next(new AppError('You do not have permission to view this ride', 403));
     }
 
+    // Build a sanitised copy so we never mutate the Mongoose document
+    const rideData = ride.toObject();
+
+    // Passengers see a masked driver phone; drivers see a masked passenger phone.
+    // Admins receive full unmasked data.
+    if (!isAdmin) {
+        if (isUser && rideData.driver && rideData.driver.user) {
+            rideData.driver.user.phone = maskPhone(rideData.driver.user.phone);
+        }
+        if (isDriver && rideData.user) {
+            rideData.user.phone = maskPhone(rideData.user.phone);
+        }
+    }
+
     res.json({
         success: true,
-        data: { ride }
+        data: { ride: rideData }
     });
 });
 
@@ -1609,6 +1775,225 @@ const expireWaitingRides = async (io) => {
     }
 };
 
+// @desc    Driver rates a passenger after ride completion (Task 4: two-way rating)
+// @route   POST /api/rides/:id/review-passenger
+// @access  Private/Driver
+const reviewPassenger = catchAsync(async (req, res, next) => {
+    const { rating, review } = req.body;
+
+    if (!rating || rating < 1 || rating > 5) {
+        return next(new AppError('Rating must be between 1 and 5', 400));
+    }
+
+    // Verify caller has an approved driver profile
+    const driver = await Driver.findOne({ user: req.user.id, isApproved: true }).select('_id').lean();
+    if (!driver) {
+        return next(new AppError('Driver profile not found or not approved', 403));
+    }
+
+    const ride = await Ride.findById(req.params.id);
+
+    if (!ride) {
+        return next(new AppError('Ride not found', 404));
+    }
+
+    // Only the driver assigned to this ride can rate the passenger
+    if (!ride.driver || ride.driver.toString() !== driver._id.toString()) {
+        return next(new AppError('You are not the assigned driver for this ride', 403));
+    }
+
+    if (ride.status !== 'completed') {
+        return next(new AppError('You can only rate passengers on completed rides', 400));
+    }
+
+    if (ride.driverRating) {
+        return next(new AppError('You have already rated the passenger for this ride', 400));
+    }
+
+    ride.driverRating = rating;
+    ride.driverReview = review || null;
+    ride.driverReviewedAt = new Date();
+    await ride.save();
+
+    res.json({
+        success: true,
+        message: 'Passenger rated successfully',
+        data: {
+            rideId: ride._id,
+            driverRating: ride.driverRating,
+            driverReview: ride.driverReview,
+            driverReviewedAt: ride.driverReviewedAt
+        }
+    });
+});
+
+// @desc    List upcoming scheduled rides for the authenticated user (Task 6)
+// @route   GET /api/rides/scheduled
+// @access  Private
+const getScheduledRides = catchAsync(async (req, res) => {
+    const { page = 1, limit = 20 } = req.query;
+
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.min(50, Math.max(1, parseInt(limit, 10) || 20));
+    const skip = (pageNum - 1) * limitNum;
+
+    const query = {
+        user: req.user.id,
+        isScheduled: true,
+        scheduledFor: { $gte: new Date() },
+        status: { $in: ['pending', 'accepted'] }
+    };
+
+    const [rides, total] = await Promise.all([
+        Ride.find(query)
+            .populate({
+                path: 'driver',
+                populate: {
+                    path: 'user',
+                    select: 'firstName lastName fullName phone profileImage'
+                }
+            })
+            .sort({ scheduledFor: 1 })
+            .skip(skip)
+            .limit(limitNum),
+        Ride.countDocuments(query)
+    ]);
+
+    res.json({
+        success: true,
+        count: rides.length,
+        total,
+        page: pageNum,
+        pages: Math.ceil(total / limitNum),
+        data: { rides }
+    });
+});
+
+// Broadcast scheduled rides that are starting within the next 10 minutes.
+// Called on a periodic interval from app.js so drivers get notified in time to accept.
+const SCHEDULED_BROADCAST_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
+// Minimum gap between re-broadcasts of the same ride (prevents duplicate blasts
+// when the cron fires every 60 seconds but the ride stays in the window).
+const SCHEDULED_BROADCAST_DEDUP_MS = 10 * 60 * 1000; // 10 minutes
+
+// ── Scheduler concurrency lock ─────────────────────────────────────────────────
+//
+// Problem: broadcastScheduledRides() runs on a setInterval. If the DB query
+// or the per-ride updateOne calls take longer than the interval (1 minute) the
+// next tick will start a second concurrent run, leading to duplicate broadcasts.
+//
+// Current approach — in-process boolean lock:
+//   Works correctly for single-process and PM2-cluster deployments where
+//   background jobs are restricted to instance 0 (see isPrimaryWorker in app.js).
+//   If a run is still in progress when the next interval fires the new tick is
+//   skipped and a warning is emitted — no duplicate broadcasts.
+//
+// TODO (multi-instance / Redis): Replace with a Redis SET NX EX lock:
+//   const acquired = await redis.set('lock:scheduledBroadcast', '1', { NX: true, EX: 50 });
+//   if (!acquired) return;   // another instance is running — skip
+//   try { ... } finally { await redis.del('lock:scheduledBroadcast'); }
+//
+// Note: the `lastBroadcastAt` dedup stamp (written atomically via updateOne before
+// any broadcast) already provides a second line of defence. Even if two instances
+// both pass the lock simultaneously, the first one to stamp a ride will exclude it
+// from the second instance's query window, preventing a double-broadcast for the
+// same ride.
+// ──────────────────────────────────────────────────────────────────────────────
+let _scheduledBroadcastRunning = false;
+
+const broadcastScheduledRides = async (io) => {
+    // In-process lock — skips the tick if a previous run hasn't finished yet.
+    if (_scheduledBroadcastRunning) {
+        console.warn('[scheduler] broadcastScheduledRides skipped — previous run still in progress (consider Redis lock for multi-instance)');
+        return;
+    }
+    _scheduledBroadcastRunning = true;
+
+    try {
+        if (!io) return;
+
+        const now = new Date();
+        const windowEnd = new Date(now.getTime() + SCHEDULED_BROADCAST_WINDOW_MS);
+        // Only fetch rides that have never been broadcast OR whose last broadcast
+        // was more than SCHEDULED_BROADCAST_DEDUP_MS ago.
+        const dedupCutoff = new Date(now.getTime() - SCHEDULED_BROADCAST_DEDUP_MS);
+
+        // Find pending scheduled rides within the broadcast window that haven't
+        // been broadcast recently.
+        //
+        // The `lastBroadcastAt` field is the primary dedup mechanism for multi-instance
+        // deployments: once any instance stamps a ride, all instances will skip it for
+        // the next SCHEDULED_BROADCAST_DEDUP_MS (10 min), regardless of which instance
+        // held the lock. This means the worst-case duplicate window equals the time
+        // between two instances reading the same un-stamped ride and the first stamp
+        // being written — a very small window under normal DB latencies.
+        const upcomingRides = await Ride.find({
+            isScheduled: true,
+            status: 'pending',
+            scheduledFor: { $gte: now, $lte: windowEnd },
+            $or: [
+                { lastBroadcastAt: null },
+                { lastBroadcastAt: { $lte: dedupCutoff } }
+            ]
+        }).populate('user', 'firstName lastName email phone').lean();
+
+        if (upcomingRides.length === 0) return;
+
+        const pricingConfig = await Settings.getPricing();
+        const commissionPercent = pricingConfig.commissionPercent || 15;
+
+        for (const ride of upcomingRides) {
+            // Stamp BEFORE broadcasting: this minimises the multi-instance race window.
+            // If the stamp write fails we skip the broadcast for this tick to avoid a
+            // potential duplicate on the next tick.
+            const stampResult = await Ride.updateOne(
+                {
+                    _id: ride._id,
+                    // Only stamp if it still hasn't been broadcast by another instance
+                    // since we fetched the list above (optimistic concurrency guard).
+                    $or: [
+                        { lastBroadcastAt: null },
+                        { lastBroadcastAt: { $lte: dedupCutoff } }
+                    ]
+                },
+                { $set: { lastBroadcastAt: now } }
+            );
+
+            // If modifiedCount is 0, another instance already stamped this ride —
+            // skip broadcasting it from this instance.
+            if (stampResult.modifiedCount === 0) {
+                console.warn(`[scheduler] Skipping ride ${ride._id} — already stamped by another instance`);
+                continue;
+            }
+
+            const eligibleTypes = getEligibleDriverTypes(ride.vehicleType);
+            let broadcast = io.to('admin');
+            for (const type of eligibleTypes) {
+                broadcast = broadcast.to(`drivers:${type}`);
+            }
+
+            const totalPrice = ride.quote?.totalPrice || 0;
+            const commissionAmount = Math.round(totalPrice * (commissionPercent / 100) * 100) / 100;
+            const rideData = {
+                ...ride,
+                commissionPercent,
+                commissionAmount,
+                driverEarnings: Math.round((totalPrice - commissionAmount) * 100) / 100,
+                isScheduledBroadcast: true
+            };
+
+            broadcast.emit('ride:request', rideData);
+
+            console.log(`[scheduler] Broadcast scheduled ride ${ride._id} (scheduledFor: ${ride.scheduledFor})`);
+        }
+    } catch (err) {
+        console.error('[scheduler] Error broadcasting scheduled rides:', err.message);
+    } finally {
+        // Always release the lock, even if an error is thrown.
+        _scheduledBroadcastRunning = false;
+    }
+};
+
 module.exports = {
     createRide,
     adminCreateRide,
@@ -1624,7 +2009,11 @@ module.exports = {
     getAllRides,
     getAvailableRides,
     reviewDriver,
+    reviewPassenger,
+    getScheduledRides,
     receiveLocationBatch,
     expireOldRides,
-    expireWaitingRides
+    expireWaitingRides,
+    getEligibleDriverTypes,
+    broadcastScheduledRides
 };

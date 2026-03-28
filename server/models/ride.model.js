@@ -178,6 +178,30 @@ const rideSchema = new mongoose.Schema({
         type: Date,
         default: null
     },
+    // Driver's rating of the passenger (Task 4: two-way rating)
+    driverRating: {
+        type: Number,
+        min: 1,
+        max: 5,
+        default: null
+    },
+    driverReview: {
+        type: String,
+        default: null
+    },
+    driverReviewedAt: {
+        type: Date,
+        default: null
+    },
+    // Scheduled ride fields (Task 6)
+    scheduledFor: {
+        type: Date,
+        default: null
+    },
+    isScheduled: {
+        type: Boolean,
+        default: false
+    },
     expiresAt: {
         type: Date,
         default: null
@@ -193,6 +217,12 @@ const rideSchema = new mongoose.Schema({
     dropoffApproachNotified: {
         type: Boolean,
         default: false
+    },
+    // Tracks when this scheduled ride was last broadcast to drivers.
+    // Used to prevent duplicate broadcasts when the cron fires every minute.
+    lastBroadcastAt: {
+        type: Date,
+        default: null
     },
     // Route points recorded during in_progress phase (for ride reconstruction)
     routePoints: [{
@@ -217,6 +247,7 @@ rideSchema.index({ status: 1, expiresAt: 1 }); // For querying non-expired pendi
 rideSchema.index({ status: 1, waitingExpiresAt: 1 }); // For querying waiting timeout rides
 rideSchema.index({ status: 1, vehicleType: 1, expiresAt: 1 }); // getAvailableRides filtered by vehicle type
 rideSchema.index({ driver: 1, status: 1, endTime: -1 }); // Driver ride history sorted by completion
+rideSchema.index({ user: 1, isScheduled: 1, scheduledFor: 1 }); // Scheduled ride queries per user
 
 const Ride = mongoose.model('Ride', rideSchema);
 

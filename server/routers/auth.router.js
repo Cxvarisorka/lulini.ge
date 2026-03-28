@@ -17,7 +17,13 @@ const {
     completeOnboarding,
     sendPhoneUpdateOtp,
     verifyPhoneUpdateOtp,
-    updateEmail
+    sendEmailCode,
+    verifyEmailCode,
+    sendEmailVerification,
+    verifyEmailForRegistration,
+    updateProfile,
+    deleteAccount,
+    cancelAccountDeletion
 } = require('../controllers/auth.controller');
 const { protect } = require('../middlewares/auth.middleware');
 const { authLimiter, otpSendLimiter, otpVerifyLimiter } = require('../middlewares/rateLimiter');
@@ -67,8 +73,25 @@ router.post('/apple/token', authLimiter, appleTokenAuth);
 // Complete onboarding
 router.post('/complete-onboarding', protect, completeOnboarding);
 
-// Update email (authenticated)
-router.patch('/email', protect, updateEmail);
+// Update profile (firstName, lastName)
+router.patch('/profile', protect, updateProfile);
+
+// Email verification (authenticated — add/update email)
+router.post('/email/send-code', protect, otpSendLimiter, sendEmailCode);
+router.post('/email/verify-code', protect, otpVerifyLimiter, verifyEmailCode);
+
+// Email verification (unauthenticated — for registration)
+router.post('/email/send-verification', otpSendLimiter, sendEmailVerification);
+router.post('/email/verify-registration', otpVerifyLimiter, verifyEmailForRegistration);
+
+// Account deletion (Apple App Store requirement)
+// DELETE /account        - schedule deletion (30-day grace period)
+// DELETE /account/cancel - cancel a pending deletion within the grace period
+//
+// The /cancel sub-route MUST be registered before /account so Express matches
+// the more-specific path first.
+router.delete('/account/cancel', protect, cancelAccountDeletion);
+router.delete('/account', protect, deleteAccount);
 
 // Google OAuth for mobile (web browser flow - legacy) - starts OAuth flow and passes redirect_uri as state
 router.get('/google/mobile', (req, res, next) => {

@@ -44,6 +44,7 @@ function connectionHandler(io) {
         if (rawAppType === 'driver' && socket.user.role !== 'driver' && socket.user.role !== 'admin') {
             const hasDriverProfile = await findDriverProfile(socket.user.id);
             if (!hasDriverProfile) {
+                console.log(`[Socket] Rejecting driver-app connection: userId=${socket.user.id}, role=${socket.user.role}, no approved driver profile found`);
                 socket.emit('error', { message: 'Not authorized as driver' });
                 socket.disconnect(true);
                 return;

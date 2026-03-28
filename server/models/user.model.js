@@ -94,8 +94,20 @@ const userSchema = new mongoose.Schema({
     }],
     preferredLanguage: {
         type: String,
-        enum: ['en', 'es', 'ru', 'ka'],
+        enum: ['en', 'ka'],
         default: 'ka'
+    },
+    // Account deletion grace period (30 days). Set when user requests deletion.
+    // A background job (or on login) can hard-delete when this date is in the past.
+    deletionScheduledAt: {
+        type: Date,
+        default: null
+    },
+    // Soft-delete flag set immediately so the account cannot be used during the
+    // grace period, even before the hard-delete job runs.
+    isDeleted: {
+        type: Boolean,
+        default: false
     }
 }, {
     timestamps: true
@@ -120,6 +132,9 @@ userSchema.index({ provider: 1, providerId: 1 });
 
 // Index for device token lookups (registerToken cross-user cleanup)
 userSchema.index({ 'deviceTokens.token': 1 });
+
+// Index for scheduled-deletion cleanup job
+userSchema.index({ deletionScheduledAt: 1 }, { sparse: true });
 
 const User = mongoose.model('User', userSchema);
 

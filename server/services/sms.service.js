@@ -93,7 +93,44 @@ const sendVerification = async (phone) => {
     }
 };
 
+/**
+ * Send a custom SMS message to a phone number.
+ * In development (or when SMS_API is not configured) the message is logged
+ * instead of being delivered, so the caller never throws in non-production.
+ * @param {string} phone - Recipient phone number
+ * @param {string} message - Message text to send
+ * @returns {Promise<{ sent: boolean } | { devLog: true }>}
+ */
+const sendSMS = async (phone, message) => {
+    if (!apiKey) {
+        console.warn(`SMS_API not configured. Would send to ${phone}: ${message}`);
+        return { devLog: true };
+    }
+
+    try {
+        const result = await sendSms(phone, message);
+
+        if (!result.Success) {
+            console.error('SMSOffice sendSMS failed:', result.ErrorCode, result.Message);
+            if (process.env.NODE_ENV !== 'production') {
+                console.warn(`Falling back to dev log. Message to ${phone}: ${message}`);
+                return { devLog: true };
+            }
+            throw new Error(`SMS send failed: ${result.Message} (code ${result.ErrorCode})`);
+        }
+
+        return { sent: true };
+    } catch (error) {
+        if (process.env.NODE_ENV !== 'production') {
+            console.warn(`SMS send error, falling back to dev log. Message to ${phone}: ${message}`);
+            return { devLog: true };
+        }
+        throw error;
+    }
+};
+
 module.exports = {
     generateOTP,
     sendVerification,
+    sendSMS,
 };
