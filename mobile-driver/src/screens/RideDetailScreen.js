@@ -9,6 +9,8 @@ import {
   Alert,
   Linking,
   Platform,
+  Modal,
+  TextInput,
 } from 'react-native';
 import MapView from '../components/map/MapViewWrapper';
 import Marker from '../components/map/MarkerWrapper';
@@ -17,6 +19,7 @@ import { markerImages } from '../components/map/markerImages';
 import { mapStyle } from '../components/map/mapStyle';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { safeFitToCoordinates } from '../utils/mapSafety';
 
@@ -26,7 +29,7 @@ import { useDriver } from '../context/DriverContext';
 import { useSocket } from '../context/SocketContext';
 import { useMap } from '../context/MapContext';
 import { useLocation } from '../context/LocationContext';
-import { colors, shadows, radius, useTypography } from '../theme/colors';
+import { colors, shadows, radius, spacing, useTypography } from '../theme/colors';
 import { haversineKm } from '../utils/distance';
 
 const PROXIMITY_THRESHOLD_KM = 0.5; // 500m — must be within this to click arrival/complete buttons
@@ -59,6 +62,11 @@ export default function RideDetailScreen({ navigation, route }) {
   const [waitingFee, setWaitingFee] = useState(0);
   const [polylineCoords, setPolylineCoords] = useState([]);
   const [distanceToTarget, setDistanceToTarget] = useState(null); // km
+  const [showRatingModal, setShowRatingModal] = useState(false);
+  const [ratingValue, setRatingValue] = useState(0);
+  const [ratingReview, setRatingReview] = useState('');
+  const [ratingSubmitting, setRatingSubmitting] = useState(false);
+  const [ratingSubmitted, setRatingSubmitted] = useState(false);
   const cancelledHandledRef = useRef(false);
   const mapRef = useRef(null);
   const hasFitted = useRef(false);
@@ -297,6 +305,21 @@ export default function RideDetailScreen({ navigation, route }) {
     );
   };
 
+  const handleSubmitRating = async () => {
+    if (ratingValue === 0) return;
+    setRatingSubmitting(true);
+    try {
+      await rideAPI.reviewPassenger(rideId, ratingValue, ratingReview.trim());
+      setRatingSubmitted(true);
+      setShowRatingModal(false);
+      Alert.alert(t('common.success'), t('rating.ratingSubmitted'));
+    } catch {
+      Alert.alert(t('common.error'), t('errors.somethingWentWrong'));
+    } finally {
+      setRatingSubmitting(false);
+    }
+  };
+
   const handleNavigate = (address, lat, lng) => {
     if (isBuiltinMap) {
       navigation.navigate('Navigation', {
@@ -314,7 +337,11 @@ export default function RideDetailScreen({ navigation, route }) {
   const formatDate = (dateString) => {
     if (!dateString) return '—';
     const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
+    // Map i18n language codes to BCP 47 locale tags for toLocaleDateString.
+    // Georgian ('ka') maps to 'ka-GE'; fall back to the device default for everything else.
+    const localeMap = { ka: 'ka-GE', en: 'en-US' };
+    const locale = localeMap[i18n.language] ?? undefined;
+    return date.toLocaleDateString(locale, {
       month: 'short', day: 'numeric', year: 'numeric',
       hour: '2-digit', minute: '2-digit',
     });
@@ -346,7 +373,7 @@ export default function RideDetailScreen({ navigation, route }) {
     latitudeDelta: 0.05,
     longitudeDelta: 0.05,
   } : {
-    latitude: 42.2679, longitude: 42.6946,
+    latitude: 41.6938, longitude: 44.8015,
     latitudeDelta: 0.05, longitudeDelta: 0.05,
   };
 
@@ -582,18 +609,49 @@ export default function RideDetailScreen({ navigation, route }) {
                 <Text style={styles.passengerPhone}>{ride.passengerPhone}</Text>
               )}
             </View>
-            {ride.passengerPhone && (
-              <TouchableOpacity
-                style={styles.contactButton}
-                onPress={() => Linking.openURL(`tel:${ride.passengerPhone}`)}
-                accessibilityRole="button"
-                accessibilityLabel={t('rides.callPassenger') || 'Call passenger'}
-              >
-                <Ionicons name="call" size={18} color={colors.primary} />
-              </TouchableOpacity>
-            )}
+            <View style={styles.contactButtons}>
+              {ride.passengerPhone && (
+                <TouchableOpacity
+                  style={styles.contactButton}
+                  onPress={() => Linking.openURL(`tel:${ride.passengerPhone}`)}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('rides.callPassenger')}
+                >
+                  <Ionicons name="call" size={18} color={colors.primary} />
+                </TouchableOpacity>
+              )}
+              {!isReadOnly && (
+                <TouchableOpacity
+                  style={styles.contactButton}
+                  onPress={() => navigation.navigate('Chat', {
+                    rideId,
+                    passengerName: ride.passengerName,
+                  })}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('rides.chatWithPassenger')}
+                >
+                  <Ionicons name="chatbubble-outline" size={18} color={colors.primary} />
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
         </View>
+
+        {/* Rate Passenger — completed rides only, not yet rated */}
+        {ride.status === 'completed' && !ratingSubmitted && !ride.driverRatingForPassenger && (
+          <View style={styles.card}>
+            <TouchableOpacity
+              style={styles.ratePassengerButton}
+              onPress={() => setShowRatingModal(true)}
+              accessibilityRole="button"
+              accessibilityLabel={t('rides.ratePassengerAction')}
+            >
+              <Ionicons name="star-outline" size={22} color={colors.gold} />
+              <Text style={styles.ratePassengerText}>{t('rides.ratePassengerAction')}</Text>
+              <Ionicons name="chevron-forward" size={18} color={colors.mutedForeground} />
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Waiting Time Card - active rides only */}
         {ride.status === 'driver_arrived' && waitingTimeLeft !== null && (
@@ -782,6 +840,76 @@ export default function RideDetailScreen({ navigation, route }) {
 
         <View style={{ height: 32 }} />
       </ScrollView>
+
+      {/* Rate Passenger Modal */}
+      <Modal
+        visible={showRatingModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowRatingModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.ratingModal}>
+            <View style={styles.ratingModalHandle} />
+            <Text style={styles.ratingModalTitle}>{t('rating.ratePassenger')}</Text>
+            <Text style={styles.ratingModalSubtitle}>{t('rating.ratePassengerDesc')}</Text>
+            {/* Stars */}
+            <View style={styles.starsRow} accessibilityRole="none">
+              {[1, 2, 3, 4, 5].map((star) => (
+                <TouchableOpacity
+                  key={star}
+                  onPress={() => setRatingValue(star)}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('rating.starLabel', { count: star })}
+                  accessibilityState={{ selected: star <= ratingValue }}
+                  style={styles.starButton}
+                >
+                  <Ionicons
+                    name={star <= ratingValue ? 'star' : 'star-outline'}
+                    size={36}
+                    color={star <= ratingValue ? colors.gold : colors.border}
+                  />
+                </TouchableOpacity>
+              ))}
+            </View>
+            {/* Review text */}
+            <TextInput
+              style={styles.ratingInput}
+              placeholder={t('rating.reviewPlaceholder')}
+              placeholderTextColor={colors.mutedForeground}
+              value={ratingReview}
+              onChangeText={setRatingReview}
+              multiline
+              maxLength={300}
+              accessibilityLabel={t('rating.reviewPlaceholder')}
+            />
+            <View style={styles.ratingModalButtons}>
+              <TouchableOpacity
+                style={styles.ratingSkipButton}
+                onPress={() => setShowRatingModal(false)}
+                accessibilityRole="button"
+                accessibilityLabel={t('rating.skipRating')}
+              >
+                <Text style={styles.ratingSkipText}>{t('rating.skipRating')}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.ratingSubmitButton, (ratingValue === 0 || ratingSubmitting) && styles.ratingSubmitDisabled]}
+                onPress={handleSubmitRating}
+                disabled={ratingValue === 0 || ratingSubmitting}
+                accessibilityRole="button"
+                accessibilityLabel={t('rating.submitRating')}
+                accessibilityState={{ disabled: ratingValue === 0 || ratingSubmitting }}
+              >
+                {ratingSubmitting ? (
+                  <ActivityIndicator color={colors.primaryForeground} size="small" />
+                ) : (
+                  <Text style={styles.ratingSubmitText}>{t('rating.submitRating')}</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -1015,6 +1143,10 @@ const createStyles = (typography) => StyleSheet.create({
     color: colors.mutedForeground,
     marginTop: 2,
   },
+  contactButtons: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+  },
   contactButton: {
     width: 44,
     height: 44,
@@ -1022,6 +1154,17 @@ const createStyles = (typography) => StyleSheet.create({
     backgroundColor: colors.primary + '15',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  ratePassengerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  ratePassengerText: {
+    ...typography.body,
+    fontWeight: '600',
+    color: colors.foreground,
+    flex: 1,
   },
   // Timestamps
   timestampList: {},
@@ -1192,5 +1335,91 @@ const createStyles = (typography) => StyleSheet.create({
     textAlign: 'center',
     marginTop: -4,
     marginBottom: 12,
+  },
+  // Rating Modal
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  ratingModal: {
+    backgroundColor: colors.background,
+    borderTopLeftRadius: radius['2xl'],
+    borderTopRightRadius: radius['2xl'],
+    padding: spacing.xl,
+    paddingBottom: spacing['3xl'],
+  },
+  ratingModalHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.border,
+    alignSelf: 'center',
+    marginBottom: spacing.lg,
+  },
+  ratingModalTitle: {
+    ...typography.h2,
+    fontWeight: '700',
+    color: colors.foreground,
+    textAlign: 'center',
+    marginBottom: spacing.xs,
+  },
+  ratingModalSubtitle: {
+    ...typography.body,
+    color: colors.mutedForeground,
+    textAlign: 'center',
+    marginBottom: spacing.xl,
+  },
+  starsRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginBottom: spacing.lg,
+    gap: spacing.sm,
+  },
+  starButton: {
+    padding: spacing.xs,
+  },
+  ratingInput: {
+    backgroundColor: colors.muted,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    ...typography.body,
+    color: colors.foreground,
+    minHeight: 80,
+    textAlignVertical: 'top',
+    marginBottom: spacing.lg,
+  },
+  ratingModalButtons: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  ratingSkipButton: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.md,
+    borderRadius: radius.xl,
+    backgroundColor: colors.muted,
+  },
+  ratingSkipText: {
+    ...typography.body,
+    color: colors.mutedForeground,
+    fontWeight: '600',
+  },
+  ratingSubmitButton: {
+    flex: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.md,
+    borderRadius: radius.xl,
+    backgroundColor: colors.primary,
+  },
+  ratingSubmitDisabled: {
+    opacity: 0.5,
+  },
+  ratingSubmitText: {
+    ...typography.body,
+    color: colors.primaryForeground,
+    fontWeight: '700',
   },
 });

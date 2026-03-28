@@ -7,6 +7,8 @@ export default {
     icon: './assets/icon.png',
     userInterfaceStyle: 'light',
     owner: "cxvari",
+    // Hermes is the optimised JS engine for React Native — faster startup, lower memory
+    jsEngine: 'hermes',
     // newArchEnabled requires development build, disable for Expo Go
     // newArchEnabled: true,
     scheme: 'lulini-driver',

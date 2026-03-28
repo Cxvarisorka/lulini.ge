@@ -12,6 +12,8 @@ import { colors, useTypography } from '../theme/colors';
 
 // Screens
 import LoginScreen from '../screens/LoginScreen';
+import RegisterScreen from '../screens/RegisterScreen';
+import OnboardingScreen from '../screens/OnboardingScreen';
 import HomeScreen from '../screens/HomeScreen';
 import RidesScreen from '../screens/RidesScreen';
 import EarningsScreen from '../screens/EarningsScreen';
@@ -21,6 +23,8 @@ import RideDetailScreen from '../screens/RideDetailScreen';
 import LanguageSelectScreen from '../screens/LanguageSelectScreen';
 import MapSelectScreen from '../screens/MapSelectScreen';
 import NavigationScreen from '../screens/NavigationScreen';
+import ChatScreen from '../screens/ChatScreen';
+import DeleteAccountScreen from '../screens/DeleteAccountScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -89,7 +93,7 @@ function MainTabs() {
 }
 
 export default function AppNavigator() {
-  const { isAuthenticated, loading } = useAuth();
+  const { isAuthenticated, loading, user } = useAuth();
 
   if (loading) {
     return (
@@ -98,6 +102,12 @@ export default function AppNavigator() {
       </View>
     );
   }
+
+  // Determine which authenticated flow to show.
+  // Existing approved drivers (role=driver) go straight to main tabs.
+  // Anyone else (role=user) is either still onboarding or waiting for approval,
+  // so they stay in the OnboardingScreen which handles both states.
+  const needsOnboarding = isAuthenticated && user?.role !== 'driver';
 
   return (
     <NavigationContainer>
@@ -108,8 +118,20 @@ export default function AppNavigator() {
         }}
       >
         {!isAuthenticated ? (
-          <Stack.Screen name="Login" component={LoginScreen} />
+          // ── Unauthenticated stack ──
+          <>
+            <Stack.Screen name="Login" component={LoginScreen} />
+            <Stack.Screen name="Register" component={RegisterScreen} />
+          </>
+        ) : needsOnboarding ? (
+          // ── Onboarding stack (authenticated but profile not yet set up) ──
+          <Stack.Screen
+            name="Onboarding"
+            component={OnboardingScreen}
+            options={{ animation: 'fade' }}
+          />
         ) : (
+          // ── Main app stack ──
           <>
             <Stack.Screen name="MainTabs" component={MainTabs} />
             <Stack.Screen name="RideDetail" component={RideDetailScreen} />
@@ -117,6 +139,8 @@ export default function AppNavigator() {
             <Stack.Screen name="LanguageSelect" component={LanguageSelectScreen} />
             <Stack.Screen name="MapSelect" component={MapSelectScreen} />
             <Stack.Screen name="Navigation" component={NavigationScreen} />
+            <Stack.Screen name="Chat" component={ChatScreen} />
+            <Stack.Screen name="DeleteAccount" component={DeleteAccountScreen} />
           </>
         )}
       </Stack.Navigator>

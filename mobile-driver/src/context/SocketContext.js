@@ -6,6 +6,8 @@ import * as Notifications from 'expo-notifications';
 import { useAuth } from './AuthContext';
 import { rideAPI } from '../services/api';
 import RideTrackingService from '../services/RideTrackingService';
+// Import i18n instance directly (not the hook) because SocketContext is not a React component
+import i18n from '../i18n';
 
 const SocketContext = createContext();
 
@@ -63,8 +65,14 @@ export const SocketProvider = ({ children }) => {
     setupNotificationChannel();
   }, []);
 
+  // Only connect the socket when the user is an approved driver (role === 'driver').
+  // During registration/onboarding the user has role === 'user' and the server's
+  // isDriver middleware will reject the socket handshake, causing an infinite
+  // connect → disconnect → reconnect loop.
+  const isApprovedDriver = isAuthenticated && userId && user?.role === 'driver';
+
   useEffect(() => {
-    if (isAuthenticated && userId) {
+    if (isApprovedDriver) {
       // Skip reconnection if userId hasn't changed AND socket is still alive.
       // [C3 FIX] Check socket.connected — a dead/failed socket must be replaced.
       if (userIdRef.current === userId && socketRef.current?.connected) {
@@ -80,7 +88,7 @@ export const SocketProvider = ({ children }) => {
     return () => {
       disconnectSocket();
     };
-  }, [isAuthenticated, userId]);
+  }, [isApprovedDriver, userId]);
 
   // Reconnect socket when app comes back to foreground
   useEffect(() => {
@@ -243,15 +251,33 @@ export const SocketProvider = ({ children }) => {
           rejoinTimer = null;
         }
 
-        // If server disconnected us, force reconnect
+        // Do NOT auto-reconnect on server-initiated disconnect.
+        // "io server disconnect" means the server explicitly kicked us
+        // (e.g. auth failure, not authorized as driver). Reconnecting
+        // immediately creates an infinite connect→disconnect loop.
+        // The built-in reconnection (reconnection: true) handles
+        // transport-level disconnects (ping timeout, transport close)
+        // automatically — we only need manual reconnect for those cases
+        // where socket.io's auto-reconnect doesn't fire.
         if (reason === 'io server disconnect') {
-          socketInstance.connect();
+          if (__DEV__) console.log('[Socket] Server kicked us — NOT reconnecting');
+          // Clean up so the React effect can create a fresh socket if conditions change
+          socketRef.current = null;
+          setSocket(null);
+          return;
         }
       });
 
       socketInstance.on('connect_error', (error) => {
-        console.log(`[Socket] Connection error: ${error.message}`);
+        if (__DEV__) console.log(`[Socket] Connection error: ${error.message}`);
         setIsConnected(false);
+      });
+
+      // Server emits 'error' before disconnecting unauthorized clients
+      socketInstance.on('error', (err) => {
+        if (__DEV__) console.log(`[Socket] Server error: ${err?.message || err}`);
+        // Disable auto-reconnect when server explicitly rejects us
+        socketInstance.io.opts.reconnection = false;
       });
 
       // Listen for new ride requests
@@ -289,8 +315,8 @@ export const SocketProvider = ({ children }) => {
         // Show cancellation notification outside state updater
         Notifications.scheduleNotificationAsync({
           content: {
-            title: 'Ride Cancelled',
-            body: 'The passenger cancelled the ride request.',
+            title: i18n.t('notifications.push.rideCancelledTitle'),
+            body: i18n.t('notifications.push.rideCancelledBody'),
             data: { rideId: rideId, type: 'ride_cancelled', _local: true },
             sound: true,
           },
@@ -311,8 +337,8 @@ export const SocketProvider = ({ children }) => {
         // Show unavailable notification outside state updater
         Notifications.scheduleNotificationAsync({
           content: {
-            title: 'Ride Unavailable',
-            body: 'The ride request is no longer available.',
+            title: i18n.t('notifications.push.rideUnavailableTitle'),
+            body: i18n.t('notifications.push.rideUnavailableBody'),
             data: { rideId: data.rideId, type: 'ride_unavailable', _local: true },
             sound: true,
           },
@@ -334,12 +360,10 @@ export const SocketProvider = ({ children }) => {
 
       // Listen for waiting timeout (passenger didn't show up)
       socketInstance.on('ride:waitingTimeout', (data) => {
-        // TODO: i18n - these notification strings need localization
-        // M10: Add .catch() to prevent unhandled promise rejection
         Notifications.scheduleNotificationAsync({
           content: {
-            title: 'Ride Cancelled',
-            body: data.message || 'Passenger did not show up within 3 minutes',
+            title: i18n.t('notifications.push.waitingTimeoutTitle'),
+            body: i18n.t('notifications.push.waitingTimeoutBody'),
             data: { rideId: data.rideId, type: 'waiting_timeout', _local: true },
             sound: true,
           },
@@ -399,11 +423,12 @@ export const SocketProvider = ({ children }) => {
     notifiedRideIdsRef.current.add(rideData._id);
 
     try {
-      // TODO: i18n - these notification strings need localization
       await Notifications.scheduleNotificationAsync({
         content: {
-          title: 'New Ride Request!',
-          body: `Pickup: ${rideData.pickup?.address || 'Unknown location'}`,
+          title: i18n.t('notifications.push.rideRequestTitle'),
+          body: i18n.t('notifications.push.rideRequestBody', {
+            address: rideData.pickup?.address || i18n.t('common.unknown'),
+          }),
           data: { rideId: rideData._id, type: 'ride_request', _local: true },
           sound: true,
           priority: Notifications.AndroidNotificationPriority.MAX,

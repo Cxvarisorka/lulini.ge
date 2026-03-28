@@ -66,7 +66,7 @@ export default function SettingsScreen({ navigation }) {
         {
           icon: 'help-circle-outline',
           label: t('settings.helpCenter'),
-          onPress: () => Alert.alert(t('common.comingSoon') || 'Coming Soon', t('common.featureComingSoon') || 'This feature is coming soon.'),
+          onPress: () => Linking.openURL('https://lulini.ge/support'),
         },
         {
           icon: 'document-text-outline',
@@ -87,6 +87,17 @@ export default function SettingsScreen({ navigation }) {
           icon: 'information-circle-outline',
           label: t('settings.version'),
           value: appConfig.expo?.version || '1.0.0',
+        },
+      ],
+    },
+    {
+      title: t('settings.account') || 'Account',
+      items: [
+        {
+          icon: 'trash-outline',
+          label: t('deleteAccount.title'),
+          onPress: () => navigation.navigate('DeleteAccount'),
+          destructive: true,
         },
       ],
     },
@@ -121,10 +132,22 @@ export default function SettingsScreen({ navigation }) {
                   ]}
                   onPress={item.onPress}
                   disabled={!item.onPress}
+                  accessibilityRole={item.onPress ? 'button' : 'none'}
+                  accessibilityLabel={item.label + (item.value ? `, ${item.value}` : '')}
+                  accessibilityHint={item.onPress && !item.value ? `Opens ${item.label}` : undefined}
                 >
                   <View style={styles.menuItemLeft}>
-                    <Ionicons name={item.icon} size={24} color={colors.foreground} />
-                    <Text style={styles.menuItemText}>{item.label}</Text>
+                    <Ionicons
+                      name={item.icon}
+                      size={24}
+                      color={item.destructive ? colors.destructive : colors.foreground}
+                    />
+                    <Text style={[
+                      styles.menuItemText,
+                      item.destructive && styles.menuItemTextDestructive,
+                    ]}>
+                      {item.label}
+                    </Text>
                   </View>
                   <View style={styles.menuItemRight}>
                     {item.value && (
@@ -134,7 +157,7 @@ export default function SettingsScreen({ navigation }) {
                       <Ionicons
                         name="chevron-forward"
                         size={20}
-                        color={colors.mutedForeground}
+                        color={item.destructive ? colors.destructive : colors.mutedForeground}
                       />
                     )}
                   </View>
@@ -221,6 +244,9 @@ const createStyles = (typography) => StyleSheet.create({
     ...typography.body,
     color: colors.foreground,
     marginLeft: 12,
+  },
+  menuItemTextDestructive: {
+    color: colors.destructive,
   },
   menuItemRight: {
     flexDirection: 'row',

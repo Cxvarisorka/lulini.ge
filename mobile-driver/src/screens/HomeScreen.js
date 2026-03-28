@@ -64,6 +64,14 @@ export default function HomeScreen({ navigation }) {
   const [showRideRequest, setShowRideRequest] = useState(false);
   const [accepting, setAccepting] = useState(false);
   const [isExpanded, setIsExpanded] = useState(true);
+  // Break mode state
+  const [isOnBreak, setIsOnBreak] = useState(false);
+  const [breakTimeLeft, setBreakTimeLeft] = useState(0); // seconds
+  const breakTimerRef = useRef(null);
+  const BREAK_DURATION_SECONDS = 30 * 60; // 30 minutes
+  // Decline with reason state
+  const [showDeclineModal, setShowDeclineModal] = useState(false);
+  const [selectedDeclineReason, setSelectedDeclineReason] = useState(null);
   const [routePolyline, setRoutePolyline] = useState([]);
   const [routeInfo, setRouteInfo] = useState(null); // { distance, duration, distanceText, durationText }
   const [followMode, setFollowMode] = useState(false); // Camera follows driver during nav
@@ -336,6 +344,80 @@ export default function HomeScreen({ navigation }) {
     }
   }, [location?.latitude, location?.longitude, followMode, isBuiltinMap, activeRide]);
 
+  // ─── Break mode timer ───────────────────────────────────────────────
+  useEffect(() => {
+    if (isOnBreak) {
+      setBreakTimeLeft(BREAK_DURATION_SECONDS);
+      breakTimerRef.current = setInterval(() => {
+        setBreakTimeLeft((prev) => {
+          if (prev <= 1) {
+            clearInterval(breakTimerRef.current);
+            setIsOnBreak(false);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    } else {
+      clearInterval(breakTimerRef.current);
+    }
+    return () => clearInterval(breakTimerRef.current);
+  }, [isOnBreak]);
+
+  // When on break, ignore incoming ride requests
+  useEffect(() => {
+    if (isOnBreak && newRideRequest) {
+      // Silently clear the request without showing the modal
+      clearRideRequest();
+    }
+  }, [isOnBreak, newRideRequest, clearRideRequest]);
+
+  const handleStartBreak = () => {
+    Alert.alert(
+      t('breakMode.confirmBreak'),
+      t('breakMode.confirmBreakDesc'),
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        { text: t('breakMode.takeBreak'), onPress: () => setIsOnBreak(true) },
+      ]
+    );
+  };
+
+  const handleEndBreak = () => {
+    setIsOnBreak(false);
+  };
+
+  const formatBreakTime = (seconds) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return t('breakMode.breakTimer', { minutes: m, seconds: String(s).padStart(2, '0') });
+  };
+
+  // ─── Decline with reason ────────────────────────────────────────────
+  const DECLINE_REASONS = useMemo(() => [
+    { key: 'too_far', label: t('decline.too_far') },
+    { key: 'low_fare', label: t('decline.low_fare') },
+    { key: 'wrong_direction', label: t('decline.wrong_direction') },
+    { key: 'ending_shift', label: t('decline.ending_shift') },
+    { key: 'vehicle_issue', label: t('decline.vehicle_issue') },
+    { key: 'other', label: t('decline.other') },
+  ], [t]);
+
+  const handleDeclinePress = () => {
+    if (!newRideRequest) return;
+    setSelectedDeclineReason(null);
+    setShowDeclineModal(true);
+  };
+
+  const handleConfirmDecline = (reason) => {
+    if (!newRideRequest) return;
+    const rideIdToDecline = newRideRequest._id;
+    setShowDeclineModal(false);
+    setShowRideRequest(false);
+    clearRideRequest();
+    rideAPI.declineRide(rideIdToDecline, reason || undefined).catch(() => {});
+  };
+
   // [H6 FIX] Prevent double-tap race condition with toggling ref
   const togglingRef = useRef(false);
   const handleToggleOnline = async () => {
@@ -402,12 +484,7 @@ export default function HomeScreen({ navigation }) {
   };
 
   const handleDeclineRide = () => {
-    if (!newRideRequest) return;
-    const rideId = newRideRequest._id;
-    setShowRideRequest(false);
-    clearRideRequest();
-    // Fire-and-forget: record the decline on the server for accurate stats
-    rideAPI.declineRide(rideId).catch(() => {});
+    handleDeclinePress();
   };
 
   const handleMyLocation = useCallback(() => {
@@ -421,10 +498,10 @@ export default function HomeScreen({ navigation }) {
     }
   }, [location]);
 
-  // Fallback region (Georgia center) used only as initialRegion
+  // Fallback region (Tbilisi center) used only as initialRegion
   const initialMapRegion = useRef({
-    latitude: 42.2679,
-    longitude: 43.3569,
+    latitude: 41.6938,
+    longitude: 44.8015,
     latitudeDelta: 3,
     longitudeDelta: 3,
   }).current;
@@ -588,9 +665,11 @@ export default function HomeScreen({ navigation }) {
               {t('home.greeting') || 'Hello'}, {user?.firstName || 'Driver'}
             </Text>
             <View style={styles.statusRow}>
-              <View style={[styles.statusDot, { backgroundColor: isOnline ? colors.online : colors.offline }]} />
+              <View style={[styles.statusDot, {
+                backgroundColor: isOnBreak ? colors.warning : (isOnline ? colors.online : colors.offline)
+              }]} />
               <Text style={styles.statusText} numberOfLines={1}>
-                {isOnline ? t('home.youAreOnline') : t('home.youAreOffline')}
+                {isOnBreak ? t('breakMode.onBreak') : (isOnline ? t('home.youAreOnline') : t('home.youAreOffline'))}
               </Text>
             </View>
           </View>
@@ -824,6 +903,46 @@ export default function HomeScreen({ navigation }) {
               )}
             </Pressable>
 
+            {/* Break Mode Button — only when online and no active ride */}
+            {isOnline && (!activeRides || activeRides.length === 0) && (
+              isOnBreak ? (
+                <View style={styles.breakCard} accessibilityRole="none">
+                  <View style={styles.breakCardContent}>
+                    <View style={[styles.breakIconBadge, { backgroundColor: colors.warning + '20' }]}>
+                      <Ionicons name="pause-circle" size={26} color={colors.warning} />
+                    </View>
+                    <View style={styles.breakTextContainer}>
+                      <Text style={styles.breakTitle} numberOfLines={1}>{t('breakMode.onBreak')}</Text>
+                      <Text style={styles.breakSubtitle} numberOfLines={1}>{formatBreakTime(breakTimeLeft)}</Text>
+                    </View>
+                    <TouchableOpacity
+                      style={styles.endBreakButton}
+                      onPress={handleEndBreak}
+                      accessibilityRole="button"
+                      accessibilityLabel={t('breakMode.accessEndBreak')}
+                    >
+                      <Text style={styles.endBreakText}>{t('breakMode.endBreak')}</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : (
+                <TouchableOpacity
+                  style={styles.breakCard}
+                  onPress={handleStartBreak}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('breakMode.accessBreakButton')}
+                >
+                  <View style={styles.breakCardContent}>
+                    <View style={styles.breakIconBadge}>
+                      <Ionicons name="cafe-outline" size={22} color={colors.mutedForeground} />
+                    </View>
+                    <Text style={styles.breakCardText} numberOfLines={1}>{t('breakMode.takeBreak')}</Text>
+                    <Ionicons name="chevron-forward" size={18} color={colors.mutedForeground} />
+                  </View>
+                </TouchableOpacity>
+              )
+            )}
+
             {/* Quick Actions */}
             <View style={styles.actionsSection}>
               <TouchableOpacity
@@ -986,6 +1105,61 @@ export default function HomeScreen({ navigation }) {
                 )}
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Decline with Reason Modal */}
+      <Modal
+        visible={showDeclineModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowDeclineModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.declineReasonModal, { paddingBottom: insets.bottom + spacing.lg }]}>
+            <View style={styles.modalDragHandle} />
+            <Text style={styles.declineReasonTitle}>{t('decline.selectReason')}</Text>
+            <View style={styles.declineReasonsGrid}>
+              {DECLINE_REASONS.map((reason) => (
+                <TouchableOpacity
+                  key={reason.key}
+                  style={[
+                    styles.declineReasonChip,
+                    selectedDeclineReason === reason.key && styles.declineReasonChipSelected,
+                  ]}
+                  onPress={() => setSelectedDeclineReason(
+                    selectedDeclineReason === reason.key ? null : reason.key
+                  )}
+                  accessibilityRole="button"
+                  accessibilityLabel={reason.label}
+                  accessibilityState={{ selected: selectedDeclineReason === reason.key }}
+                >
+                  <Text style={[
+                    styles.declineReasonChipText,
+                    selectedDeclineReason === reason.key && styles.declineReasonChipTextSelected,
+                  ]}>
+                    {reason.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TouchableOpacity
+              style={styles.declineConfirmButton}
+              onPress={() => handleConfirmDecline(selectedDeclineReason)}
+              accessibilityRole="button"
+              accessibilityLabel={t('decline.declineWithReason')}
+            >
+              <Text style={styles.declineConfirmText}>{t('decline.declineWithReason')}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.declineSkipButton}
+              onPress={() => handleConfirmDecline(null)}
+              accessibilityRole="button"
+              accessibilityLabel={t('decline.skip')}
+            >
+              <Text style={styles.declineSkipText}>{t('decline.skip')}</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -1543,5 +1717,117 @@ const createStyles = (typography) => StyleSheet.create({
   acceptButtonText: {
     ...typography.button,
     color: colors.primaryForeground,
+  },
+  // Break mode
+  breakCard: {
+    backgroundColor: colors.background,
+    borderRadius: radius.xl,
+    marginBottom: spacing.md,
+    ...shadows.sm,
+    overflow: 'hidden',
+  },
+  breakCardContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: spacing.md,
+    gap: spacing.sm,
+  },
+  breakIconBadge: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.lg,
+    backgroundColor: colors.muted,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  breakCardText: {
+    ...typography.body,
+    color: colors.mutedForeground,
+    flex: 1,
+    fontWeight: '500',
+  },
+  breakTitle: {
+    ...typography.body,
+    color: colors.warning,
+    fontWeight: '700',
+  },
+  breakSubtitle: {
+    ...typography.captionSmall,
+    color: colors.mutedForeground,
+  },
+  breakTextContainer: {
+    flex: 1,
+  },
+  endBreakButton: {
+    backgroundColor: colors.primary,
+    borderRadius: radius.lg,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+  },
+  endBreakText: {
+    ...typography.captionSmall,
+    color: colors.primaryForeground,
+    fontWeight: '700',
+  },
+  // Decline with reason
+  declineReasonModal: {
+    backgroundColor: colors.background,
+    borderTopLeftRadius: radius['2xl'],
+    borderTopRightRadius: radius['2xl'],
+    padding: spacing.xl,
+  },
+  declineReasonTitle: {
+    ...typography.h3,
+    fontWeight: '700',
+    color: colors.foreground,
+    textAlign: 'center',
+    marginBottom: spacing.lg,
+  },
+  declineReasonsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginBottom: spacing.xl,
+    justifyContent: 'center',
+  },
+  declineReasonChip: {
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.full,
+    backgroundColor: colors.muted,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+  },
+  declineReasonChipSelected: {
+    backgroundColor: colors.primary + '15',
+    borderColor: colors.primary,
+  },
+  declineReasonChipText: {
+    ...typography.bodySmall,
+    color: colors.foreground,
+    fontWeight: '500',
+  },
+  declineReasonChipTextSelected: {
+    color: colors.primary,
+    fontWeight: '700',
+  },
+  declineConfirmButton: {
+    backgroundColor: colors.destructive,
+    borderRadius: radius.xl,
+    padding: spacing.lg,
+    alignItems: 'center',
+    marginBottom: spacing.sm,
+  },
+  declineConfirmText: {
+    ...typography.button,
+    color: colors.primaryForeground,
+  },
+  declineSkipButton: {
+    alignItems: 'center',
+    padding: spacing.md,
+  },
+  declineSkipText: {
+    ...typography.bodySmall,
+    color: colors.mutedForeground,
   },
 });

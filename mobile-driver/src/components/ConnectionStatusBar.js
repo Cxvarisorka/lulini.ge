@@ -4,10 +4,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { useSocket } from '../context/SocketContext';
+import { useAuth } from '../context/AuthContext';
 import { colors, useTypography } from '../theme/colors';
 
 const ConnectionStatusBar = () => {
   const { isConnected } = useSocket();
+  const { user, isAuthenticated } = useAuth();
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const typography = useTypography();
@@ -15,7 +17,11 @@ const ConnectionStatusBar = () => {
   const [visible, setVisible] = useState(false);
   const wasConnectedRef = useRef(true);
 
+  // Only show connection status for approved drivers (not during login/register/onboarding)
+  const isApprovedDriver = isAuthenticated && user?.role === 'driver';
+
   useEffect(() => {
+    if (!isApprovedDriver) return;
     if (!isConnected && wasConnectedRef.current) {
       // Lost connection — show bar
       setVisible(true);
@@ -36,9 +42,9 @@ const ConnectionStatusBar = () => {
       return () => clearTimeout(timer);
     }
     wasConnectedRef.current = isConnected;
-  }, [isConnected]);
+  }, [isConnected, isApprovedDriver]);
 
-  if (!visible) return null;
+  if (!isApprovedDriver || !visible) return null;
 
   return (
     <Animated.View

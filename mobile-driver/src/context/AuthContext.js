@@ -68,12 +68,13 @@ export const AuthProvider = ({ children }) => {
         }
 
         const userData = JSON.parse(storedUser);
-        // Verify user is a driver
-        if (userData.role === 'driver') {
+        // Allow both 'driver' (approved) and 'user' (in onboarding) roles.
+        // The navigator handles routing to onboarding vs main app.
+        if (userData.role === 'driver' || userData.role === 'user') {
           setUser(userData);
           setIsAuthenticated(true);
         } else {
-          // Not a driver, clear storage
+          // Admin accounts should not use the driver app
           await logout();
         }
       }
@@ -92,7 +93,11 @@ export const AuthProvider = ({ children }) => {
         const userData = response.data.data.user;
         const token = response.data.token;
 
-        if (userData.role !== 'driver') {
+        // Allow both 'driver' role (approved drivers) and 'user' role
+        // (new registrations going through onboarding). The navigator will
+        // route 'user' role to the OnboardingScreen automatically.
+        // Only reject admin accounts trying to use the driver app.
+        if (userData.role === 'admin') {
           throw new Error('Not authorized as driver');
         }
 
@@ -128,6 +133,7 @@ export const AuthProvider = ({ children }) => {
       await SecureStore.deleteItemAsync('token');
       await SecureStore.deleteItemAsync('user');
       await AsyncStorage.removeItem('@driver_rides_cache').catch(() => {});
+      await AsyncStorage.removeItem('@driver_onboarding_cache').catch(() => {});
       // [M10 FIX] Clear location retry queue to prevent sending stale data on next login
       await clearRetryQueue().catch(() => {});
       setUser(null);

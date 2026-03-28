@@ -254,6 +254,9 @@ export default function RidesScreen({ navigation }) {
       style={styles.rideCard}
       onPress={() => navigation.navigate('RideDetail', { rideId: item._id })}
       activeOpacity={0.7}
+      accessibilityRole="button"
+      accessibilityLabel={`${t(`rides.${item.status}`)} ride, ${item.pickup?.address} to ${item.dropoff?.address}, ${item.quote?.totalPrice?.toFixed(2)} GEL`}
+      accessibilityHint="Opens ride details"
     >
       <View style={styles.rideHeader}>
         <View style={[styles.statusBadge, { backgroundColor: `${colors.status[item.status]}15` }]}>
@@ -495,6 +498,9 @@ export default function RidesScreen({ navigation }) {
                 selectedFilter === filter.key && styles.filterButtonActive,
               ]}
               onPress={() => setSelectedFilter(filter.key)}
+              accessibilityRole="tab"
+              accessibilityLabel={filter.label}
+              accessibilityState={{ selected: selectedFilter === filter.key }}
             >
               <Ionicons
                 name={filter.icon}
@@ -557,6 +563,10 @@ export default function RidesScreen({ navigation }) {
                 />
               }
               showsVerticalScrollIndicator={false}
+              removeClippedSubviews={true}
+              maxToRenderPerBatch={10}
+              windowSize={5}
+              initialNumToRender={10}
             />
           )
         ) : (
@@ -597,6 +607,10 @@ export default function RidesScreen({ navigation }) {
                 />
               }
               showsVerticalScrollIndicator={false}
+              removeClippedSubviews={true}
+              maxToRenderPerBatch={10}
+              windowSize={5}
+              initialNumToRender={10}
             />
           )
         )}

@@ -20,7 +20,7 @@ export default function ProfileScreen({ navigation }) {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { user, logout } = useAuth();
-  const { stats } = useDriver();
+  const { stats, isOnline } = useDriver();
   const typography = useTypography();
   const styles = useMemo(() => createStyles(typography), [typography]);
 
@@ -105,8 +105,15 @@ export default function ProfileScreen({ navigation }) {
                 <Text style={styles.avatarText}>{getInitials()}</Text>
               </View>
             )}
-            <View style={styles.onlineBadge}>
-              <Ionicons name="checkmark" size={12} color={colors.primaryForeground} />
+            <View style={[
+              styles.onlineBadge,
+              { backgroundColor: isOnline ? colors.success : colors.mutedForeground },
+            ]}>
+              <Ionicons
+                name={isOnline ? 'checkmark' : 'remove'}
+                size={12}
+                color={colors.primaryForeground}
+              />
             </View>
           </View>
 
@@ -130,7 +137,12 @@ export default function ProfileScreen({ navigation }) {
           <Text style={styles.sectionTitle} numberOfLines={1}>{t('profile.stats') || 'YOUR STATS'}</Text>
           <View style={styles.statsGrid}>
             {quickStats.map((stat) => (
-              <View key={stat.id} style={styles.statCard}>
+              <View
+                key={stat.id}
+                style={styles.statCard}
+                accessible
+                accessibilityLabel={`${stat.label}: ${stat.value}`}
+              >
                 <View style={[styles.statIcon, { backgroundColor: `${stat.color}15` }]}>
                   <Ionicons name={stat.icon} size={22} color={stat.color} />
                 </View>
@@ -195,6 +207,8 @@ export default function ProfileScreen({ navigation }) {
                   index !== menuItems.length - 1 && styles.menuItemBorder,
                 ]}
                 onPress={item.onPress}
+                accessibilityRole="button"
+                accessibilityLabel={item.label}
               >
                 <View style={styles.menuItemLeft}>
                   <View style={styles.menuIconContainer}>
@@ -271,7 +285,7 @@ const createStyles = (typography) => StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: colors.success,
+    // backgroundColor is set dynamically via inline style based on isOnline status
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 3,

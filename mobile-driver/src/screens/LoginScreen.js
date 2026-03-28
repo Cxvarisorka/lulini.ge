@@ -18,7 +18,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { colors, shadows, radius, useTypography } from '../theme/colors';
 
-export default function LoginScreen() {
+export default function LoginScreen({ navigation }) {
   const { t } = useTranslation();
   const { login } = useAuth();
   const insets = useSafeAreaInsets();
@@ -97,6 +97,8 @@ export default function LoginScreen() {
               autoCapitalize="none"
               autoComplete="email"
               editable={!loading}
+              accessibilityLabel={t('auth.email')}
+              accessibilityHint="Enter your email address"
             />
           </View>
 
@@ -117,10 +119,14 @@ export default function LoginScreen() {
               autoCapitalize="none"
               autoComplete="password"
               editable={!loading}
+              accessibilityLabel={t('auth.password')}
+              accessibilityHint="Enter your password"
             />
             <TouchableOpacity
               onPress={() => setShowPassword(!showPassword)}
               style={styles.eyeIcon}
+              accessibilityRole="button"
+              accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
             >
               <Ionicons
                 name={showPassword ? 'eye-outline' : 'eye-off-outline'}
@@ -134,6 +140,9 @@ export default function LoginScreen() {
             style={[styles.loginButton, loading && styles.loginButtonDisabled]}
             onPress={handleLogin}
             disabled={loading}
+            accessibilityRole="button"
+            accessibilityLabel={t('auth.loginButton')}
+            accessibilityState={{ disabled: loading }}
           >
             {loading ? (
               <ActivityIndicator color={colors.primaryForeground} />
@@ -143,6 +152,18 @@ export default function LoginScreen() {
                 <Ionicons name="arrow-forward" size={20} color={colors.primaryForeground} />
               </>
             )}
+          </TouchableOpacity>
+        </View>
+
+        {/* Register link */}
+        <View style={styles.registerRow}>
+          <Text style={styles.registerText}>{t('register.noAccount')}</Text>
+          <TouchableOpacity
+            onPress={() => navigation.navigate('Register')}
+            accessibilityLabel={t('register.title')}
+            accessibilityRole="link"
+          >
+            <Text style={styles.registerLink}>{t('register.signUpLink')}</Text>
           </TouchableOpacity>
         </View>
 
@@ -238,6 +259,22 @@ const createStyles = (typography) => StyleSheet.create({
     ...typography.button,
     color: colors.primaryForeground,
     marginRight: 8,
+  },
+  registerRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+    gap: 4,
+  },
+  registerText: {
+    ...typography.bodySmall,
+    color: colors.mutedForeground,
+  },
+  registerLink: {
+    ...typography.bodySmall,
+    color: colors.primary,
+    fontWeight: '600',
   },
   footer: {
     alignItems: 'center',

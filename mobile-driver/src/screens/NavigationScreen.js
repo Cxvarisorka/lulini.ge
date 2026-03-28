@@ -697,6 +697,9 @@ export default function NavigationScreen({ navigation, route: navRoute }) {
               onPress={actionButton.onPress}
               disabled={actionButton.disabled || actionLoading}
               activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel={actionButton.label}
+              accessibilityState={{ disabled: actionButton.disabled || actionLoading }}
             >
               {actionLoading ? (
                 <ActivityIndicator color={colors.primaryForeground} />
@@ -723,10 +726,17 @@ export default function NavigationScreen({ navigation, route: navRoute }) {
             <TouchableOpacity
               style={[styles.recenterButton, !followMode && styles.recenterButtonActive]}
               onPress={handleRecenter}
+              accessibilityRole="button"
+              accessibilityLabel={followMode ? 'Following location' : 'Recenter map'}
             >
               <Ionicons name={followMode ? 'navigate' : 'locate'} size={24} color={followMode ? colors.mutedForeground : colors.primary} />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.exitButton} onPress={handleExit}>
+            <TouchableOpacity
+              style={styles.exitButton}
+              onPress={handleExit}
+              accessibilityRole="button"
+              accessibilityLabel={t('nav.exit')}
+            >
               <Ionicons name="close" size={24} color={colors.destructive} />
               <Text style={styles.exitText}>{t('nav.exit')}</Text>
             </TouchableOpacity>
