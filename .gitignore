@@ -28,6 +28,9 @@ Thumbs.db
 nul
 *.log
 
+# Docs
+docs/
+
 # Reports and audits
 *AUDIT*.md
 *REPORT*.md
