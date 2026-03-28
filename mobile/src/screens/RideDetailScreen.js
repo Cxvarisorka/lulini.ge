@@ -6,29 +6,33 @@ import {
   ScrollView,
   ActivityIndicator,
   Platform,
+  TouchableOpacity,
 } from 'react-native';
 import MapView from '../components/map/MapViewWrapper';
 import Marker from '../components/map/MarkerWrapper';
 import Polyline from '../components/map/PolylineWrapper';
-import { mapStyle } from '../components/map/mapStyle';
+import { mapStyle, mapStyleDark } from '../components/map/mapStyle';
 import { markerImages } from '../components/map/markerImages';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 
-import { colors, shadows, radius, useTypography } from '../theme/colors';
+import { shadows, radius, useTypography } from '../theme/colors';
+import { useTheme } from '../context/ThemeContext';
 import { getDirections } from '../services/googleMaps';
 import { safeFitToCoordinates, safePolyline } from '../utils/mapSafety';
 
-const STATUS_COLORS = {
-  pending: colors.status.pending,
-  accepted: colors.info,
-  arrived: colors.info,
-  driver_arrived: colors.info,
-  in_progress: colors.status.active,
-  inProgress: colors.status.active,
-  completed: colors.status.completed,
-  cancelled: colors.status.cancelled,
-};
+function getStatusColors(colors) {
+  return {
+    pending: colors.status.pending,
+    accepted: colors.info,
+    arrived: colors.info,
+    driver_arrived: colors.info,
+    in_progress: colors.status.active,
+    inProgress: colors.status.active,
+    completed: colors.status.completed,
+    cancelled: colors.status.cancelled,
+  };
+}
 
 // M7: Use same key map as TaxiHistoryScreen for consistent status translations
 const STATUS_KEY_MAP = {
@@ -39,10 +43,11 @@ function statusTranslationKey(status) {
   return STATUS_KEY_MAP[status] || status;
 }
 
-export default function RideDetailScreen({ route }) {
+export default function RideDetailScreen({ route, navigation }) {
   const { ride } = route.params;
   const typography = useTypography();
-  const styles = React.useMemo(() => createStyles(typography), [typography]);
+  const { colors, isDark } = useTheme();
+  const styles = React.useMemo(() => createStyles(typography, colors), [typography, colors]);
   const { t, i18n } = useTranslation();
   const mapRef = useRef(null);
   const [polylineCoords, setPolylineCoords] = useState([]);
@@ -97,7 +102,7 @@ export default function RideDetailScreen({ route }) {
     }
   }, [ride]);
 
-  const getStatusColor = (status) => STATUS_COLORS[status] || colors.mutedForeground;
+  const getStatusColor = (status) => getStatusColors(colors)[status] || colors.mutedForeground;
 
   const formatDate = (dateString) => {
     if (!dateString) return '—';
@@ -124,8 +129,9 @@ export default function RideDetailScreen({ route }) {
     latitudeDelta: 0.05,
     longitudeDelta: 0.05,
   } : {
-    latitude: 42.2679,
-    longitude: 42.6946,
+    // Geographic center of Georgia (Tbilisi) — fallback when ride has no stored coordinates
+    latitude: 41.6938,
+    longitude: 44.8015,
     latitudeDelta: 0.05,
     longitudeDelta: 0.05,
   };
@@ -145,7 +151,7 @@ export default function RideDetailScreen({ route }) {
         <MapView
           ref={mapRef}
           style={styles.map}
-          customMapStyle={mapStyle}
+          customMapStyle={isDark ? mapStyleDark : mapStyle}
           initialRegion={initialRegion}
           onMapReady={fitMapToMarkers}
           onLayout={fitMapToMarkers}
@@ -364,6 +370,7 @@ export default function RideDetailScreen({ route }) {
             label={t('history.requested')}
             value={formatDate(ride.createdAt)}
             styles={styles}
+            colors={colors}
           />
           {ride.startTime && (
             <TimestampRow
@@ -431,12 +438,26 @@ export default function RideDetailScreen({ route }) {
         </View>
       )}
 
+      {/* View Receipt — shown for completed rides */}
+      {ride.status === 'completed' && (
+        <TouchableOpacity
+          style={styles.receiptButton}
+          onPress={() => navigation.navigate('RideReceipt', { rideId: ride._id, ride })}
+          accessibilityRole="button"
+          accessibilityLabel={t('receipt.viewReceipt')}
+          accessibilityHint={t('receipt.viewReceiptHint')}
+        >
+          <Ionicons name="receipt-outline" size={18} color={colors.primary} />
+          <Text style={styles.receiptButtonText}>{t('receipt.viewReceipt')}</Text>
+        </TouchableOpacity>
+      )}
+
       <View style={{ height: 32 }} />
     </ScrollView>
   );
 }
 
-function TimestampRow({ icon, label, value, styles }) {
+function TimestampRow({ icon, label, value, styles, colors }) {
   return (
     <View style={styles.timestampRow}>
       <Ionicons name={icon} size={18} color={colors.mutedForeground} />
@@ -446,7 +467,7 @@ function TimestampRow({ icon, label, value, styles }) {
   );
 }
 
-const createStyles = (typography) => StyleSheet.create({
+const createStyles = (typography, colors) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
@@ -716,5 +737,23 @@ const createStyles = (typography) => StyleSheet.create({
     color: colors.mutedForeground,
     fontStyle: 'italic',
     marginTop: 4,
+  },
+  receiptButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginHorizontal: 16,
+    marginBottom: 12,
+    paddingVertical: 14,
+    borderRadius: radius.lg,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+    backgroundColor: colors.primary + '08',
+  },
+  receiptButtonText: {
+    ...typography.bodyMedium,
+    fontWeight: '600',
+    color: colors.primary,
   },
 });

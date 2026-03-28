@@ -58,6 +58,66 @@ export const colors = {
   },
 };
 
+export const darkColors = {
+  // Primary colors
+  primary: '#7c3aed', // slightly lighter purple for dark bg
+  primaryForeground: '#ffffff',
+
+  // Secondary colors
+  secondary: '#e5e5e5',
+  secondaryForeground: '#0a0a0a',
+
+  // Accent colors
+  accent: '#8b5cf6',
+  accentForeground: '#ffffff',
+
+  // Background and foreground
+  background: '#1a1a1a',
+  foreground: '#fafafa',
+
+  // Card colors
+  card: '#242424',
+  cardForeground: '#fafafa',
+
+  // Muted colors
+  muted: '#0a0a0a',
+  mutedForeground: '#a3a3a3',
+
+  // Border and input
+  border: '#333333',
+  input: '#333333',
+  ring: '#7c3aed',
+
+  // Destructive
+  destructive: '#f87171',
+  destructiveForeground: '#0a0a0a',
+
+  // Additional colors
+  success: '#4ade80',
+  warning: '#fbbf24',
+  info: '#a78bfa',
+
+  // Text colors
+  text: {
+    primary: '#fafafa',
+    secondary: '#a3a3a3',
+    muted: '#737373',
+    inverse: '#0a0a0a',
+  },
+
+  // Status colors
+  status: {
+    pending: '#fbbf24',
+    confirmed: '#60a5fa',
+    active: '#4ade80',
+    completed: '#4ade80',
+    cancelled: '#f87171',
+  },
+};
+
+// Helper to get colors based on dark mode flag
+export const getColors = (isDark) => isDark ? darkColors : colors;
+
 // Shadow styles - lighter for minimalist design
 export const shadows = {
   sm: {

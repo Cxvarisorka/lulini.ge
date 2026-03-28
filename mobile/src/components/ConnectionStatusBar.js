@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { useSocket } from '../context/SocketContext';
 import { useNetwork } from '../context/NetworkContext';
 import { useAuth } from '../context/AuthContext';
-import { colors } from '../theme/colors';
+import { useTheme } from '../context/ThemeContext';
 
 // Three-state connectivity indicator:
 //   offline       = no internet (red)
@@ -19,6 +19,8 @@ const ConnectionStatusBar = () => {
   const { user } = useAuth();
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
+  const styles = React.useMemo(() => createStyles(colors), [colors]);
   const slideAnim = useRef(new Animated.Value(-60)).current;
   const [visible, setVisible] = useState(false);
   const prevStateRef = useRef('connected'); // 'connected' | 'reconnecting' | 'offline'
@@ -103,7 +105,7 @@ const ConnectionStatusBar = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => StyleSheet.create({
   container: {
     position: 'absolute',
     top: 0,

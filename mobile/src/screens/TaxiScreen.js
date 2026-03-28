@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
+  Linking,
   Platform,
   AppState,
   Animated,
@@ -28,7 +29,11 @@ import {
   dismissRideNotification,
 } from '../services/rideNotification';
 import { getDirections, getDirectionsOSRM, reverseGeocode } from '../services/googleMaps';
-import { colors, shadows, radius, useTypography } from '../theme/colors';
+import { shadows, radius, useTypography } from '../theme/colors';
+import { useTheme } from '../context/ThemeContext';
+import { notificationSuccess, notificationWarning, notificationError, mediumImpact } from '../utils/haptics';
+import { rideAccepted, rideArrived, rideCompleted, rideCancelled } from '../utils/sounds';
+import { maybePromptReview } from '../utils/reviewPrompt';
 import CancelRideModal from '../components/CancelRideModal';
 import RideReviewModal from '../components/RideReviewModal';
 import LocationSearchSheet from '../components/taxi/LocationSearchSheet';
@@ -46,7 +51,7 @@ import StopMarker from '../components/map/StopMarker';
 import DraggablePickupMarker from '../components/map/DraggablePickupMarker';
 import Marker from '../components/map/MarkerWrapper';
 import { markerImages } from '../components/map/markerImages';
-import { mapStyle, ROUTE_STYLE } from '../components/map/mapStyle';
+import { mapStyle, mapStyleDark, ROUTE_STYLE, ROUTE_STYLE_DARK } from '../components/map/mapStyle';
 import { haversineKm } from '../utils/distance';
 
 // Safe wrappers for native map calls — prevents iOS crash when map isn't ready
@@ -97,10 +102,12 @@ const DRIVER_CLOSE_THRESHOLD_KM = 0.3; // 300 meters
 // Shared hitSlop constant — avoids re-creating objects in JSX on every render
 const HIT_SLOP = { top: 10, bottom: 10, left: 10, right: 10 };
 
-// Default location (Kutaisi, Georgia)
+// Map initial region — geographic center of Georgia (Tbilisi).
+// Used only for the MapView's initialRegion prop and map-fit calculations.
+// Never used as a fallback for the user's actual GPS position.
 const DEFAULT_LOCATION = {
-  latitude: 42.2679,
-  longitude: 42.6946,
+  latitude: 41.6938,
+  longitude: 44.8015,
 };
 
 // Timeout duration for ride request (30 seconds)
@@ -186,7 +193,8 @@ function extractDriverInfo(ride) {
 
 export default function TaxiScreen({ navigation }) {
   const typography = useTypography();
-  const styles = React.useMemo(() => createStyles(typography), [typography]);
+  const { colors, isDark } = useTheme();
+  const styles = React.useMemo(() => createStyles(typography, colors), [typography, colors]);
   const { t } = useTranslation();
   const { user } = useAuth();
   const { socket } = useSocket();
@@ -260,6 +268,9 @@ export default function TaxiScreen({ navigation }) {
 
   // Track whether "driver is close" notification was already sent for current ride
   const driverCloseNotifiedRef = useRef(false);
+
+  // Chat — unread message counter (reset on opening chat screen)
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
 
   // Flag: true while user-initiated cancel is in progress (prevents socket handler from duplicating)
   const userCancellingRef = useRef(false);
@@ -905,6 +916,8 @@ export default function TaxiScreen({ navigation }) {
     socket.on('ride:accepted', (ride) => {
       if (__DEV__) console.log('[TaxiScreen] ride:accepted received!', ride?._id);
       clearRideTimeout();
+      notificationSuccess();
+      rideAccepted();
       setCurrentRide(ride);
       setBookingStep(BOOKING_STEPS.DRIVER_FOUND);
       setCachedRide(ride);
@@ -1049,6 +1062,8 @@ export default function TaxiScreen({ navigation }) {
       const cur = currentRideRef.current;
       if (!ride?._id || (cur && cur._id !== ride._id)) return;
 
+      notificationWarning();
+      rideArrived();
       setCurrentRide(ride);
       setBookingStep(BOOKING_STEPS.DRIVER_ARRIVED);
       setCachedRide(ride);
@@ -1186,6 +1201,9 @@ export default function TaxiScreen({ navigation }) {
       setCompletedRide(completedData);
       setShowReviewModal(true);
       resetBookingState();
+      notificationSuccess();
+      rideCompleted();
+      maybePromptReview();
     });
 
     socket.on('ride:cancelled', (ride) => {
@@ -1199,6 +1217,8 @@ export default function TaxiScreen({ navigation }) {
       if (!cur || cur._id !== ride._id) {
         return;
       }
+      notificationError();
+      rideCancelled();
       resetBookingState();
       const tr = tRef.current;
       showAlertOnce(
@@ -1234,6 +1254,15 @@ export default function TaxiScreen({ navigation }) {
       );
     });
 
+    // Chat — increment unread count for incoming messages from driver
+    socket.on('chat:message', (data) => {
+      const msg = data?.message || data;
+      // Only count messages not sent by us
+      if (msg?.senderId !== currentRideRef.current?.userId) {
+        setUnreadChatCount(prev => prev + 1);
+      }
+    });
+
     return () => {
       socket.off('ride:accepted');
       socket.off('driver:locationUpdate');
@@ -1244,6 +1273,7 @@ export default function TaxiScreen({ navigation }) {
       socket.off('ride:cancelled');
       socket.off('ride:expired');
       socket.off('ride:waitingTimeout');
+      socket.off('chat:message');
     };
   }, [socket]);
 
@@ -1403,6 +1433,7 @@ export default function TaxiScreen({ navigation }) {
     routeDistanceRef.current = null;
     driverLocationRef.current = null;
     driverCloseNotifiedRef.current = false;
+    setUnreadChatCount(0);
     savedDestinationRef.current = null;
     savedDestinationCoordsRef.current = null;
     searchStartedAtRef.current = null;
@@ -1480,8 +1511,19 @@ export default function TaxiScreen({ navigation }) {
         setLocationAddress(result.mainText || result.address || t('taxi.currentLocation'));
       }
     } catch (error) {
-      setLocation(DEFAULT_LOCATION);
-      setLocationAddress('Kutaisi, Georgia');
+      // GPS unavailable — do not fall back to a hardcoded city.
+      // Show a prompt so the user knows to enable location services.
+      Alert.alert(
+        t('taxi.locationPermission'),
+        t('taxi.locationPermissionDesc'),
+        [
+          { text: t('common.cancel'), style: 'cancel' },
+          {
+            text: t('taxi.enableLocation'),
+            onPress: () => Linking.openSettings(),
+          },
+        ]
+      );
     } finally {
       setIsLoadingLocation(false);
     }
@@ -1710,6 +1752,7 @@ export default function TaxiScreen({ navigation }) {
   };
 
   const handleRequestRide = async () => {
+    mediumImpact();
     if (!location) {
       Alert.alert(t('errors.error'), t('errors.locationError'));
       return;
@@ -1893,7 +1936,16 @@ export default function TaxiScreen({ navigation }) {
     }
   };
 
+  const handleOpenChat = useCallback(() => {
+    setUnreadChatCount(0);
+    const rideId = currentRide?._id || currentRide?.id;
+    const driverName = [currentRide?.driver?.user?.firstName, currentRide?.driver?.user?.lastName].filter(Boolean).join(' ')
+      || currentRide?.driver?.user?.fullName || t('taxi.driver');
+    navigation.navigate('Chat', { rideId, driverName });
+  }, [currentRide, navigation, t]);
+
   const handleCancelRide = () => {
+    mediumImpact();
     setShowCancelModal(true);
   };
 
@@ -2155,6 +2207,8 @@ export default function TaxiScreen({ navigation }) {
           waitingTimeLeft={waitingTimeLeft}
           waitingFee={waitingFee}
           onCancel={handleCancelRide}
+          onOpenChat={handleOpenChat}
+          unreadChatCount={unreadChatCount}
         />
       );
     }
@@ -2196,6 +2250,7 @@ export default function TaxiScreen({ navigation }) {
   }, [
     bookingStep, currentRide, estimatedPrice, estimatedDuration, totalDistance,
     driverETA, driverDistance, waitingTimeLeft, waitingFee,
+    handleOpenChat, unreadChatCount,
     selectedVehicle, isRequesting, pricingConfig,
     locationAddress, destination, isLoadingLocation, isLoadingDirections,
     location, stops, lastDestination,
@@ -2234,7 +2289,7 @@ export default function TaxiScreen({ navigation }) {
         <MapView
           ref={mapRef}
           style={styles.map}
-          customMapStyle={mapStyle}
+          customMapStyle={isDark ? mapStyleDark : mapStyle}
           initialRegion={initialRegion}
           onPress={handleMapPress}
           showsUserLocation={bookingStep !== BOOKING_STEPS.IN_PROGRESS}
@@ -2298,9 +2353,9 @@ export default function TaxiScreen({ navigation }) {
           {/* Route polyline — only ONE line on screen at a time.
               driverRoute (live) takes priority over routePolyline (static). */}
           {driverRoute && driverRoute.length > 1 ? (
-            <Polyline id="driver-route" coordinates={driverRoute} {...ROUTE_STYLE} />
+            <Polyline id="driver-route" coordinates={driverRoute} {...(isDark ? ROUTE_STYLE_DARK : ROUTE_STYLE)} />
           ) : routePolyline && routePolyline.length > 1 ? (
-            <Polyline id="route-main" coordinates={routePolyline} {...ROUTE_STYLE} />
+            <Polyline id="route-main" coordinates={routePolyline} {...(isDark ? ROUTE_STYLE_DARK : ROUTE_STYLE)} />
           ) : null}
         </MapView>
 
@@ -2409,7 +2464,7 @@ export default function TaxiScreen({ navigation }) {
   );
 }
 
-const createStyles = (typography) => StyleSheet.create({
+const createStyles = (typography, colors) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,

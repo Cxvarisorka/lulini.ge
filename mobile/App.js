@@ -50,6 +50,7 @@ import { AuthProvider } from './src/context/AuthContext';
 import { LanguageProvider } from './src/context/LanguageContext';
 import { NetworkProvider } from './src/context/NetworkContext';
 import { SocketProvider } from './src/context/SocketContext';
+import { ThemeProvider } from './src/context/ThemeContext';
 import AppNavigator from './src/navigation/AppNavigator';
 import SplashScreen from './src/screens/SplashScreen';
 import ErrorBoundary from './src/components/ErrorBoundary';
@@ -69,11 +70,11 @@ function App() {
         if (update.isAvailable) {
           await Updates.fetchUpdateAsync();
           Alert.alert(
-            'Update Available',
-            'A new version of Lulini is ready. Restart now to apply the update.',
+            i18n.t('update.title'),
+            i18n.t('update.message'),
             [
-              { text: 'Later', style: 'cancel' },
-              { text: 'Restart', onPress: () => Updates.reloadAsync() },
+              { text: i18n.t('update.later'), style: 'cancel' },
+              { text: i18n.t('update.restart'), onPress: () => Updates.reloadAsync() },
             ]
           );
         }
@@ -93,6 +94,7 @@ function App() {
       <GestureHandlerRootView style={{ flex: 1 }}>
         <I18nextProvider i18n={i18n}>
           <SafeAreaProvider>
+            <ThemeProvider>
             <LanguageProvider>
               <AuthProvider>
                 <NetworkProvider>
@@ -105,6 +107,7 @@ function App() {
                 </NetworkProvider>
               </AuthProvider>
             </LanguageProvider>
+          </ThemeProvider>
           </SafeAreaProvider>
         </I18nextProvider>
       </GestureHandlerRootView>

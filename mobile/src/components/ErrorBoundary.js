@@ -2,9 +2,11 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import i18next from 'i18next';
-import { colors } from '../theme/colors';
+import { ThemeContext } from '../context/ThemeContext';
 
 class ErrorBoundary extends React.Component {
+  static contextType = ThemeContext;
+
   state = { hasError: false, error: null };
 
   static getDerivedStateFromError(error) {
@@ -26,6 +28,9 @@ class ErrorBoundary extends React.Component {
   };
 
   render() {
+    const { colors } = this.context;
+    const styles = createStyles(colors);
+
     if (this.state.hasError) {
       return (
         <View style={styles.container}>
@@ -48,7 +53,7 @@ class ErrorBoundary extends React.Component {
   }
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => StyleSheet.create({
   container: {
     flex: 1,
     justifyContent: 'center',

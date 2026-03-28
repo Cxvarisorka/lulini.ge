@@ -2,7 +2,8 @@ import React from 'react';
 import { Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
-import { colors, radius, useTypography } from '../../theme/colors';
+import { radius, useTypography } from '../../theme/colors';
+import { useTheme } from '../../context/ThemeContext';
 
 const PAYMENT_ICONS = {
   cash: 'cash-outline',
@@ -13,7 +14,8 @@ const PAYMENT_ICONS = {
 
 export default function PaymentMethodSelector({ selected, onPress }) {
   const typography = useTypography();
-  const styles = React.useMemo(() => createStyles(typography), [typography]);
+  const { colors } = useTheme();
+  const styles = React.useMemo(() => createStyles(typography, colors), [typography, colors]);
   const { t } = useTranslation();
 
   const getLabel = () => {
@@ -36,7 +38,7 @@ export default function PaymentMethodSelector({ selected, onPress }) {
   );
 }
 
-const createStyles = (typography) => StyleSheet.create({
+const createStyles = (typography, colors) => StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'center',

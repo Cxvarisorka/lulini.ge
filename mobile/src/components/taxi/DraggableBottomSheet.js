@@ -9,7 +9,8 @@ import {
   Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors, radius, shadows } from '../../theme/colors';
+import { radius, shadows } from '../../theme/colors';
+import { useTheme } from '../../context/ThemeContext';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -24,6 +25,8 @@ const DraggableBottomSheet = forwardRef(function DraggableBottomSheet({
   handleKeyboard = true,
 }, ref) {
   const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
+  const styles = React.useMemo(() => createStyles(colors), [colors]);
 
   // Convert percentage snap points to pixel values
   const snapPointsPixels = snapPoints.map(point => {
@@ -209,7 +212,7 @@ const DraggableBottomSheet = forwardRef(function DraggableBottomSheet({
   );
 });
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => StyleSheet.create({
   container: {
     position: 'absolute',
     left: 0,

@@ -19,17 +19,16 @@ import { useAuth } from '../context/AuthContext';
 import { radius, useTypography } from '../theme/colors';
 import { useTheme } from '../context/ThemeContext';
 
-export default function PhoneRegistrationScreen({ navigation, route }) {
+export default function SocialRegistrationScreen() {
   const typography = useTypography();
   const { colors } = useTheme();
   const styles = React.useMemo(() => createStyles(typography, colors), [typography, colors]);
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
-  const { phone } = route.params;
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const { verifyPhoneOtp } = useAuth();
+  const { updateProfile, user } = useAuth();
 
   const validateForm = () => {
     return firstName.trim().length >= 2 && lastName.trim().length >= 2;
@@ -42,14 +41,19 @@ export default function PhoneRegistrationScreen({ navigation, route }) {
     }
 
     setIsLoading(true);
-    const result = await verifyPhoneOtp(phone, null, firstName.trim(), lastName.trim());
+    const result = await updateProfile(firstName.trim(), lastName.trim());
     setIsLoading(false);
 
     if (!result.success) {
       Alert.alert(t('errors.error'), result.error || t('auth.registrationFailed'));
     }
-    // On success, AppNavigator will handle navigation
+    // On success, AppNavigator will handle navigation automatically
   };
+
+  // Show which provider they signed in with
+  const providerLabel = user?.email
+    ? user.email
+    : t('auth.socialAccount');
 
   return (
     <KeyboardAvoidingView
@@ -61,13 +65,6 @@ export default function PhoneRegistrationScreen({ navigation, route }) {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Ionicons name="arrow-back" size={24} color={colors.foreground} />
-        </TouchableOpacity>
-
         <View style={styles.header}>
           <View style={styles.iconContainer}>
             <Ionicons name="person-add-outline" size={32} color={colors.primary} />
@@ -108,11 +105,13 @@ export default function PhoneRegistrationScreen({ navigation, route }) {
             </View>
           </View>
 
-          <View style={styles.phoneInfo}>
-            <Ionicons name="call-outline" size={16} color={colors.mutedForeground} />
-            <Text style={styles.phoneInfoText}>{phone}</Text>
-            <Ionicons name="checkmark-circle" size={16} color={colors.primary} />
-          </View>
+          {providerLabel && (
+            <View style={styles.providerInfo}>
+              <Ionicons name="shield-checkmark-outline" size={16} color={colors.mutedForeground} />
+              <Text style={styles.providerInfoText}>{providerLabel}</Text>
+              <Ionicons name="checkmark-circle" size={16} color={colors.primary} />
+            </View>
+          )}
 
           <TouchableOpacity
             style={[styles.button, (!validateForm() || isLoading) && styles.buttonDisabled]}
@@ -122,7 +121,7 @@ export default function PhoneRegistrationScreen({ navigation, route }) {
             {isLoading ? (
               <ActivityIndicator color={colors.primaryForeground} />
             ) : (
-              <Text style={styles.buttonText}>{t('auth.createAccount')}</Text>
+              <Text style={styles.buttonText}>{t('common.save')}</Text>
             )}
           </TouchableOpacity>
 
@@ -144,17 +143,6 @@ const createStyles = (typography, colors) => StyleSheet.create({
     flexGrow: 1,
     paddingHorizontal: 24,
     paddingBottom: 24,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 24,
-    borderWidth: 1,
-    borderColor: colors.border,
   },
   header: {
     alignItems: 'center',
@@ -212,7 +200,7 @@ const createStyles = (typography, colors) => StyleSheet.create({
     ...typography.h2,
     color: colors.foreground,
   },
-  phoneInfo: {
+  providerInfo: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -224,7 +212,7 @@ const createStyles = (typography, colors) => StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  phoneInfoText: {
+  providerInfoText: {
     ...typography.bodyMedium,
     color: colors.foreground,
   },

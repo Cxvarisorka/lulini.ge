@@ -5,7 +5,8 @@ import { useTranslation } from 'react-i18next';
 
 import VehicleTypeSelector from './VehicleTypeSelector';
 import PaymentMethodSelector from './PaymentMethodSelector';
-import { colors, radius, useTypography } from '../../theme/colors';
+import { radius, useTypography } from '../../theme/colors';
+import { useTheme } from '../../context/ThemeContext';
 
 export default function RideOptionsSheet({
   selectedVehicle,
@@ -19,9 +20,11 @@ export default function RideOptionsSheet({
   isRequesting,
   pricingConfig,
   routeDistance,
+  onScheduleRide,
 }) {
   const typography = useTypography();
-  const styles = React.useMemo(() => createStyles(typography), [typography]);
+  const { colors } = useTheme();
+  const styles = React.useMemo(() => createStyles(typography, colors), [typography, colors]);
   const { t } = useTranslation();
 
   return (
@@ -49,6 +52,20 @@ export default function RideOptionsSheet({
         <Ionicons name="cash-outline" size={18} color={colors.success} />
         <Text style={styles.cashLabel}>{t('taxi.cash')}</Text>
       </View>
+
+      {/* Schedule for later */}
+      {onScheduleRide && (
+        <TouchableOpacity
+          style={styles.scheduleButton}
+          onPress={onScheduleRide}
+          accessibilityRole="button"
+          accessibilityLabel={t('schedule.scheduleForLater')}
+          accessibilityHint={t('schedule.scheduleHint')}
+        >
+          <Ionicons name="calendar-outline" size={16} color={colors.primary} />
+          <Text style={styles.scheduleButtonText}>{t('schedule.scheduleForLater')}</Text>
+        </TouchableOpacity>
+      )}
 
       {/* Bottom: Price + Request */}
       <View style={styles.bottomRow}>
@@ -78,7 +95,7 @@ export default function RideOptionsSheet({
   );
 }
 
-const createStyles = (typography) => StyleSheet.create({
+const createStyles = (typography, colors) => StyleSheet.create({
   container: {},
   header: {
     flexDirection: 'row',
@@ -102,6 +119,23 @@ const createStyles = (typography) => StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     marginTop: 10,
+  },
+  scheduleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    marginTop: 8,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+    borderRadius: radius.lg,
+    borderStyle: 'dashed',
+  },
+  scheduleButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: colors.primary,
   },
   cashLabel: {
     ...typography.bodySmall,

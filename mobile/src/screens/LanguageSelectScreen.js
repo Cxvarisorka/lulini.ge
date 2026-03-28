@@ -10,11 +10,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 
 import { useLanguage, LANGUAGES } from '../context/LanguageContext';
-import { colors, shadows, radius, useTypography } from '../theme/colors';
+import { shadows, radius, useTypography } from '../theme/colors';
+import { useTheme } from '../context/ThemeContext';
 
 export default function LanguageSelectScreen({ navigation }) {
 const typography = useTypography();
-  const styles = React.useMemo(() => createStyles(typography), [typography]);
+  const { colors } = useTheme();
+  const styles = React.useMemo(() => createStyles(typography, colors), [typography, colors]);
     const { t } = useTranslation();
   const { currentLanguage, changeLanguage } = useLanguage();
 
@@ -83,7 +85,7 @@ function getFlagEmoji(countryCode) {
   return String.fromCodePoint(...codePoints);
 }
 
-const createStyles = (typography) => StyleSheet.create({
+const createStyles = (typography, colors) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.muted,

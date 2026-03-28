@@ -9,11 +9,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { showCrisp } from '../services/crisp';
-import { colors, shadows, radius, spacing, useTypography } from '../theme/colors';
+import { shadows, radius, spacing, useTypography } from '../theme/colors';
+import { useTheme } from '../context/ThemeContext';
 
 export default function SupportHistoryScreen({ navigation }) {
   const typography = useTypography();
-  const styles = React.useMemo(() => createStyles(typography), [typography]);
+  const { colors } = useTheme();
+  const styles = React.useMemo(() => createStyles(typography, colors), [typography, colors]);
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
 
@@ -45,7 +47,7 @@ export default function SupportHistoryScreen({ navigation }) {
   );
 }
 
-const createStyles = (typography) => StyleSheet.create({
+const createStyles = (typography, colors) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.muted,

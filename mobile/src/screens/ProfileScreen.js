@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Pressable,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
@@ -19,7 +20,8 @@ import { useTranslation } from 'react-i18next';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { authAPI } from '../services/api';
-import { colors, shadows, radius, useTypography } from '../theme/colors';
+import { shadows, radius, useTypography } from '../theme/colors';
+import { useTheme } from '../context/ThemeContext';
 
 export default function ProfileScreen({ navigation }) {
   const { t, i18n } = useTranslation();
@@ -28,13 +30,35 @@ export default function ProfileScreen({ navigation }) {
   const typography = useTypography();
 
   const currentLang = getCurrentLanguageInfo();
-  const styles = React.useMemo(() => createStyles(typography), [typography]);
+  const { colors } = useTheme();
+  const styles = React.useMemo(() => createStyles(typography, colors), [typography, colors]);
 
   const [emailModalVisible, setEmailModalVisible] = useState(false);
+  const [emailStep, setEmailStep] = useState('email'); // 'email' | 'code'
   const [emailInput, setEmailInput] = useState('');
+  const [codeInput, setCodeInput] = useState('');
   const [emailLoading, setEmailLoading] = useState(false);
+  const [emailInputFocused, setEmailInputFocused] = useState(false);
+  const [codeInputFocused, setCodeInputFocused] = useState(false);
+  const [resendTimer, setResendTimer] = useState(0);
+  const emailInputRef = useRef(null);
+  const codeInputRef = useRef(null);
+  const resendTimerRef = useRef(null);
 
-  const handleEmailUpdate = async () => {
+  const startResendTimer = () => {
+    setResendTimer(60);
+    resendTimerRef.current = setInterval(() => {
+      setResendTimer(prev => {
+        if (prev <= 1) {
+          clearInterval(resendTimerRef.current);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
+  const handleSendCode = async () => {
     const emailRegex = /^\S+@\S+\.\S+$/;
     if (!emailRegex.test(emailInput.trim())) {
       Alert.alert(t('errors.error'), t('auth.invalidEmail'));
@@ -43,11 +67,33 @@ export default function ProfileScreen({ navigation }) {
 
     setEmailLoading(true);
     try {
-      const response = await authAPI.updateEmail(emailInput.trim());
+      const response = await authAPI.sendEmailCode(emailInput.trim());
+      if (response.data.success) {
+        setEmailStep('code');
+        setCodeInput('');
+        startResendTimer();
+        setTimeout(() => codeInputRef.current?.focus(), 300);
+      }
+    } catch (error) {
+      const message = error.response?.data?.message || t('errors.tryAgain');
+      Alert.alert(t('errors.error'), message);
+    } finally {
+      setEmailLoading(false);
+    }
+  };
+
+  const handleVerifyCode = async () => {
+    if (codeInput.trim().length !== 6) {
+      Alert.alert(t('errors.error'), t('profile.enterCode'));
+      return;
+    }
+
+    setEmailLoading(true);
+    try {
+      const response = await authAPI.verifyEmailCode(emailInput.trim(), codeInput.trim());
       if (response.data.success) {
         await refreshUser();
-        setEmailModalVisible(false);
-        setEmailInput('');
+        closeEmailModal();
         Alert.alert(t('common.success'), t('profile.emailUpdated'));
       }
     } catch (error) {
@@ -58,8 +104,32 @@ export default function ProfileScreen({ navigation }) {
     }
   };
 
+  const handleResendCode = async () => {
+    if (resendTimer > 0) return;
+    setEmailLoading(true);
+    try {
+      await authAPI.sendEmailCode(emailInput.trim());
+      startResendTimer();
+    } catch (error) {
+      const message = error.response?.data?.message || t('errors.tryAgain');
+      Alert.alert(t('errors.error'), message);
+    } finally {
+      setEmailLoading(false);
+    }
+  };
+
+  const closeEmailModal = () => {
+    setEmailModalVisible(false);
+    setEmailStep('email');
+    setEmailInput('');
+    setCodeInput('');
+    setResendTimer(0);
+    if (resendTimerRef.current) clearInterval(resendTimerRef.current);
+  };
+
   const openEmailModal = () => {
     setEmailInput(user.email || '');
+    setEmailStep('email');
     setEmailModalVisible(true);
   };
 
@@ -113,7 +183,11 @@ export default function ProfileScreen({ navigation }) {
         {user.email ? (
           <Text style={styles.email} numberOfLines={1} ellipsizeMode="middle">{user.email}</Text>
         ) : (
-          <TouchableOpacity onPress={openEmailModal}>
+          <TouchableOpacity
+            onPress={openEmailModal}
+            accessibilityRole="button"
+            accessibilityLabel={t('profile.addEmail')}
+          >
             <Text style={styles.addEmailLink}>{t('profile.addEmail')}</Text>
           </TouchableOpacity>
         )}
@@ -132,6 +206,9 @@ export default function ProfileScreen({ navigation }) {
             style={styles.infoRow}
             onPress={openEmailModal}
             activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={user.email ? t('profile.editEmail') : t('profile.addEmail')}
+            accessibilityHint={t('profile.emailLabel')}
           >
             <View style={styles.infoIconContainer}>
               <Ionicons name="mail-outline" size={20} color={colors.primary} />
@@ -157,6 +234,9 @@ export default function ProfileScreen({ navigation }) {
             style={styles.infoRow}
             onPress={() => navigation.navigate('UpdatePhone')}
             activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={user.phone ? t('profile.updatePhone', { defaultValue: 'Update phone number' }) : t('profile.addPhone', { defaultValue: 'Add phone number' })}
+            accessibilityHint={t('profile.phoneLabel')}
           >
             <View style={styles.infoIconContainer}>
               <Ionicons name="call-outline" size={20} color={colors.primary} />
@@ -225,6 +305,8 @@ export default function ProfileScreen({ navigation }) {
         <TouchableOpacity
           style={styles.actionButton}
           onPress={() => navigation.navigate('TaxiHistory')}
+          accessibilityRole="button"
+          accessibilityLabel={t('profile.myRides')}
         >
           <View style={styles.actionLeft}>
             <Ionicons name="car-outline" size={24} color={colors.primary} />
@@ -236,6 +318,8 @@ export default function ProfileScreen({ navigation }) {
         <TouchableOpacity
           style={styles.actionButton}
           onPress={() => navigation.navigate('Taxi')}
+          accessibilityRole="button"
+          accessibilityLabel={t('profile.bookTaxi')}
         >
           <View style={styles.actionLeft}>
             <Ionicons name="add-circle-outline" size={24} color={colors.primary} />
@@ -251,6 +335,8 @@ export default function ProfileScreen({ navigation }) {
         <TouchableOpacity
           style={styles.actionButton}
           onPress={() => navigation.navigate('LanguageSelect')}
+          accessibilityRole="button"
+          accessibilityLabel={t('profile.language')}
         >
           <View style={styles.actionLeft}>
             <Ionicons name="language-outline" size={24} color={colors.primary} />
@@ -263,7 +349,13 @@ export default function ProfileScreen({ navigation }) {
         </TouchableOpacity>
       </View>
 
-      <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+      <TouchableOpacity
+        style={styles.logoutButton}
+        onPress={handleLogout}
+        accessibilityRole="button"
+        accessibilityLabel={t('profile.logout')}
+        accessibilityHint={t('profile.logoutConfirm')}
+      >
         <Ionicons name="log-out-outline" size={24} color={colors.destructive} />
         <Text style={styles.logoutText} numberOfLines={1}>{t('profile.logout')}</Text>
       </TouchableOpacity>
@@ -275,63 +367,184 @@ export default function ProfileScreen({ navigation }) {
         visible={emailModalVisible}
         transparent
         animationType="fade"
-        onRequestClose={() => setEmailModalVisible(false)}
+        onRequestClose={closeEmailModal}
       >
         <KeyboardAvoidingView
           style={styles.modalOverlay}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         >
-          <TouchableOpacity
-            style={styles.modalOverlay}
-            activeOpacity={1}
-            onPress={() => setEmailModalVisible(false)}
-          >
-            <TouchableOpacity activeOpacity={1} style={styles.modalContent}>
-              <Text style={styles.modalTitle}>
-                {user.email ? t('profile.editEmail') : t('profile.addEmail')}
-              </Text>
-              <View style={styles.modalInputWrapper}>
-                <Ionicons name="mail-outline" size={20} color={colors.mutedForeground} />
-                <TextInput
-                  style={styles.modalInput}
-                  placeholder={t('auth.emailPlaceholder')}
-                  placeholderTextColor={colors.mutedForeground}
-                  value={emailInput}
-                  onChangeText={setEmailInput}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  autoFocus
-                />
-              </View>
-              <View style={styles.modalButtons}>
-                <TouchableOpacity
-                  style={styles.modalCancelButton}
-                  onPress={() => setEmailModalVisible(false)}
+          <Pressable
+            style={styles.modalBackdrop}
+            onPress={closeEmailModal}
+          />
+          <View style={styles.modalContent}>
+            {emailStep === 'email' ? (
+              <>
+                <View style={styles.modalHeader}>
+                  <View style={styles.modalIconCircle}>
+                    <Ionicons name="mail-outline" size={24} color={colors.primary} />
+                  </View>
+                  <Text style={styles.modalTitle}>
+                    {user.email ? t('profile.editEmail') : t('profile.addEmail')}
+                  </Text>
+                  <Text style={styles.modalSubtitle}>
+                    {t('profile.emailDescription')}
+                  </Text>
+                </View>
+
+                <Pressable
+                  style={[
+                    styles.modalInputWrapper,
+                    emailInputFocused && styles.modalInputWrapperFocused,
+                  ]}
+                  onPress={() => emailInputRef.current?.focus()}
                 >
-                  <Text style={styles.modalCancelText}>{t('common.cancel')}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.modalSaveButton, emailLoading && styles.buttonDisabled]}
-                  onPress={handleEmailUpdate}
-                  disabled={emailLoading}
-                >
-                  {emailLoading ? (
-                    <ActivityIndicator color={colors.primaryForeground} size="small" />
-                  ) : (
-                    <Text style={styles.modalSaveText}>{t('common.save')}</Text>
+                  <Ionicons
+                    name="mail-outline"
+                    size={20}
+                    color={emailInputFocused ? colors.primary : colors.mutedForeground}
+                  />
+                  <TextInput
+                    ref={emailInputRef}
+                    style={styles.modalInput}
+                    placeholder={t('auth.emailPlaceholder')}
+                    placeholderTextColor={colors.mutedForeground}
+                    value={emailInput}
+                    onChangeText={setEmailInput}
+                    onFocus={() => setEmailInputFocused(true)}
+                    onBlur={() => setEmailInputFocused(false)}
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    autoFocus
+                    returnKeyType="done"
+                    onSubmitEditing={handleSendCode}
+                    accessibilityLabel={t('auth.email')}
+                  />
+                  {emailInput.length > 0 && (
+                    <TouchableOpacity
+                      onPress={() => setEmailInput('')}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    >
+                      <Ionicons name="close-circle" size={18} color={colors.mutedForeground} />
+                    </TouchableOpacity>
                   )}
+                </Pressable>
+
+                <View style={styles.modalButtons}>
+                  <TouchableOpacity
+                    style={styles.modalCancelButton}
+                    onPress={closeEmailModal}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('common.cancel')}
+                  >
+                    <Text style={styles.modalCancelText}>{t('common.cancel')}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.modalSaveButton, emailLoading && styles.buttonDisabled]}
+                    onPress={handleSendCode}
+                    disabled={emailLoading}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('profile.sendCode')}
+                  >
+                    {emailLoading ? (
+                      <ActivityIndicator color={colors.primaryForeground} size="small" />
+                    ) : (
+                      <Text style={styles.modalSaveText}>{t('profile.sendCode')}</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : (
+              <>
+                <View style={styles.modalHeader}>
+                  <View style={styles.modalIconCircle}>
+                    <Ionicons name="shield-checkmark-outline" size={24} color={colors.primary} />
+                  </View>
+                  <Text style={styles.modalTitle}>{t('profile.verifyEmail')}</Text>
+                  <Text style={styles.modalSubtitle}>
+                    {t('profile.codeSentTo', { email: emailInput.trim() })}
+                  </Text>
+                </View>
+
+                <Pressable
+                  style={[
+                    styles.modalInputWrapper,
+                    codeInputFocused && styles.modalInputWrapperFocused,
+                  ]}
+                  onPress={() => codeInputRef.current?.focus()}
+                >
+                  <Ionicons
+                    name="keypad-outline"
+                    size={20}
+                    color={codeInputFocused ? colors.primary : colors.mutedForeground}
+                  />
+                  <TextInput
+                    ref={codeInputRef}
+                    style={[styles.modalInput, styles.codeInput]}
+                    placeholder="000000"
+                    placeholderTextColor={colors.mutedForeground}
+                    value={codeInput}
+                    onChangeText={(text) => setCodeInput(text.replace(/[^0-9]/g, '').slice(0, 6))}
+                    onFocus={() => setCodeInputFocused(true)}
+                    onBlur={() => setCodeInputFocused(false)}
+                    keyboardType="number-pad"
+                    maxLength={6}
+                    autoFocus
+                    returnKeyType="done"
+                    onSubmitEditing={handleVerifyCode}
+                    accessibilityLabel={t('profile.verificationCode')}
+                  />
+                </Pressable>
+
+                <TouchableOpacity
+                  onPress={handleResendCode}
+                  disabled={resendTimer > 0 || emailLoading}
+                  style={styles.resendButton}
+                >
+                  <Text style={[
+                    styles.resendText,
+                    resendTimer > 0 && { color: colors.mutedForeground }
+                  ]}>
+                    {resendTimer > 0
+                      ? t('profile.resendIn', { seconds: resendTimer })
+                      : t('profile.resendCode')}
+                  </Text>
                 </TouchableOpacity>
-              </View>
-            </TouchableOpacity>
-          </TouchableOpacity>
+
+                <View style={styles.modalButtons}>
+                  <TouchableOpacity
+                    style={styles.modalCancelButton}
+                    onPress={() => { setEmailStep('email'); setCodeInput(''); }}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('common.back')}
+                  >
+                    <Text style={styles.modalCancelText}>{t('common.back')}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.modalSaveButton, emailLoading && styles.buttonDisabled]}
+                    onPress={handleVerifyCode}
+                    disabled={emailLoading}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('profile.verify')}
+                  >
+                    {emailLoading ? (
+                      <ActivityIndicator color={colors.primaryForeground} size="small" />
+                    ) : (
+                      <Text style={styles.modalSaveText}>{t('profile.verify')}</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+          </View>
         </KeyboardAvoidingView>
       </Modal>
     </ScrollView>
   );
 }
 
-const createStyles = (typography) => StyleSheet.create({
+const createStyles = (typography, colors) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.muted,
@@ -527,38 +740,92 @@ const createStyles = (typography) => StyleSheet.create({
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
   },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
   modalContent: {
     backgroundColor: colors.background,
-    borderRadius: radius.xl,
-    padding: 24,
-    width: '85%',
+    borderRadius: radius['2xl'],
+    padding: 28,
+    width: '88%',
     maxWidth: 400,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 24,
+    elevation: 10,
+  },
+  modalHeader: {
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  modalIconCircle: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: `${colors.primary}12`,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 14,
   },
   modalTitle: {
     ...typography.h1,
     color: colors.foreground,
-    marginBottom: 20,
+    textAlign: 'center',
+    marginBottom: 6,
+  },
+  modalSubtitle: {
+    ...typography.caption,
+    color: colors.mutedForeground,
+    textAlign: 'center',
+    lineHeight: 18,
   },
   modalInputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.background,
+    backgroundColor: colors.muted,
     borderRadius: radius.lg,
-    paddingHorizontal: 16,
-    borderWidth: 1,
+    paddingHorizontal: 14,
+    borderWidth: 1.5,
     borderColor: colors.border,
-    marginBottom: 20,
+    marginBottom: 24,
+  },
+  modalInputWrapperFocused: {
+    borderColor: colors.primary,
+    backgroundColor: colors.background,
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    elevation: 2,
   },
   modalInput: {
     flex: 1,
     paddingVertical: 14,
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     ...typography.body,
     color: colors.foreground,
+  },
+  codeInput: {
+    letterSpacing: 8,
+    fontSize: 22,
+    fontWeight: '600',
+    textAlign: 'center',
+    paddingHorizontal: 4,
+  },
+  resendButton: {
+    alignSelf: 'center',
+    marginBottom: 20,
+    paddingVertical: 4,
+  },
+  resendText: {
+    ...typography.caption,
+    color: colors.primary,
+    fontWeight: '500',
   },
   modalButtons: {
     flexDirection: 'row',
@@ -569,8 +836,7 @@ const createStyles = (typography) => StyleSheet.create({
     padding: 14,
     borderRadius: radius.lg,
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: colors.muted,
   },
   modalCancelText: {
     ...typography.button,

@@ -7,20 +7,23 @@ import {
   Image,
   ScrollView,
   Alert,
+  Share,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import Constants from 'expo-constants';
 import { useAuth } from '../context/AuthContext';
-import { colors, radius, spacing, useTypography } from '../theme/colors';
+import { radius, spacing, useTypography } from '../theme/colors';
+import { useTheme } from '../context/ThemeContext';
 
 export default function DrawerContent({ navigation }) {
   const { t } = useTranslation();
   const { user, logout } = useAuth();
   const insets = useSafeAreaInsets();
   const typography = useTypography();
-  const styles = React.useMemo(() => createStyles(typography), [typography]);
+  const { colors } = useTheme();
+  const styles = React.useMemo(() => createStyles(typography, colors), [typography, colors]);
 
   const menuSections = [
     {
@@ -85,6 +88,20 @@ export default function DrawerContent({ navigation }) {
     },
   ];
 
+  const handleInviteFriends = async () => {
+    try {
+      await Share.share({
+        message: t('drawer.inviteMessage', {
+          defaultValue: 'Try Lulini — fast, safe taxi rides in Georgia! Download the app: https://lulini.ge/download',
+        }),
+        url: 'https://lulini.ge/download',
+        title: t('drawer.inviteFriends'),
+      });
+    } catch (err) {
+      if (__DEV__) console.warn('[Drawer] Share failed:', err.message);
+    }
+  };
+
   const handleLogout = async () => {
     navigation.closeDrawer();
     // Small delay to let drawer close before logout unmounts everything
@@ -100,7 +117,7 @@ export default function DrawerContent({ navigation }) {
       >
         <View style={styles.avatarContainer}>
           {user?.profileImage ? (
-            <Image source={{ uri: user.profileImage }} style={styles.avatar} />
+            <Image source={{ uri: user.profileImage, cache: 'force-cache' }} style={styles.avatar} />
           ) : (
             <View style={styles.avatarPlaceholder}>
               <Ionicons name="person" size={32} color={colors.primaryForeground} />
@@ -176,7 +193,7 @@ export default function DrawerContent({ navigation }) {
         ))}
 
         {/* Promotions Card */}
-        <TouchableOpacity style={styles.promoCard}>
+        <TouchableOpacity style={styles.promoCard} onPress={handleInviteFriends}>
           <View style={styles.promoContent}>
             <Ionicons name="gift" size={24} color={colors.primary} />
             <View style={styles.promoText}>
@@ -200,7 +217,7 @@ export default function DrawerContent({ navigation }) {
   );
 }
 
-const createStyles = (typography) => StyleSheet.create({
+const createStyles = (typography, colors) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,

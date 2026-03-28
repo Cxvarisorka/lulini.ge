@@ -21,22 +21,25 @@ import { useTranslation } from 'react-i18next';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 
-import { colors, shadows, radius, useTypography } from '../theme/colors';
+import { shadows, radius, useTypography } from '../theme/colors';
+import { useTheme } from '../context/ThemeContext';
 import { taxiAPI } from '../services/api';
 
 const CACHE_KEY = '@rides_cache';
 const PAGE_SIZE = 20;
 
-const STATUS_COLORS = {
-  pending: colors.status.pending,
-  accepted: colors.info,
-  arrived: colors.info,
-  driver_arrived: colors.info,
-  in_progress: colors.status.active,
-  inProgress: colors.status.active,
-  completed: colors.status.completed,
-  cancelled: colors.status.cancelled,
-};
+function getStatusColors(colors) {
+  return {
+    pending: colors.status.pending,
+    accepted: colors.info,
+    arrived: colors.info,
+    driver_arrived: colors.info,
+    in_progress: colors.status.active,
+    inProgress: colors.status.active,
+    completed: colors.status.completed,
+    cancelled: colors.status.cancelled,
+  };
+}
 
 const STATUS_FILTERS = ['all', 'completed', 'cancelled', 'in_progress', 'pending'];
 const VEHICLE_FILTERS = ['all', 'economy', 'comfort', 'business'];
@@ -65,6 +68,7 @@ function formatShortDate(date) {
 
 // Skeleton loading card — mimics ride card layout with pulsing animation
 function SkeletonRideCard({ delay = 0 }) {
+  const { colors } = useTheme();
   const pulseAnim = React.useRef(new Animated.Value(0.3)).current;
   React.useEffect(() => {
     const anim = Animated.loop(
@@ -101,7 +105,8 @@ export default function TaxiHistoryScreen({ navigation }) {
   // L2: Use hook instead of module-level Dimensions.get
   const { height: SCREEN_HEIGHT } = useWindowDimensions();
   const typography = useTypography();
-  const styles = React.useMemo(() => createStyles(typography, SCREEN_HEIGHT), [typography, SCREEN_HEIGHT]);
+  const { colors } = useTheme();
+  const styles = React.useMemo(() => createStyles(typography, SCREEN_HEIGHT, colors), [typography, SCREEN_HEIGHT, colors]);
   const { t, i18n } = useTranslation();
   const [rides, setRides] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -304,7 +309,7 @@ export default function TaxiHistoryScreen({ navigation }) {
     });
   };
 
-  const getStatusColor = (status) => STATUS_COLORS[status] || colors.mutedForeground;
+  const getStatusColor = (status) => getStatusColors(colors)[status] || colors.mutedForeground;
 
   const getStatusLabel = (status) => {
     if (status === 'all') return t('history.allStatuses');
@@ -336,6 +341,9 @@ export default function TaxiHistoryScreen({ navigation }) {
         style={[styles.filterButton, hasActiveFilters && styles.filterButtonActive]}
         onPress={openFilterModal}
         activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityLabel={t('history.filters')}
+        accessibilityState={{ expanded: filterVisible }}
       >
         <Ionicons name="options-outline" size={18} color={hasActiveFilters ? colors.primaryForeground : colors.foreground} />
         <Text style={[styles.filterButtonText, hasActiveFilters && styles.filterButtonTextActive]}>
@@ -349,7 +357,13 @@ export default function TaxiHistoryScreen({ navigation }) {
       </TouchableOpacity>
 
       {hasActiveFilters && (
-        <TouchableOpacity onPress={clearAppliedFilters} style={styles.clearBtn} activeOpacity={0.7}>
+        <TouchableOpacity
+          onPress={clearAppliedFilters}
+          style={styles.clearBtn}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel={t('history.clearFilters')}
+        >
           <Ionicons name="close-circle" size={16} color={colors.destructive} />
           <Text style={styles.clearBtnText}>{t('history.clearFilters')}</Text>
         </TouchableOpacity>
@@ -367,6 +381,9 @@ export default function TaxiHistoryScreen({ navigation }) {
       style={styles.rideCard}
       onPress={() => navigation.navigate('RideDetail', { ride: item })}
       activeOpacity={0.7}
+      accessibilityRole="button"
+      accessibilityLabel={`${t(`taxi.status.${statusTranslationKey(item.status)}`)} — ${item.dropoff?.address || ''}, ${getRideFare(item)} ₾`}
+      accessibilityHint={t('history.viewDetails')}
     >
       <View style={styles.rideHeader}>
         <View style={styles.dateContainer}>
@@ -542,8 +559,8 @@ export default function TaxiHistoryScreen({ navigation }) {
         ListFooterComponent={renderFooter}
         onEndReached={fetchNextPage}
         onEndReachedThreshold={0.3}
-        initialNumToRender={5}
-        maxToRenderPerBatch={5}
+        initialNumToRender={10}
+        maxToRenderPerBatch={10}
         windowSize={5}
         removeClippedSubviews={true}
         refreshControl={
@@ -697,7 +714,7 @@ export default function TaxiHistoryScreen({ navigation }) {
   );
 }
 
-const createStyles = (typography, SCREEN_HEIGHT = 800) => StyleSheet.create({
+const createStyles = (typography, SCREEN_HEIGHT = 800, colors) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,

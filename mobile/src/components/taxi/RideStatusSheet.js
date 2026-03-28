@@ -1,8 +1,11 @@
-import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Image, ScrollView, Linking, Animated } from 'react-native';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Image, Linking, Animated, Modal, Share, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
-import { colors, radius, shadows, useTypography } from '../../theme/colors';
+import { radius, shadows, useTypography } from '../../theme/colors';
+import { useTheme } from '../../context/ThemeContext';
+import { safetyAPI } from '../../services/api';
+import ChatButton from './ChatButton';
 
 // Helper function to convert color names to hex
 const getColorHex = (colorName) => {
@@ -38,10 +41,121 @@ export default function RideStatusSheet({
   waitingTimeLeft,
   waitingFee,
   onCancel,
+  userLocation,
+  onOpenChat,
+  unreadChatCount = 0,
 }) {
   const typography = useTypography();
-  const styles = React.useMemo(() => createStyles(typography), [typography]);
+  const { colors } = useTheme();
+  const styles = React.useMemo(() => createStyles(typography, colors), [typography, colors]);
   const { t } = useTranslation();
+
+  const [sosModalVisible, setSosModalVisible] = useState(false);
+  const [sosLoading, setSosLoading] = useState(false);
+  const [shareLoading, setShareLoading] = useState(false);
+  const [etaShareLoading, setEtaShareLoading] = useState(false);
+
+  // Pulsing animation for waiting fee accrual
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  // Active ride states where SOS and Share are relevant
+  const isActiveRide = ['found', 'driver_arrived', 'in_progress'].includes(rideStatus);
+  const canShareETA = ['found', 'in_progress'].includes(rideStatus);
+  const rideId = currentRide?._id || currentRide?.id;
+
+  // Start pulsing animation when waiting fee begins accruing
+  useEffect(() => {
+    if (waitingFee > 0) {
+      const anim = Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, { toValue: 1.04, duration: 600, useNativeDriver: true }),
+          Animated.timing(pulseAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
+        ])
+      );
+      anim.start();
+      return () => anim.stop();
+    } else {
+      pulseAnim.setValue(1);
+    }
+  }, [waitingFee > 0]);
+
+  const handleShareETA = useCallback(async () => {
+    if (!rideId) return;
+    setEtaShareLoading(true);
+    try {
+      const shareUrl = `https://lulini.ge/track/${rideId}`;
+      const etaText = driverETA ? `${driverETA} min` : '';
+      const message = t('taxi.shareETAMessage', {
+        eta: etaText,
+        url: shareUrl,
+        defaultValue: `I'm on my way! ${etaText ? `ETA: ${etaText}. ` : ''}Track my ride: ${shareUrl}`,
+      });
+      await Share.share({ message, url: shareUrl, title: t('taxi.shareETA') });
+    } catch (error) {
+      if (error?.message !== 'The user did not share') {
+        Alert.alert(t('common.error'), t('errors.somethingWentWrong'));
+      }
+    } finally {
+      setEtaShareLoading(false);
+    }
+  }, [rideId, driverETA, t]);
+
+  const handleSOSConfirm = useCallback(async () => {
+    setSosLoading(true);
+    try {
+      await safetyAPI.triggerSOS({
+        rideId,
+        location: userLocation || null,
+      });
+      setSosModalVisible(false);
+      Alert.alert(
+        t('safety.sosAlertTitle'),
+        t('safety.sosAlertMessage'),
+        [
+          {
+            text: t('safety.call112'),
+            onPress: () => Linking.openURL('tel:112'),
+          },
+          { text: t('common.ok'), style: 'cancel' },
+        ]
+      );
+    } catch (error) {
+      setSosModalVisible(false);
+      // Even on API failure, always offer the emergency call option
+      Alert.alert(
+        t('safety.sosAlertTitle'),
+        t('safety.sosAlertFallback'),
+        [
+          {
+            text: t('safety.call112'),
+            onPress: () => Linking.openURL('tel:112'),
+          },
+          { text: t('common.cancel'), style: 'cancel' },
+        ]
+      );
+    } finally {
+      setSosLoading(false);
+    }
+  }, [rideId, userLocation, t]);
+
+  const handleShareTrip = useCallback(async () => {
+    if (!rideId) return;
+    setShareLoading(true);
+    try {
+      const res = await safetyAPI.shareRide(rideId);
+      const shareUrl = res.data?.shareUrl || res.data?.url || `https://lulini.ge/track/${rideId}`;
+      await Share.share({
+        message: t('safety.shareTripMessage', { url: shareUrl }),
+        url: shareUrl,
+        title: t('safety.shareTripTitle'),
+      });
+    } catch (error) {
+      if (error?.message !== 'The user did not share') {
+        Alert.alert(t('common.error'), t('errors.somethingWentWrong'));
+      }
+    } finally {
+      setShareLoading(false);
+    }
+  }, [rideId, t]);
 
   const renderSearchingStatus = () => (
     <>
@@ -70,7 +184,7 @@ export default function RideStatusSheet({
           {/* Driver Coming Banner */}
           <View style={styles.driverComingBanner}>
             <View style={styles.driverComingIconContainer}>
-              <Ionicons name="car" size={20} color={colors.primary} />
+              <Ionicons name="car" size={16} color={colors.primary} />
             </View>
             <View style={styles.driverComingTextContainer}>
               <Text style={styles.driverComingTitle}>{t('taxi.driverIsOnTheWay')}</Text>
@@ -91,12 +205,12 @@ export default function RideStatusSheet({
             <View style={styles.driverAvatarContainer}>
               {currentRide.driver.user?.profileImage ? (
                 <Image
-                  source={{ uri: currentRide.driver.user.profileImage }}
+                  source={{ uri: currentRide.driver.user.profileImage, cache: 'force-cache' }}
                   style={styles.driverAvatar}
                 />
               ) : (
                 <View style={styles.driverAvatarPlaceholder}>
-                  <Ionicons name="person" size={32} color={colors.mutedForeground} />
+                  <Ionicons name="person" size={24} color={colors.mutedForeground} />
                 </View>
               )}
             </View>
@@ -134,7 +248,7 @@ export default function RideStatusSheet({
           {/* Vehicle Info */}
           <View style={styles.vehicleInfo}>
             <View style={styles.vehicleIconContainer}>
-              <Ionicons name="car-sport" size={24} color={colors.primary} />
+              <Ionicons name="car-sport" size={18} color={colors.primary} />
             </View>
             <View style={styles.vehicleDetails}>
               <Text style={styles.vehicleName} numberOfLines={1}>
@@ -163,54 +277,81 @@ export default function RideStatusSheet({
     </>
   );
 
-  const renderDriverArrivedStatus = () => (
-    <>
-      <View style={styles.statusHeader}>
-        <Ionicons name="checkmark-circle" size={24} color={colors.success} />
-        <Text style={styles.statusTitle}>{t('taxi.driverArrived')}</Text>
-      </View>
+  const renderDriverArrivedStatus = () => {
+    const isUrgent = waitingTimeLeft !== null && waitingTimeLeft <= 60;
+    const isFeeActive = waitingFee > 0;
 
-      {waitingTimeLeft !== null && (
-        <View style={styles.waitingContainer}>
-          <View style={styles.waitingHeader}>
-            <Ionicons
-              name="time-outline"
-              size={20}
-              color={waitingTimeLeft <= 60 ? colors.destructive : colors.warning}
-            />
-            <Text style={styles.waitingTitle}>{t('taxi.waitingForYou')}</Text>
-          </View>
-          <View style={styles.waitingTimeRow}>
-            <Text style={[
-              styles.waitingTimeValue,
-              waitingTimeLeft <= 60 && styles.waitingTimeUrgent
-            ]}>
-              {Math.floor(waitingTimeLeft / 60)}:{(waitingTimeLeft % 60).toString().padStart(2, '0')}
-            </Text>
-            <Text style={styles.waitingTimeLabel}>{t('taxi.timeRemaining')}</Text>
-          </View>
-          <View style={styles.waitingProgressBar}>
-            <View style={[
-              styles.waitingProgressFill,
-              { width: `${(waitingTimeLeft / 180) * 100}%` },
-              waitingTimeLeft <= 60 && styles.waitingProgressUrgent
-            ]} />
-          </View>
-          <View style={styles.waitingFeeRow}>
-            <Text style={styles.waitingFeeLabel}>
-              {waitingFee > 0 ? t('taxi.paidWaiting') : t('taxi.freeWaiting')}
-            </Text>
-            {waitingFee > 0 && (
-              <Text style={styles.waitingFeeValue}>+{waitingFee.toFixed(2)} ₾</Text>
-            )}
-          </View>
-          {waitingTimeLeft <= 60 && (
-            <Text style={styles.waitingWarning}>{t('taxi.hurryUp')}</Text>
-          )}
+    return (
+      <>
+        <View style={styles.statusHeader}>
+          <Ionicons name="checkmark-circle" size={24} color={colors.success} />
+          <Text style={styles.statusTitle}>{t('taxi.driverArrived')}</Text>
         </View>
-      )}
-    </>
-  );
+
+        {waitingTimeLeft !== null && (
+          <Animated.View style={[
+            styles.waitingContainer,
+            isFeeActive && { transform: [{ scale: pulseAnim }] },
+            isUrgent && styles.waitingContainerUrgent,
+          ]}>
+            {/* Header */}
+            <View style={styles.waitingHeader}>
+              <Ionicons
+                name={isUrgent ? 'warning' : 'time-outline'}
+                size={20}
+                color={isUrgent ? colors.destructive : colors.warning}
+              />
+              <Text style={[styles.waitingTitle, isUrgent && styles.waitingTitleUrgent]}>
+                {t('taxi.waitingForYou')}
+              </Text>
+            </View>
+
+            {/* Countdown — large, prominent */}
+            <View style={styles.waitingTimeRow}>
+              <Text style={[
+                styles.waitingTimeValue,
+                isUrgent && styles.waitingTimeUrgent,
+              ]}>
+                {Math.floor(waitingTimeLeft / 60)}:{(waitingTimeLeft % 60).toString().padStart(2, '0')}
+              </Text>
+              <Text style={styles.waitingTimeLabel}>{t('taxi.timeRemaining')}</Text>
+            </View>
+
+            {/* Progress Bar */}
+            <View style={styles.waitingProgressBar}>
+              <Animated.View style={[
+                styles.waitingProgressFill,
+                { width: `${Math.max(0, (waitingTimeLeft / 180) * 100)}%` },
+                isUrgent && styles.waitingProgressUrgent,
+              ]} />
+            </View>
+
+            {/* Fee display — shown with animation when accruing */}
+            <View style={styles.waitingFeeRow}>
+              <Text style={styles.waitingFeeLabel}>
+                {isFeeActive ? t('taxi.paidWaiting') : t('taxi.freeWaiting')}
+              </Text>
+              {isFeeActive && (
+                <View style={styles.waitingFeeValueContainer}>
+                  <Ionicons name="alert-circle" size={14} color={colors.warning} />
+                  <Text style={styles.waitingFeeValue}>
+                    +{waitingFee.toFixed(2)} ₾
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {isUrgent && (
+              <View style={styles.waitingWarningRow}>
+                <Ionicons name="flash" size={14} color={colors.destructive} />
+                <Text style={styles.waitingWarning}>{t('taxi.hurryUp')}</Text>
+              </View>
+            )}
+          </Animated.View>
+        )}
+      </>
+    );
+  };
 
   const renderInProgressStatus = () => (
     <>
@@ -226,66 +367,175 @@ export default function RideStatusSheet({
   );
 
   return (
-    <ScrollView
-      style={styles.container}
-      showsVerticalScrollIndicator={false}
-    >
-      {rideStatus === 'searching' && renderSearchingStatus()}
-      {rideStatus === 'found' && renderDriverFoundStatus()}
-      {rideStatus === 'driver_arrived' && renderDriverArrivedStatus()}
-      {rideStatus === 'in_progress' && renderInProgressStatus()}
+    <>
+      <View style={styles.container}>
+        {rideStatus === 'searching' && renderSearchingStatus()}
+        {rideStatus === 'found' && renderDriverFoundStatus()}
+        {rideStatus === 'driver_arrived' && renderDriverArrivedStatus()}
+        {rideStatus === 'in_progress' && renderInProgressStatus()}
 
-      {/* Ride Details */}
-      <View style={styles.rideDetailsRow}>
-        <View style={styles.rideDetailItem}>
-          <Text style={styles.rideDetailLabel}>{t('taxi.estimatedFare')}</Text>
-          <Text style={styles.rideDetailValue}>
-            {estimatedPrice}{waitingFee > 0 ? ` (+${waitingFee.toFixed(2)} ₾)` : ''} ₾
-          </Text>
+        {/* Compact ride details — single row */}
+        <View style={styles.rideDetailsRow}>
+          <View style={styles.rideDetailItem}>
+            <Text style={styles.rideDetailValue}>
+              {estimatedPrice}{waitingFee > 0 ? ` +${waitingFee.toFixed(1)}` : ''} ₾
+            </Text>
+            <Text style={styles.rideDetailLabel}>{t('taxi.estimatedFare')}</Text>
+          </View>
+          <View style={styles.rideDetailDivider} />
+          <View style={styles.rideDetailItem}>
+            <Text style={styles.rideDetailValue}>{totalDistance || '—'} {t('taxi.km')}</Text>
+            <Text style={styles.rideDetailLabel}>{t('taxi.distance')}</Text>
+          </View>
+          <View style={styles.rideDetailDivider} />
+          <View style={styles.rideDetailItem}>
+            <Text style={styles.rideDetailValue}>{estimatedDuration} {t('taxi.minutes')}</Text>
+            <Text style={styles.rideDetailLabel}>{t('taxi.duration')}</Text>
+          </View>
         </View>
-        <View style={styles.rideDetailItem}>
-          <Text style={styles.rideDetailLabel}>{t('taxi.distance')}</Text>
-          <Text style={styles.rideDetailValue}>{totalDistance || '—'} {t('taxi.km')}</Text>
-        </View>
-        <View style={styles.rideDetailItem}>
-          <Text style={styles.rideDetailLabel}>{t('taxi.duration')}</Text>
-          <Text style={styles.rideDetailValue}>{estimatedDuration} {t('taxi.minutes')}</Text>
-        </View>
+
+        {/* Compact action bar — all in one row */}
+        {isActiveRide && (
+          <View style={styles.actionBar}>
+            <TouchableOpacity
+              style={styles.sosButton}
+              onPress={() => setSosModalVisible(true)}
+              accessibilityRole="button"
+              accessibilityLabel={t('safety.sos')}
+            >
+              <Text style={styles.sosButtonText}>SOS</Text>
+            </TouchableOpacity>
+
+            {onOpenChat && (
+              <ChatButton
+                onPress={onOpenChat}
+                unreadCount={unreadChatCount}
+              />
+            )}
+
+            {canShareETA && (
+              <TouchableOpacity
+                style={styles.actionButton}
+                onPress={handleShareETA}
+                disabled={etaShareLoading}
+                accessibilityRole="button"
+                accessibilityLabel={t('taxi.shareETA')}
+              >
+                {etaShareLoading ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <Ionicons name="location-outline" size={18} color={colors.primary} />
+                )}
+              </TouchableOpacity>
+            )}
+
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={handleShareTrip}
+              disabled={shareLoading}
+              accessibilityRole="button"
+              accessibilityLabel={t('safety.shareTrip')}
+            >
+              {shareLoading ? (
+                <ActivityIndicator size="small" color={colors.primary} />
+              ) : (
+                <Ionicons name="share-outline" size={18} color={colors.primary} />
+              )}
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Cancel Button — always visible except in_progress */}
+        {rideStatus !== 'in_progress' && (
+          <TouchableOpacity
+            style={styles.cancelButton}
+            accessibilityRole="button"
+            accessibilityLabel={t('taxi.cancelRide')}
+            onPress={() => {
+            if (rideStatus === 'driver_arrived') {
+              Alert.alert(
+                t('taxi.cancelRide'),
+                t('taxi.cancelAfterArrivalWarning', { defaultValue: 'The driver has already arrived. Are you sure you want to cancel? A cancellation fee may apply.' }),
+                [
+                  { text: t('common.no'), style: 'cancel' },
+                  { text: t('taxi.cancelRide'), style: 'destructive', onPress: onCancel },
+                ]
+              );
+            } else {
+              onCancel();
+            }
+          }}>
+            <Ionicons name="close-circle-outline" size={18} color={colors.destructive} />
+            <Text style={styles.cancelButtonText}>{t('taxi.cancelRide')}</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
-      {/* Cancel Button (not shown during in_progress) */}
-      {rideStatus !== 'in_progress' && (
-        <TouchableOpacity style={styles.cancelButton} onPress={() => {
-          if (rideStatus === 'driver_arrived') {
-            // Extra confirmation when driver has already arrived
-            const { Alert } = require('react-native');
-            Alert.alert(
-              t('taxi.cancelRide'),
-              t('taxi.cancelAfterArrivalWarning', { defaultValue: 'The driver has already arrived. Are you sure you want to cancel? A cancellation fee may apply.' }),
-              [
-                { text: t('common.no'), style: 'cancel' },
-                { text: t('taxi.cancelRide'), style: 'destructive', onPress: onCancel },
-              ]
-            );
-          } else {
-            onCancel();
-          }
-        }}>
-          <Text style={styles.cancelButtonText}>{t('taxi.cancelRide')}</Text>
-        </TouchableOpacity>
-      )}
-    </ScrollView>
+      {/* SOS Confirmation Modal */}
+      <Modal
+        visible={sosModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSosModalVisible(false)}
+      >
+        <View style={styles.sosModalOverlay}>
+          <View style={styles.sosModalCard}>
+            <View style={styles.sosModalIconCircle}>
+              <Ionicons name="warning" size={40} color={colors.destructive} />
+            </View>
+            <Text style={styles.sosModalTitle}>{t('safety.sosConfirmTitle')}</Text>
+            <Text style={styles.sosModalMessage}>{t('safety.sosConfirmMessage')}</Text>
+
+            {/* Direct 112 call — always visible even before confirming API */}
+            <TouchableOpacity
+              style={styles.call112Button}
+              onPress={() => Linking.openURL('tel:112')}
+              accessibilityRole="button"
+              accessibilityLabel={t('safety.call112')}
+            >
+              <Ionicons name="call" size={20} color={colors.background} style={styles.call112Icon} />
+              <Text style={styles.call112Text}>{t('safety.call112')}</Text>
+            </TouchableOpacity>
+
+            <View style={styles.sosModalActions}>
+              <TouchableOpacity
+                style={styles.sosModalCancelButton}
+                onPress={() => setSosModalVisible(false)}
+                disabled={sosLoading}
+                accessibilityRole="button"
+                accessibilityLabel={t('common.cancel')}
+              >
+                <Text style={styles.sosModalCancelText}>{t('common.cancel')}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.sosModalConfirmButton}
+                onPress={handleSOSConfirm}
+                disabled={sosLoading}
+                accessibilityRole="button"
+                accessibilityLabel={t('safety.sosConfirmButton')}
+              >
+                {sosLoading ? (
+                  <ActivityIndicator size="small" color={colors.background} />
+                ) : (
+                  <Text style={styles.sosModalConfirmText}>{t('safety.sosConfirmButton')}</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </>
   );
 }
 
-const createStyles = (typography) => StyleSheet.create({
+const createStyles = (typography, colors) => StyleSheet.create({
   container: {
     flex: 1,
   },
   statusHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 10,
   },
   statusTitle: {
     ...typography.h1,
@@ -315,30 +565,27 @@ const createStyles = (typography) => StyleSheet.create({
   driverInfoCard: {
     backgroundColor: colors.background,
     borderRadius: radius.lg,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: 2,
-    borderColor: colors.primary,
-    ...shadows.md,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 1.5,
+    borderColor: colors.border,
   },
   driverComingBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.primary + '10',
-    padding: 12,
+    backgroundColor: colors.primary + '08',
+    padding: 10,
     borderRadius: radius.md,
-    marginBottom: 12,
-    borderWidth: 2,
-    borderColor: colors.primary,
+    marginBottom: 10,
   },
   driverComingIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.primary + '20',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.primary + '15',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: 10,
   },
   driverComingTextContainer: {
     flex: 1,
@@ -361,20 +608,20 @@ const createStyles = (typography) => StyleSheet.create({
   driverInfoHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 10,
   },
   driverAvatarContainer: {
-    marginRight: 12,
+    marginRight: 10,
   },
   driverAvatar: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
   },
   driverAvatarPlaceholder: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center',
@@ -415,13 +662,13 @@ const createStyles = (typography) => StyleSheet.create({
     alignItems: 'center',
   },
   vehicleIconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: 10,
   },
   vehicleDetails: {
     flex: 1,
@@ -466,12 +713,16 @@ const createStyles = (typography) => StyleSheet.create({
     textTransform: 'capitalize',
   },
   waitingContainer: {
-    backgroundColor: colors.warning + '15',
+    backgroundColor: colors.warning + '10',
     borderRadius: radius.lg,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: 2,
-    borderColor: colors.primary,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 1.5,
+    borderColor: colors.warning + '40',
+  },
+  waitingContainerUrgent: {
+    backgroundColor: colors.destructive + '15',
+    borderColor: colors.destructive,
   },
   waitingHeader: {
     flexDirection: 'row',
@@ -483,6 +734,9 @@ const createStyles = (typography) => StyleSheet.create({
     fontWeight: '600',
     color: colors.foreground,
     marginLeft: 8,
+  },
+  waitingTitleUrgent: {
+    color: colors.destructive,
   },
   waitingTimeRow: {
     alignItems: 'center',
@@ -520,33 +774,43 @@ const createStyles = (typography) => StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginTop: 4,
   },
   waitingFeeLabel: {
     ...typography.bodySmall,
     color: colors.mutedForeground,
   },
+  waitingFeeValueContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
   waitingFeeValue: {
     ...typography.bodyMedium,
-    fontWeight: '600',
+    fontWeight: '700',
     color: colors.warning,
+  },
+  waitingWarningRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    marginTop: 8,
   },
   waitingWarning: {
     ...typography.bodySmall,
     color: colors.destructive,
     textAlign: 'center',
-    marginTop: 8,
-    fontWeight: '500',
+    fontWeight: '600',
   },
   inProgressContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.primary + '15',
+    backgroundColor: colors.primary + '08',
     borderRadius: radius.lg,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: 2,
-    borderColor: colors.primary,
+    padding: 12,
+    marginBottom: 12,
   },
   inProgressText: {
     ...typography.h2,
@@ -555,35 +819,169 @@ const createStyles = (typography) => StyleSheet.create({
   },
   rideDetailsRow: {
     flexDirection: 'row',
-    marginBottom: 16,
+    alignItems: 'center',
+    backgroundColor: colors.background,
+    borderRadius: radius.md,
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+    marginBottom: 12,
   },
   rideDetailItem: {
     flex: 1,
-    backgroundColor: colors.background,
-    padding: 16,
-    borderRadius: radius.lg,
-    marginHorizontal: 4,
-    borderWidth: 2,
-    borderColor: colors.primary,
+    alignItems: 'center',
+  },
+  rideDetailDivider: {
+    width: 1,
+    height: 28,
+    backgroundColor: colors.border,
   },
   rideDetailLabel: {
-    ...typography.caption,
+    ...typography.captionSmall,
     color: colors.mutedForeground,
-    marginBottom: 4,
+    marginTop: 2,
   },
   rideDetailValue: {
-    ...typography.h1,
+    ...typography.bodyMedium,
+    fontWeight: '600',
     color: colors.foreground,
   },
-  cancelButton: {
-    backgroundColor: colors.destructive + '15',
-    padding: 16,
-    borderRadius: radius.lg,
+  // Compact action bar — single row
+  actionBar: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 24,
+    justifyContent: 'center',
+    gap: 12,
+    marginBottom: 12,
+  },
+  sosButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.destructive,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  sosButtonText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: colors.background,
+    letterSpacing: 0.5,
+  },
+  actionButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.primary + '12',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  cancelButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: colors.destructive + '10',
+    paddingVertical: 12,
+    borderRadius: radius.lg,
+    marginBottom: 16,
   },
   cancelButtonText: {
-    ...typography.h2,
+    ...typography.bodyMedium,
+    fontWeight: '600',
     color: colors.destructive,
+  },
+  // SOS Modal
+  sosModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  sosModalCard: {
+    backgroundColor: colors.background,
+    borderRadius: radius.xl,
+    padding: 24,
+    width: '100%',
+    maxWidth: 360,
+    alignItems: 'center',
+    ...shadows.md,
+  },
+  sosModalIconCircle: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: colors.destructive + '15',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  sosModalTitle: {
+    ...typography.h1,
+    fontWeight: '700',
+    color: colors.destructive,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  sosModalMessage: {
+    ...typography.body,
+    color: colors.mutedForeground,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 20,
+  },
+  call112Button: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.destructive,
+    borderRadius: radius.lg,
+    paddingVertical: 14,
+    paddingHorizontal: 28,
+    width: '100%',
+    marginBottom: 16,
+    ...shadows.sm,
+  },
+  call112Icon: {
+    marginRight: 8,
+  },
+  call112Text: {
+    ...typography.h2,
+    fontWeight: '700',
+    color: colors.background,
+  },
+  sosModalActions: {
+    flexDirection: 'row',
+    width: '100%',
+    gap: 12,
+  },
+  sosModalCancelButton: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radius.lg,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.background,
+    minHeight: 48,
+  },
+  sosModalCancelText: {
+    ...typography.h3,
+    color: colors.mutedForeground,
+  },
+  sosModalConfirmButton: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radius.lg,
+    paddingVertical: 12,
+    backgroundColor: colors.destructive + 'CC',
+    minHeight: 48,
+  },
+  sosModalConfirmText: {
+    ...typography.h3,
+    fontWeight: '600',
+    color: colors.background,
   },
 });

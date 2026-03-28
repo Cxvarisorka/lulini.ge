@@ -6,17 +6,20 @@ import {
   ScrollView,
   TouchableOpacity,
   Linking,
+  Platform,
   Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import Constants from 'expo-constants';
-import { colors, shadows, radius, spacing, useTypography } from '../theme/colors';
+import { shadows, radius, spacing, useTypography } from '../theme/colors';
+import { useTheme } from '../context/ThemeContext';
 
 export default function AboutScreen({ navigation }) {
 const typography = useTypography();
-  const styles = React.useMemo(() => createStyles(typography), [typography]);
+  const { colors } = useTheme();
+  const styles = React.useMemo(() => createStyles(typography, colors), [typography, colors]);
     const { t } = useTranslation();
   const insets = useSafeAreaInsets();
 
@@ -35,17 +38,17 @@ const typography = useTypography();
     {
       icon: 'logo-facebook',
       label: 'Facebook',
-      url: 'https://facebook.com/gotoursgeorgia',
+      url: 'https://facebook.com/lulinitaxi',
     },
     {
       icon: 'logo-instagram',
       label: 'Instagram',
-      url: 'https://instagram.com/gotoursgeorgia',
+      url: 'https://instagram.com/lulinitaxi',
     },
     {
       icon: 'logo-twitter',
       label: 'Twitter',
-      url: 'https://twitter.com/gotoursge',
+      url: 'https://twitter.com/lulinitaxi',
     },
   ];
 
@@ -74,6 +77,26 @@ const typography = useTypography();
     } catch (err) {
       if (__DEV__) console.warn('[About] Failed to open URL:', err.message);
     }
+  };
+
+  const handleRateApp = async () => {
+    // Try expo-store-review first (graceful degradation if not installed)
+    try {
+      const StoreReview = require('expo-store-review');
+      const isAvailable = await StoreReview.isAvailableAsync();
+      if (isAvailable) {
+        await StoreReview.requestReview();
+        return;
+      }
+    } catch (_) {
+      // expo-store-review not installed — fall through to Linking
+    }
+    // Fallback: open the store listing directly
+    const storeUrl =
+      Platform.OS === 'ios'
+        ? 'https://apps.apple.com/app/lulini/id0000000000' // replace with real App Store ID
+        : 'market://details?id=ge.lulini.passenger';
+    handleLinkPress(storeUrl);
   };
 
   return (
@@ -125,6 +148,9 @@ const typography = useTypography();
                   index !== links.length - 1 && styles.linkItemBorder,
                 ]}
                 onPress={() => handleLinkPress(link.url)}
+                accessibilityRole="link"
+                accessibilityLabel={link.label}
+                accessibilityHint={t('about.opensInBrowser', { defaultValue: 'Opens in browser' })}
               >
                 <View style={styles.linkIcon}>
                   <Ionicons name={link.icon} size={22} color={colors.foreground} />
@@ -152,6 +178,9 @@ const typography = useTypography();
                   index !== legalLinks.length - 1 && styles.linkItemBorder,
                 ]}
                 onPress={link.onPress}
+                accessibilityRole="link"
+                accessibilityLabel={link.label}
+                accessibilityHint={t('about.opensInBrowser', { defaultValue: 'Opens in browser' })}
               >
                 <View style={styles.linkIcon}>
                   <Ionicons name={link.icon} size={22} color={colors.foreground} />
@@ -168,7 +197,13 @@ const typography = useTypography();
         </View>
 
         {/* Rate App */}
-        <TouchableOpacity style={styles.rateCard}>
+        <TouchableOpacity
+          style={styles.rateCard}
+          onPress={handleRateApp}
+          accessibilityRole="button"
+          accessibilityLabel={t('about.rateApp')}
+          accessibilityHint={t('about.rateAppDesc')}
+        >
           <View style={styles.rateContent}>
             <Ionicons name="star" size={28} color={colors.warning} />
             <View style={styles.rateText}>
@@ -197,7 +232,7 @@ const typography = useTypography();
   );
 }
 
-const createStyles = (typography) => StyleSheet.create({
+const createStyles = (typography, colors) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.muted,

@@ -17,7 +17,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../context/AuthContext';
 import { authAPI } from '../services/api';
-import { colors, radius, shadows, useTypography } from '../theme/colors';
+import { radius, shadows, useTypography } from '../theme/colors';
+import { useTheme } from '../context/ThemeContext';
 import { COUNTRY_CODE } from '../config/phone.config';
 
 const OTP_LENGTH = 6;
@@ -30,7 +31,8 @@ const STEPS = {
 
 export default function UpdatePhoneScreen({ navigation }) {
 const typography = useTypography();
-  const styles = React.useMemo(() => createStyles(typography), [typography]);
+  const { colors } = useTheme();
+  const styles = React.useMemo(() => createStyles(typography, colors), [typography, colors]);
     const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { user, refreshUser } = useAuth();
@@ -311,7 +313,7 @@ const typography = useTypography();
   );
 }
 
-const createStyles = (typography) => StyleSheet.create({
+const createStyles = (typography, colors) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,

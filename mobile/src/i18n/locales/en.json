@@ -20,7 +20,9 @@
     "seeAll": "See All",
     "goBack": "Go Back",
     "optional": "Optional",
-    "tryAgain": "Try Again"
+    "tryAgain": "Try Again",
+    "comingSoon": "Coming Soon",
+    "comingSoonDesc": "This feature will be available soon."
   },
   "drawer": {
     "taxiServices": "Taxi Services",
@@ -68,7 +70,8 @@
     "fairPrices": "Fair Prices",
     "fairPricesDesc": "Transparent pricing, no surprises",
     "support247": "24/7 Support",
-    "support247Desc": "Help whenever you need it"
+    "support247Desc": "Help whenever you need it",
+    "openMenu": "Open menu"
   },
   "taxi": {
     "title": "Request a Taxi",
@@ -212,10 +215,16 @@
     "googleApiNotConfigured": "Google Places API not configured. Using manual search.",
     "tapToSelectLocation": "Tap on the map to select location",
     "activeRideExists": "You already have an active ride. Please wait for it to finish or cancel it first.",
+    "shareETA": "Share ETA",
+    "shareETAHint": "Share your estimated arrival time with contacts",
+    "shareETAMessage": "I'm on my way! ETA: {{eta}}. Track my ride: {{url}}",
     "driverApproaching": "Driver is Nearby!",
     "driverApproachingPickup": "Your driver will arrive in about {{minutes}} min. Please be ready at the pickup location.",
     "almostThere": "Almost There!",
-    "approachingDropoff": "You will arrive at your destination in about {{minutes}} min."
+    "approachingDropoff": "You will arrive at your destination in about {{minutes}} min.",
+    "passengers": "passengers",
+    "cancelAfterArrivalWarning": "Cancelling after your driver has arrived may result in a cancellation fee.",
+    "callDriver": "Call Driver"
   },
   "connection": {
     "noInternet": "No Internet Connection",
@@ -287,7 +296,11 @@
     "passwordsNotMatch": "Passwords do not match",
     "passwordTooShort": "Password must be at least 8 characters",
     "pleaseLogin": "Please login to continue",
-    "newUserHint": "New number? You'll create an account after verification"
+    "newUserHint": "New number? You'll create an account after verification",
+    "hidePassword": "Hide password",
+    "showPassword": "Show password",
+    "otpBoxes": "Verification code entry",
+    "socialAccount": "Social account"
   },
   "permissions": {
     "welcome": "Welcome!",
@@ -330,7 +343,17 @@
     "changeNumber": "Change number",
     "addEmail": "Add Email",
     "editEmail": "Edit Email",
-    "emailUpdated": "Email updated successfully"
+    "emailDescription": "You'll receive ride receipts and account updates",
+    "emailUpdated": "Email verified and updated successfully",
+    "sendCode": "Send Code",
+    "verifyEmail": "Verify Email",
+    "codeSentTo": "We sent a 6-digit code to {{email}}",
+    "verificationCode": "Verification code",
+    "enterCode": "Please enter the 6-digit verification code",
+    "resendCode": "Resend code",
+    "resendIn": "Resend in {{seconds}}s",
+    "verify": "Verify",
+    "verifyEmailFirst": "Please verify your email first"
   },
   "languages": {
     "en": "English",
@@ -376,7 +399,10 @@
     "soundEffects": "Sound Effects",
     "soundEffectsDesc": "Play sounds for notifications",
     "hapticFeedback": "Haptic Feedback",
-    "hapticFeedbackDesc": "Vibrate on interactions",
+    "hapticFeedbackDesc": "Vibrate on button presses and events",
+    "themeLight": "Light",
+    "themeDark": "Dark",
+    "themeSystem": "System",
     "ridePreferences": "Ride Preferences",
     "showETA": "Show ETA",
     "showETADesc": "Display estimated time of arrival",
@@ -384,10 +410,72 @@
     "liveTrackingDesc": "Show driver location in real-time",
     "saveRideHistory": "Save Ride History",
     "saveRideHistoryDesc": "Keep record of your past rides",
+    "safety": "Safety",
     "privacy": "Privacy & Legal",
     "privacyPolicy": "Privacy Policy",
     "termsOfService": "Terms of Service",
     "deleteAccount": "Delete Account"
+  },
+  "deleteAccount": {
+    "title": "Delete Account",
+    "subtitle": "This action is permanent and cannot be undone after the grace period.",
+    "whatHappensTitle": "What will happen",
+    "consequence1": "All active rides will be cancelled immediately",
+    "consequence2": "Your personal data will be anonymized",
+    "consequence3": "Your account will be permanently deleted after {{days}} days",
+    "consequence4": "Payment methods and ride history will be removed",
+    "gracePeriodNotice": "Your account is scheduled for deletion on {{date}}. You can cancel this within the grace period.",
+    "confirmPasswordTitle": "Confirm Your Password",
+    "deleteButton": "Delete My Account",
+    "keepAccount": "Keep My Account",
+    "finalConfirmTitle": "Are you sure?",
+    "finalConfirmMessage": "Your account will be scheduled for deletion. You have 30 days to cancel this action.",
+    "passwordRequired": "Please enter your password to confirm",
+    "error": "Error",
+    "scheduledTitle": "Deletion Scheduled",
+    "scheduledMessage": "Your account is scheduled for deletion on {{date}}. You can cancel this below.",
+    "gracePeriodInfo": "You have 30 days to change your mind. After that, all your data will be permanently removed.",
+    "cancelDeletion": "Cancel Account Deletion",
+    "cancellationSuccessTitle": "Deletion Cancelled",
+    "cancellationSuccessMessage": "Your account deletion has been cancelled. Welcome back!"
+  },
+  "emergencyContacts": {
+    "title": "Emergency Contacts",
+    "settingsDesc": "Manage contacts notified during SOS",
+    "infoBanner": "These contacts will be notified if you trigger an SOS alert during a ride.",
+    "contactsCount": "contacts saved",
+    "emptyTitle": "No Emergency Contacts",
+    "emptySubtitle": "Add trusted contacts who will be notified in case of an emergency during a ride.",
+    "addContact": "Add Emergency Contact",
+    "addTitle": "Add Contact",
+    "editTitle": "Edit Contact",
+    "nameLabel": "Full Name",
+    "namePlaceholder": "Contact's full name",
+    "nameRequired": "Name is required",
+    "phoneRequired": "Phone number is required",
+    "relationshipLabel": "Relationship",
+    "deleteTitle": "Remove Contact",
+    "deleteMessage": "Remove {{name}} from your emergency contacts?",
+    "relationships": {
+      "family": "Family",
+      "friend": "Friend",
+      "spouse": "Spouse",
+      "colleague": "Colleague",
+      "other": "Other"
+    }
+  },
+  "safety": {
+    "sos": "SOS",
+    "sosConfirmTitle": "Send SOS Alert?",
+    "sosConfirmMessage": "This will alert emergency services and notify your emergency contacts with your current location.",
+    "sosConfirmButton": "Send Alert",
+    "sosAlertTitle": "SOS Sent",
+    "sosAlertMessage": "Emergency contacts have been notified. You can also call emergency services directly.",
+    "sosAlertFallback": "Could not send alert automatically. Please call emergency services directly.",
+    "call112": "Call 112",
+    "shareTrip": "Share Trip",
+    "shareTripTitle": "Share My Trip",
+    "shareTripMessage": "Track my Lulini ride in real time: {{url}}"
   },
   "payment": {
     "payment": "Payment",
@@ -549,6 +637,86 @@
     "etaDropoff": "{{minutes}} min until drop-off",
     "ridingNow": "Heading to destination"
   },
+  "favorites": {
+    "title": "Favorite Locations",
+    "myPlaces": "My Places",
+    "saved": "saved",
+    "addNew": "Add Place",
+    "addNewHint": "Opens a form to add a new favorite location",
+    "name": "Name",
+    "namePlaceholder": "e.g. Home, Office",
+    "nameRequired": "Please enter a name for this location",
+    "type": "Type",
+    "types": {
+      "home": "Home",
+      "work": "Work",
+      "custom": "Custom"
+    },
+    "address": "Address",
+    "searchAddress": "Search for an address...",
+    "addressRequired": "Please select an address from suggestions",
+    "maxReached": "You can save up to {{max}} favorite locations",
+    "deleteTitle": "Remove Favorite",
+    "deleteMessage": "Remove \"{{name}}\" from your favorites?",
+    "deleteAccessibility": "Delete {{name}} from favorites",
+    "emptyTitle": "No Favorites Yet",
+    "emptyDesc": "Save your home, work, and other frequent destinations for quick access"
+  },
+  "chat": {
+    "noMessages": "No messages yet",
+    "startConversation": "Send a message to your driver",
+    "inputPlaceholder": "Message driver...",
+    "send": "Send",
+    "sendHint": "Tap to send your message",
+    "activeRide": "Active ride",
+    "accessibilityLabel": "Open chat with driver",
+    "openChatHint": "Opens the chat window to message your driver"
+  },
+  "receipt": {
+    "title": "Ride Receipt",
+    "fareBreakdown": "Fare Breakdown",
+    "baseFare": "Base fare",
+    "total": "Total",
+    "share": "Share Receipt",
+    "shareHint": "Opens the share sheet to send the receipt",
+    "date": "Date",
+    "viewReceipt": "View Receipt",
+    "viewReceiptHint": "Opens the receipt for this ride",
+    "notFound": "Receipt not available"
+  },
+  "schedule": {
+    "title": "Schedule a Ride",
+    "myScheduled": "Scheduled Rides",
+    "scheduleForLater": "Schedule for later",
+    "scheduleHint": "Book a ride at a future date and time",
+    "routeSummary": "Route",
+    "selectDateTime": "Choose Date & Time",
+    "date": "Date",
+    "time": "Time",
+    "selectDate": "Select date",
+    "selectDateHint": "Opens date picker",
+    "selectTime": "Select time",
+    "selectTimeHint": "Opens time picker",
+    "infoMin": "Minimum {{min}} minutes from now",
+    "infoMax": "Maximum {{days}} days in advance",
+    "inMinutes": "In {{min}} minutes",
+    "inHours": "In {{hours}}h {{min}}m",
+    "inHoursMin": "In {{hours}}h {{min}}m",
+    "inDays": "In {{days}} day(s)",
+    "past": "Past",
+    "scheduledTitle": "Ride Scheduled!",
+    "scheduledMessage": "Your ride is confirmed for {{time}} on {{date}}",
+    "tooSoon": "Too Soon",
+    "tooSoonMessage": "Please schedule at least {{min}} minutes from now",
+    "pickupDropoffRequired": "Pickup and dropoff are required",
+    "confirm": "Confirm Schedule",
+    "notSet": "Not set",
+    "scheduled": "Scheduled",
+    "noScheduled": "No Scheduled Rides",
+    "noScheduledDesc": "You have no upcoming scheduled rides",
+    "cancelTitle": "Cancel Scheduled Ride",
+    "cancelMessage": "Are you sure you want to cancel this scheduled ride?"
+  },
   "about": {
     "tagline": "Your ride, your way",
     "version": "Version",
@@ -564,6 +732,13 @@
     "rateApp": "Rate the App",
     "rateAppDesc": "Love Lulini? Leave us a review!",
     "allRightsReserved": "All rights reserved.",
-    "madeWithLove": "Made with love in Georgia"
+    "madeWithLove": "Made with love in Georgia",
+    "opensInBrowser": "Opens in browser"
+  },
+  "update": {
+    "title": "Update Available",
+    "message": "A new version of Lulini is ready. Restart now to apply the update.",
+    "later": "Later",
+    "restart": "Restart"
   }
 }

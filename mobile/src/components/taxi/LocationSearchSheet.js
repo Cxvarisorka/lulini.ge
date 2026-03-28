@@ -2,9 +2,15 @@ import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput, ActivityIndicator, Keyboard } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
-import { colors, useTypography } from '../../theme/colors';
+import { useTypography } from '../../theme/colors';
+import { useTheme } from '../../context/ThemeContext';
 import { searchPlaces } from '../../services/googleMaps';
-import { taxiAPI } from '../../services/api';
+import { taxiAPI, favoritesAPI } from '../../services/api';
+
+const FAVORITE_ICONS = { home: 'home', work: 'briefcase', custom: 'star' };
+function getFavoriteColors(colors) {
+  return { home: colors.success, work: colors.info, custom: colors.warning };
+}
 
 const MAX_STOPS = 2;
 
@@ -25,7 +31,8 @@ export default function LocationSearchSheet({
   lastDestination,
 }) {
   const typography = useTypography();
-  const styles = React.useMemo(() => createStyles(typography), [typography]);
+  const { colors } = useTheme();
+  const styles = React.useMemo(() => createStyles(typography, colors), [typography, colors]);
   const { t, i18n } = useTranslation();
   const [searchQuery, setSearchQuery] = useState(destination || '');
   const [pickupQuery, setPickupQuery] = useState('');
@@ -213,6 +220,17 @@ export default function LocationSearchSheet({
     if (onPickupRefresh) onPickupRefresh();
   }, [pickup?.address, onPickupRefresh]);
 
+  const [favorites, setFavorites] = useState([]);
+
+  useEffect(() => {
+    let mounted = true;
+    favoritesAPI.getFavorites()
+      .then(res => { if (res.data.success && mounted) setFavorites(res.data.data || []); })
+      .catch(() => {})
+      .finally(() => {});
+    return () => { mounted = false; };
+  }, []);
+
   const [recentRides, setRecentRides] = useState([]);
   const [loadingRides, setLoadingRides] = useState(true);
   const [showAllRides, setShowAllRides] = useState(false);
@@ -330,6 +348,9 @@ export default function LocationSearchSheet({
                   autoCapitalize="words"
                   returnKeyType="next"
                   blurOnSubmit={true}
+                  accessibilityLabel={t('taxi.pickup')}
+                  accessibilityRole="search"
+                  accessibilityHint={t('taxi.currentLocation')}
                 />
                 {activeInput === 'pickup' && isSearching && (
                   <ActivityIndicator size="small" color={colors.primary} style={styles.searchingIndicator} />
@@ -339,6 +360,8 @@ export default function LocationSearchSheet({
                     onPress={() => onSelectOnMap('pickup')}
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                     style={styles.mapIconButton}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('taxi.selectOnMap')}
                   >
                     <Ionicons name="map-outline" size={18} color={colors.mutedForeground} />
                   </TouchableOpacity>
@@ -347,6 +370,8 @@ export default function LocationSearchSheet({
                   onPress={handlePickupReset}
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                   style={styles.refreshButton}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('taxi.useCurrentLocation')}
                 >
                   <Ionicons name="locate" size={18} color={colors.mutedForeground} />
                 </TouchableOpacity>
@@ -372,6 +397,8 @@ export default function LocationSearchSheet({
                       autoCapitalize="words"
                       returnKeyType="search"
                       blurOnSubmit={true}
+                      accessibilityLabel={`${t('taxi.stop')} ${index + 1}`}
+                      accessibilityRole="search"
                     />
                     {activeInput === index && isSearching && (
                       <ActivityIndicator size="small" color={colors.primary} style={styles.searchingIndicator} />
@@ -381,6 +408,8 @@ export default function LocationSearchSheet({
                         onPress={() => onSelectOnMap(index)}
                         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                         style={styles.mapIconButton}
+                        accessibilityRole="button"
+                        accessibilityLabel={t('taxi.selectOnMap')}
                       >
                         <Ionicons name="map-outline" size={18} color={colors.mutedForeground} />
                       </TouchableOpacity>
@@ -389,6 +418,8 @@ export default function LocationSearchSheet({
                       style={styles.removeStopButton}
                       onPress={() => handleRemoveStop(index)}
                       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      accessibilityRole="button"
+                      accessibilityLabel={t('taxi.removeStop')}
                     >
                       <Ionicons name="close-circle" size={20} color={colors.mutedForeground} />
                     </TouchableOpacity>
@@ -417,6 +448,9 @@ export default function LocationSearchSheet({
                   returnKeyType="search"
                   blurOnSubmit={true}
                   onSubmitEditing={handleSubmit}
+                  accessibilityLabel={t('taxi.destination')}
+                  accessibilityRole="search"
+                  accessibilityHint={t('taxi.enterDestination')}
                 />
                 {activeInput === 'destination' && isSearching && (
                   <ActivityIndicator size="small" color={colors.primary} style={styles.searchingIndicator} />
@@ -426,6 +460,8 @@ export default function LocationSearchSheet({
                     onPress={() => onSelectOnMap('destination')}
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                     style={styles.mapIconButton}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('taxi.selectOnMap')}
                   >
                     <Ionicons name="map-outline" size={18} color={colors.mutedForeground} />
                   </TouchableOpacity>
@@ -438,6 +474,8 @@ export default function LocationSearchSheet({
                       onAddStop();
                     }}
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('taxi.addStop')}
                   >
                     <Ionicons name="add-circle" size={20} color={colors.mutedForeground} />
                   </TouchableOpacity>
@@ -459,6 +497,48 @@ export default function LocationSearchSheet({
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={styles.scrollContent}
       >
+        {/* Favorite Locations — shown at the top when no suggestions are active */}
+        {suggestions.length === 0 && favorites.length > 0 && (
+          <View style={styles.favoritesSection}>
+            <View style={styles.sectionHeader}>
+              <Ionicons name="bookmark" size={18} color={colors.primary} />
+              <Text style={styles.sectionTitle}>{t('favorites.myPlaces')}</Text>
+            </View>
+            {favorites.map(fav => {
+              const iconName = FAVORITE_ICONS[fav.type] || 'star';
+              const iconColor = getFavoriteColors(colors)[fav.type] || colors.warning;
+              return (
+                <TouchableOpacity
+                  key={fav._id}
+                  style={styles.favoriteItem}
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    setSearchQuery(fav.address);
+                    setSuggestions([]);
+                    const coords = fav.lat && fav.lng
+                      ? { latitude: fav.lat, longitude: fav.lng }
+                      : null;
+                    onDestinationSelect(fav.address, coords);
+                  }}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel={fav.name}
+                  accessibilityHint={fav.address}
+                >
+                  <View style={[styles.favoriteIconContainer, { backgroundColor: iconColor + '18' }]}>
+                    <Ionicons name={iconName} size={18} color={iconColor} />
+                  </View>
+                  <View style={styles.favoriteInfo}>
+                    <Text style={styles.favoriteName} numberOfLines={1}>{fav.name}</Text>
+                    <Text style={styles.favoriteAddress} numberOfLines={1}>{fav.address}</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
+
         {/* Cached Last Destination — instant, no API call */}
         {suggestions.length === 0 && lastDestination?.address && (
           <View style={styles.lastDestSection}>
@@ -613,7 +693,7 @@ export default function LocationSearchSheet({
   );
 }
 
-const createStyles = (typography) => StyleSheet.create({
+const createStyles = (typography, colors) => StyleSheet.create({
   container: {
     flex: 1,
   },
@@ -795,6 +875,37 @@ const createStyles = (typography) => StyleSheet.create({
     ...typography.caption,
     color: colors.mutedForeground,
     marginTop: 2,
+  },
+  favoritesSection: {
+    marginBottom: 8,
+  },
+  favoriteItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  favoriteIconContainer: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  favoriteInfo: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  favoriteName: {
+    ...typography.bodySmall,
+    fontWeight: '600',
+    color: colors.foreground,
+  },
+  favoriteAddress: {
+    ...typography.captionSmall,
+    color: colors.mutedForeground,
+    marginTop: 1,
   },
   lastDestSection: {
     marginBottom: 8,

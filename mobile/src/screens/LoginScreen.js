@@ -16,12 +16,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 
 import { useAuth } from '../context/AuthContext';
-import { colors, radius, useTypography } from '../theme/colors';
+import { radius, useTypography } from '../theme/colors';
+import { useTheme } from '../context/ThemeContext';
 
 export default function LoginScreen({ navigation }) {
   const { t } = useTranslation();
   const typography = useTypography();
-  const styles = React.useMemo(() => createStyles(typography), [typography]);
+  const { colors } = useTheme();
+  const styles = React.useMemo(() => createStyles(typography, colors), [typography, colors]);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -103,6 +105,9 @@ export default function LoginScreen({ navigation }) {
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoCorrect={false}
+                accessibilityLabel={t('auth.email')}
+                accessibilityRole="none"
+                accessibilityHint={t('auth.emailPlaceholder')}
               />
             </View>
           </View>
@@ -118,8 +123,15 @@ export default function LoginScreen({ navigation }) {
                 value={password}
                 onChangeText={setPassword}
                 secureTextEntry={!showPassword}
+                accessibilityLabel={t('auth.password')}
+                accessibilityRole="none"
               />
-              <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
+              <TouchableOpacity
+                onPress={() => setShowPassword(!showPassword)}
+                accessibilityRole="button"
+                accessibilityLabel={showPassword ? t('auth.hidePassword', { defaultValue: 'Hide password' }) : t('auth.showPassword', { defaultValue: 'Show password' })}
+                accessibilityState={{ checked: showPassword }}
+              >
                 <Ionicons
                   name={showPassword ? 'eye-off-outline' : 'eye-outline'}
                   size={20}
@@ -133,6 +145,9 @@ export default function LoginScreen({ navigation }) {
             style={[styles.button, isLoading && styles.buttonDisabled]}
             onPress={handleLogin}
             disabled={isLoading || isGoogleLoading}
+            accessibilityRole="button"
+            accessibilityLabel={t('auth.signIn')}
+            accessibilityState={{ disabled: isLoading || isGoogleLoading, busy: isLoading }}
           >
             {isLoading ? (
               <ActivityIndicator color={colors.primaryForeground} />
@@ -151,6 +166,9 @@ export default function LoginScreen({ navigation }) {
             style={[styles.googleButton, isGoogleLoading && styles.buttonDisabled]}
             onPress={handleGoogleLogin}
             disabled={isLoading || isGoogleLoading}
+            accessibilityRole="button"
+            accessibilityLabel={t('auth.continueWithGoogle')}
+            accessibilityState={{ disabled: isLoading || isGoogleLoading, busy: isGoogleLoading }}
           >
             {isGoogleLoading ? (
               <ActivityIndicator color={colors.foreground} />
@@ -164,7 +182,11 @@ export default function LoginScreen({ navigation }) {
 
           <View style={styles.footer}>
             <Text style={styles.footerText}>{t('auth.noAccount')} </Text>
-            <TouchableOpacity onPress={() => navigation.navigate('Signup')}>
+            <TouchableOpacity
+              onPress={() => navigation.navigate('PhoneAuth')}
+              accessibilityRole="link"
+              accessibilityLabel={t('auth.signUp')}
+            >
               <Text style={styles.linkText}>{t('auth.signUp')}</Text>
             </TouchableOpacity>
           </View>
@@ -174,7 +196,7 @@ export default function LoginScreen({ navigation }) {
   );
 }
 
-const createStyles = (typography) => StyleSheet.create({
+const createStyles = (typography, colors) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,

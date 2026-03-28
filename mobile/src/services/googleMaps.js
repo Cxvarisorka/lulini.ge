@@ -66,22 +66,21 @@ function cacheSet(cache, key, value) {
 }
 
 
-// Kutaisi region configuration - optimized for Georgia
-const KUTAISI_CONFIG = {
-  // Center of Kutaisi
-  latitude: 42.2679,
-  longitude: 42.6946,
-  // Radius in meters (~30km to cover greater Kutaisi area)
-  radius: 30000,
+// Georgia region configuration - centered on Tbilisi
+const GEORGIA_CONFIG = {
+  // Center of Tbilisi
+  latitude: 41.6938,
+  longitude: 44.8015,
+  // Radius in meters (~50km to cover greater Tbilisi area)
+  radius: 50000,
   // Country restriction
   country: 'ge',
-  // Bounding box for Kutaisi area [minLng, minLat, maxLng, maxLat]
-  // Expanded slightly for better coverage
-  bbox: [42.35, 42.05, 43.0, 42.5],
+  // Bounding box for Georgia [minLng, minLat, maxLng, maxLat]
+  bbox: [40.0, 41.0, 46.8, 43.6],
   // Viewport for Google Geocoding (southwest, northeast)
   viewport: {
-    southwest: { lat: 42.05, lng: 42.35 },
-    northeast: { lat: 42.5, lng: 43.0 },
+    southwest: { lat: 41.0, lng: 40.0 },
+    northeast: { lat: 43.6, lng: 46.8 },
   },
 };
 
@@ -107,7 +106,7 @@ export async function searchPlacesNominatim(query, location = null) {
 
   try {
     // viewbox format: <x1>,<y1>,<x2>,<y2> (lon1,lat1,lon2,lat2)
-    const viewbox = `${KUTAISI_CONFIG.viewport.southwest.lng},${KUTAISI_CONFIG.viewport.southwest.lat},${KUTAISI_CONFIG.viewport.northeast.lng},${KUTAISI_CONFIG.viewport.northeast.lat}`;
+    const viewbox = `${GEORGIA_CONFIG.viewport.southwest.lng},${GEORGIA_CONFIG.viewport.southwest.lat},${GEORGIA_CONFIG.viewport.northeast.lng},${GEORGIA_CONFIG.viewport.northeast.lat}`;
 
     const params = new URLSearchParams({
       q: query,
@@ -438,7 +437,7 @@ export async function searchPlacesGoogle(query, location = null) {
       // Restrict to Georgia
       components: 'country:GE',
       // Bounds for Kutaisi area (southwest|northeast)
-      bounds: `${KUTAISI_CONFIG.viewport.southwest.lat},${KUTAISI_CONFIG.viewport.southwest.lng}|${KUTAISI_CONFIG.viewport.northeast.lat},${KUTAISI_CONFIG.viewport.northeast.lng}`,
+      bounds: `${GEORGIA_CONFIG.viewport.southwest.lat},${GEORGIA_CONFIG.viewport.southwest.lng}|${GEORGIA_CONFIG.viewport.northeast.lat},${GEORGIA_CONFIG.viewport.northeast.lng}`,
       // Language - Georgian for local names
       language: 'ka',
       // Region hint
@@ -471,10 +470,10 @@ export async function searchPlacesGoogle(query, location = null) {
       if (!loc) return false;
       // Check if within Kutaisi bounds
       return (
-        loc.lat >= KUTAISI_CONFIG.viewport.southwest.lat &&
-        loc.lat <= KUTAISI_CONFIG.viewport.northeast.lat &&
-        loc.lng >= KUTAISI_CONFIG.viewport.southwest.lng &&
-        loc.lng <= KUTAISI_CONFIG.viewport.northeast.lng
+        loc.lat >= GEORGIA_CONFIG.viewport.southwest.lat &&
+        loc.lat <= GEORGIA_CONFIG.viewport.northeast.lat &&
+        loc.lng >= GEORGIA_CONFIG.viewport.southwest.lng &&
+        loc.lng <= GEORGIA_CONFIG.viewport.northeast.lng
       );
     });
 
@@ -531,9 +530,9 @@ async function searchPlacesAutocomplete(query, location = null) {
       // Both addresses and establishments
       types: 'geocode|establishment',
       // Center on Kutaisi
-      location: `${KUTAISI_CONFIG.latitude},${KUTAISI_CONFIG.longitude}`,
+      location: `${GEORGIA_CONFIG.latitude},${GEORGIA_CONFIG.longitude}`,
       // 30km radius
-      radius: `${KUTAISI_CONFIG.radius}`,
+      radius: `${GEORGIA_CONFIG.radius}`,
       // Strict bounds
       strictbounds: 'true',
       // Restrict to Georgia

@@ -12,11 +12,13 @@ import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
 
 import { useAuth } from '../context/AuthContext';
-import { colors, radius, useTypography } from '../theme/colors';
+import { radius, useTypography } from '../theme/colors';
+import { useTheme } from '../context/ThemeContext';
 
 export default function PermissionsScreen({ navigation }) {
 const typography = useTypography();
-  const styles = React.useMemo(() => createStyles(typography), [typography]);
+  const { colors } = useTheme();
+  const styles = React.useMemo(() => createStyles(typography, colors), [typography, colors]);
     const { t } = useTranslation();
   const [isLoading, setIsLoading] = useState(false);
   const [locationGranted, setLocationGranted] = useState(null);
@@ -200,7 +202,7 @@ const typography = useTypography();
   );
 }
 
-const createStyles = (typography) => StyleSheet.create({
+const createStyles = (typography, colors) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,

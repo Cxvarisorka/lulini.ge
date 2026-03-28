@@ -14,12 +14,14 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import * as WebBrowser from 'expo-web-browser';
-import { colors, shadows, radius, useTypography } from '../../theme/colors';
+import { shadows, radius, useTypography } from '../../theme/colors';
+import { useTheme } from '../../context/ThemeContext';
 import { paymentAPI } from '../../services/api';
 
 export default function PaymentMethodModal({ visible, onClose, onSelect, amount, mode = 'select' }) {
   const typography = useTypography();
-  const styles = React.useMemo(() => createStyles(typography), [typography]);
+  const { colors } = useTheme();
+  const styles = React.useMemo(() => createStyles(typography, colors), [typography, colors]);
   const { t, i18n } = useTranslation();
 
   const [cards, setCards] = useState([]);
@@ -343,7 +345,7 @@ export default function PaymentMethodModal({ visible, onClose, onSelect, amount,
   );
 }
 
-const createStyles = (typography) =>
+const createStyles = (typography, colors) =>
   StyleSheet.create({
     overlay: {
       flex: 1,

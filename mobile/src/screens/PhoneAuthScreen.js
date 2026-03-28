@@ -16,12 +16,14 @@ import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../context/AuthContext';
-import { colors, radius, useTypography } from '../theme/colors';
+import { radius, useTypography } from '../theme/colors';
+import { useTheme } from '../context/ThemeContext';
 import { COUNTRY_CODE } from '../config/phone.config';
 
 export default function PhoneAuthScreen({ navigation }) {
   const typography = useTypography();
-  const styles = React.useMemo(() => createStyles(typography), [typography]);
+  const { colors } = useTheme();
+  const styles = React.useMemo(() => createStyles(typography, colors), [typography, colors]);
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const [localPhone, setLocalPhone] = useState('');
@@ -123,6 +125,9 @@ export default function PhoneAuthScreen({ navigation }) {
                 keyboardType="phone-pad"
                 autoFocus
                 maxLength={9}
+                accessibilityLabel={t('auth.phoneNumber')}
+                accessibilityRole="none"
+                accessibilityHint={t('auth.phoneDescription')}
               />
             </View>
             {phoneError ? (
@@ -134,6 +139,9 @@ export default function PhoneAuthScreen({ navigation }) {
             style={[styles.button, (!validatePhone() || isLoading || cooldown > 0) && styles.buttonDisabled]}
             onPress={handleSendOtp}
             disabled={!validatePhone() || isLoading || cooldown > 0}
+            accessibilityRole="button"
+            accessibilityLabel={cooldown > 0 ? t('auth.resendIn', { seconds: cooldown }) : t('auth.sendCode')}
+            accessibilityState={{ disabled: !validatePhone() || isLoading || cooldown > 0, busy: isLoading }}
           >
             {isLoading ? (
               <ActivityIndicator color={colors.primaryForeground} />
@@ -149,7 +157,7 @@ export default function PhoneAuthScreen({ navigation }) {
   );
 }
 
-const createStyles = (typography) => StyleSheet.create({
+const createStyles = (typography, colors) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,

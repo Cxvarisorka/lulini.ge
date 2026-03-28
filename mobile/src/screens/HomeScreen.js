@@ -18,10 +18,11 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 import { useAuth } from '../context/AuthContext';
 import { useDrawer } from '../navigation/AppNavigator';
-import { colors, radius, spacing, useTypography } from '../theme/colors';
+import { radius, spacing, useTypography } from '../theme/colors';
+import { useTheme } from '../context/ThemeContext';
 
 // Animated Card Component
-const AnimatedCard = ({ children, style, delay = 0, onPress }) => {
+const AnimatedCard = ({ children, style, delay = 0, onPress, accessibilityLabel, accessibilityHint, accessibilityRole }) => {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
   const scaleAnim = useRef(new Animated.Value(1)).current;
@@ -79,6 +80,9 @@ const AnimatedCard = ({ children, style, delay = 0, onPress }) => {
           onPressIn={handlePressIn}
           onPressOut={handlePressOut}
           activeOpacity={1}
+          accessibilityRole={accessibilityRole || 'button'}
+          accessibilityLabel={accessibilityLabel}
+          accessibilityHint={accessibilityHint}
         >
           {children}
         </TouchableOpacity>
@@ -99,7 +103,8 @@ export default function HomeScreen({ navigation }) {
   const carFloatAnim = useRef(new Animated.Value(0)).current;
 
   // Create dynamic styles based on typography
-  const styles = React.useMemo(() => createStyles(typography), [typography]);
+  const { colors } = useTheme();
+  const styles = React.useMemo(() => createStyles(typography, colors), [typography, colors]);
 
   // M4: Stop animation on unmount to avoid memory leak
   useEffect(() => {
@@ -204,6 +209,8 @@ export default function HomeScreen({ navigation }) {
           <AnimatedCard
             delay={100}
             onPress={() => navigation.navigate('Taxi')}
+            accessibilityLabel={t('home.bookTaxi')}
+            accessibilityHint={t('home.taxiSubtitle')}
           >
             <LinearGradient
               colors={['#5b21b6', '#1a1a1a']}
@@ -262,6 +269,7 @@ export default function HomeScreen({ navigation }) {
                   }
                   navigation.navigate(action.screen);
                 }}
+                accessibilityLabel={action.label}
               >
                 <View style={styles.quickActionInner}>
                   <View style={[styles.quickActionIcon, { backgroundColor: `${action.color}20` }]}>
@@ -284,6 +292,8 @@ export default function HomeScreen({ navigation }) {
           <AnimatedCard
             delay={350}
             onPress={() => navigation.navigate('Support')}
+            accessibilityLabel={t('drawer.helpCenter')}
+            accessibilityHint={t('support.available247')}
           >
             <View style={styles.supportCard}>
               <View style={styles.supportIcon}>
@@ -305,6 +315,8 @@ export default function HomeScreen({ navigation }) {
           <AnimatedCard
             delay={400}
             onPress={() => Linking.openURL('https://www.facebook.com/profile.php?id=61577178682828')}
+            accessibilityLabel="Facebook — Lulini Taxi"
+            accessibilityRole="link"
           >
             <View style={styles.socialLinkCard}>
               <View style={[styles.socialLinkIcon, { backgroundColor: '#1877F220' }]}>
@@ -321,6 +333,8 @@ export default function HomeScreen({ navigation }) {
           <AnimatedCard
             delay={450}
             onPress={() => Linking.openURL('https://www.instagram.com/lulinitaxi/')}
+            accessibilityLabel="Instagram — @lulinitaxi"
+            accessibilityRole="link"
           >
             <View style={styles.socialLinkCard}>
               <View style={[styles.socialLinkIcon, { backgroundColor: '#E440A220' }]}>
@@ -339,7 +353,7 @@ export default function HomeScreen({ navigation }) {
   );
 }
 
-const createStyles = (typography) => StyleSheet.create({
+const createStyles = (typography, colors) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.muted,

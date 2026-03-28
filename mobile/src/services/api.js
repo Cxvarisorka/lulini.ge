@@ -132,9 +132,23 @@ export const authAPI = {
   appleAuth: (identityToken, fullName, email) =>
     api.post('/auth/apple/token', { identityToken, fullName, email }),
 
-  // Update email (authenticated)
-  updateEmail: (email) =>
-    api.patch('/auth/email', { email }),
+  // Email verification (authenticated — add/update email)
+  sendEmailCode: (email) =>
+    api.post('/auth/email/send-code', { email }),
+
+  verifyEmailCode: (email, code) =>
+    api.post('/auth/email/verify-code', { email, code }),
+
+  // Email verification (unauthenticated — for registration)
+  sendEmailVerification: (email) =>
+    api.post('/auth/email/send-verification', { email }),
+
+  verifyEmailForRegistration: (email, code) =>
+    api.post('/auth/email/verify-registration', { email, code }),
+
+  // Update profile (firstName, lastName)
+  updateProfile: (firstName, lastName) =>
+    api.patch('/auth/profile', { firstName, lastName }),
 
   // Complete onboarding
   completeOnboarding: () =>
@@ -160,6 +174,46 @@ export const taxiAPI = {
 
   getNearbyDrivers: (lat, lng, vehicleType) =>
     api.get('/drivers/nearby', { params: { lat, lng, vehicleType } }),
+
+  getScheduledRides: () =>
+    api.get('/rides/scheduled'),
+};
+
+// Safety API
+export const safetyAPI = {
+  addEmergencyContact: (data) => api.post('/safety/emergency-contacts', data),
+  getEmergencyContacts: () => api.get('/safety/emergency-contacts'),
+  updateEmergencyContact: (id, data) => api.patch(`/safety/emergency-contacts/${id}`, data),
+  deleteEmergencyContact: (id) => api.delete(`/safety/emergency-contacts/${id}`),
+  triggerSOS: (data) => api.post('/safety/sos', data),
+  resolveSOSAlert: (id, data) => api.patch(`/safety/sos/${id}/resolve`, data),
+  shareRide: (rideId) => api.post(`/safety/rides/${rideId}/share`),
+};
+
+// Chat API
+export const chatAPI = {
+  sendMessage: (rideId, content) => api.post(`/chat/rides/${rideId}/messages`, { content }),
+  getMessages: (rideId, page = 1, limit = 50) => api.get(`/chat/rides/${rideId}/messages`, { params: { page, limit } }),
+  markAsRead: (rideId, messageId) => api.patch(`/chat/rides/${rideId}/messages/read`, { messageId }),
+};
+
+// Favorites API
+export const favoritesAPI = {
+  getFavorites: () => api.get('/favorites'),
+  addFavorite: (data) => api.post('/favorites', data),
+  updateFavorite: (id, data) => api.patch(`/favorites/${id}`, data),
+  deleteFavorite: (id) => api.delete(`/favorites/${id}`),
+};
+
+// Receipt API
+export const receiptAPI = {
+  getReceipt: (rideId) => api.get(`/receipts/rides/${rideId}/receipt`),
+};
+
+// Account API
+export const accountAPI = {
+  deleteAccount: (password) => api.delete('/auth/account', { data: { password } }),
+  cancelDeletion: () => api.delete('/auth/account/cancel'),
 };
 
 // Settings API
@@ -213,6 +267,12 @@ export const paymentAPI = {
 
   getPaymentHistory: (page = 1, limit = 20) =>
     api.get('/payments/history', { params: { page, limit } }),
+};
+
+// Trip share API
+export const tripShareAPI = {
+  getShareLink: (rideId) =>
+    api.get(`/rides/${rideId}/share`),
 };
 
 export { API_URL };

@@ -12,7 +12,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors, shadows, radius, spacing, useTypography } from '../theme/colors';
+import { shadows, radius, spacing, useTypography } from '../theme/colors';
+import { useTheme } from '../context/ThemeContext';
 
 const CANCELLATION_REASONS = [
   {
@@ -56,8 +57,9 @@ export default function CancelRideModal({
   isLoading = false,
 }) {
   const typography = useTypography();
+  const { colors } = useTheme();
   const insets = useSafeAreaInsets();
-  const styles = React.useMemo(() => createStyles(typography), [typography]);
+  const styles = React.useMemo(() => createStyles(typography, colors), [typography, colors]);
   const { t } = useTranslation();
   const [selectedReason, setSelectedReason] = useState(null);
   const [additionalNote, setAdditionalNote] = useState('');
@@ -209,7 +211,7 @@ export default function CancelRideModal({
   );
 }
 
-const createStyles = (typography) => StyleSheet.create({
+const createStyles = (typography, colors) => StyleSheet.create({
   overlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',

@@ -18,7 +18,7 @@ import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../context/AuthContext';
-import { colors } from '../theme/colors';
+import { useTheme } from '../context/ThemeContext';
 
 // Auth Screens
 import WelcomeScreen from '../screens/WelcomeScreen';
@@ -26,6 +26,7 @@ import LoginScreen from '../screens/LoginScreen';
 import PhoneAuthScreen from '../screens/PhoneAuthScreen';
 import OtpVerificationScreen from '../screens/OtpVerificationScreen';
 import PhoneRegistrationScreen from '../screens/PhoneRegistrationScreen';
+import SocialRegistrationScreen from '../screens/SocialRegistrationScreen';
 import PermissionsScreen from '../screens/PermissionsScreen';
 
 // Main Screens
@@ -46,6 +47,15 @@ import NotificationSettingsScreen from '../screens/NotificationSettingsScreen';
 import AboutScreen from '../screens/AboutScreen';
 import FAQDetailScreen from '../screens/FAQDetailScreen';
 
+// New UX Screens
+import FavoriteLocationsScreen from '../screens/FavoriteLocationsScreen';
+import ChatScreen from '../screens/ChatScreen';
+import RideReceiptScreen from '../screens/RideReceiptScreen';
+import ScheduleRideScreen from '../screens/ScheduleRideScreen';
+import ScheduledRidesScreen from '../screens/ScheduledRidesScreen';
+import DeleteAccountScreen from '../screens/DeleteAccountScreen';
+import EmergencyContactsScreen from '../screens/EmergencyContactsScreen';
+
 // Drawer Content
 import DrawerContent from '../components/DrawerContent';
 
@@ -62,6 +72,7 @@ const DRAWER_WIDTH = Math.min(SCREEN_WIDTH * 0.8, 320);
 
 // Auth Stack (Welcome/Phone Auth)
 function AuthStack() {
+  const { colors } = useTheme();
   return (
     <Stack.Navigator
       screenOptions={{
@@ -83,6 +94,7 @@ function AuthStack() {
 function MainTabs() {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
 
   // Calculate proper bottom padding for devices with home indicator/gesture navigation
   const bottomPadding = Math.max(insets.bottom, 10);
@@ -159,6 +171,8 @@ function MainTabs() {
 // Main Stack with Tabs and Modal Screens
 function MainStackNavigator() {
   const { t } = useTranslation();
+  const { colors } = useTheme();
+  const styles = React.useMemo(() => createStyles(colors), [colors]);
 
   return (
     <Stack.Navigator
@@ -300,6 +314,63 @@ function MainStackNavigator() {
           contentStyle: { backgroundColor: colors.muted },
         }}
       />
+      <Stack.Screen
+        name="FavoriteLocations"
+        component={FavoriteLocationsScreen}
+        options={{
+          title: t('favorites.title'),
+          contentStyle: { backgroundColor: colors.background },
+        }}
+      />
+      <Stack.Screen
+        name="Chat"
+        component={ChatScreen}
+        options={{
+          headerShown: false,
+          presentation: 'modal',
+          animation: 'slide_from_bottom',
+        }}
+      />
+      <Stack.Screen
+        name="RideReceipt"
+        component={RideReceiptScreen}
+        options={{
+          title: t('receipt.title'),
+          contentStyle: { backgroundColor: colors.muted },
+        }}
+      />
+      <Stack.Screen
+        name="ScheduleRide"
+        component={ScheduleRideScreen}
+        options={{
+          title: t('schedule.title'),
+          contentStyle: { backgroundColor: colors.muted },
+        }}
+      />
+      <Stack.Screen
+        name="ScheduledRides"
+        component={ScheduledRidesScreen}
+        options={{
+          title: t('schedule.myScheduled'),
+          contentStyle: { backgroundColor: colors.muted },
+        }}
+      />
+      <Stack.Screen
+        name="DeleteAccount"
+        component={DeleteAccountScreen}
+        options={{
+          title: t('deleteAccount.title'),
+          contentStyle: { backgroundColor: colors.muted },
+        }}
+      />
+      <Stack.Screen
+        name="EmergencyContacts"
+        component={EmergencyContactsScreen}
+        options={{
+          title: t('emergencyContacts.title'),
+          contentStyle: { backgroundColor: colors.muted },
+        }}
+      />
     </Stack.Navigator>
   );
 }
@@ -308,6 +379,8 @@ function MainStackNavigator() {
 // let touches pass through when closed. No Modal, no mount/unmount.
 // Supports swipe-left-to-close gesture (HIG sidebar pattern).
 function CustomDrawerOverlay({ isOpen, onClose, navigation }) {
+  const { colors } = useTheme();
+  const styles = React.useMemo(() => createStyles(colors), [colors]);
   const slideAnim = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const [visible, setVisible] = useState(false);
@@ -423,6 +496,8 @@ function DrawerProvider({ children, navigation }) {
 
 // Loading Screen
 function LoadingScreen() {
+  const { colors } = useTheme();
+  const styles = React.useMemo(() => createStyles(colors), [colors]);
   return (
     <View style={styles.loadingContainer}>
       <ActivityIndicator size="large" color={colors.primary} />
@@ -447,6 +522,17 @@ function AuthenticatedApp() {
   );
 }
 
+// Name Collection Stack (for social sign-in users missing first/last name)
+function NameCollectionStack() {
+  return (
+    <NavigationContainer>
+      <Stack.Navigator screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="SocialRegistration" component={SocialRegistrationScreen} />
+      </Stack.Navigator>
+    </NavigationContainer>
+  );
+}
+
 // Onboarding Stack (Permissions)
 function OnboardingStack() {
   return (
@@ -460,13 +546,17 @@ function OnboardingStack() {
 
 // Main App Navigator
 export default function AppNavigator() {
-  const { isAuthenticated, loading, user, isNewUser } = useAuth();
+  const { isAuthenticated, loading, user, isNewUser, requiresName } = useAuth();
 
   if (loading) {
     return <LoadingScreen />;
   }
 
   if (isAuthenticated) {
+    // If user is missing first/last name (e.g. Apple/Google sign-in), collect it first
+    if (requiresName) {
+      return <NameCollectionStack />;
+    }
     // Check if user needs to complete onboarding (new user who hasn't completed it yet)
     if (isNewUser || (user && !user.hasCompletedOnboarding)) {
       return <OnboardingStack />;
@@ -481,7 +571,7 @@ export default function AppNavigator() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => StyleSheet.create({
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',

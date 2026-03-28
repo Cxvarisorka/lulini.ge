@@ -13,12 +13,14 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors, shadows, radius, spacing, useTypography } from '../theme/colors';
+import { shadows, radius, spacing, useTypography } from '../theme/colors';
+import { useTheme } from '../context/ThemeContext';
 
 export default function RideReviewModal({ visible, ride, onClose, onSubmit, isLoading }) {
   const typography = useTypography();
+  const { colors } = useTheme();
   const insets = useSafeAreaInsets();
-  const styles = React.useMemo(() => createStyles(typography), [typography]);
+  const styles = React.useMemo(() => createStyles(typography, colors), [typography, colors]);
   const { t } = useTranslation();
   const [rating, setRating] = useState(0);
   const [review, setReview] = useState('');
@@ -231,7 +233,7 @@ export default function RideReviewModal({ visible, ride, onClose, onSubmit, isLo
   );
 }
 
-const createStyles = (typography) => StyleSheet.create({
+const createStyles = (typography, colors) => StyleSheet.create({
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',

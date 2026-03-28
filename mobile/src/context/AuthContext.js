@@ -2,6 +2,7 @@ import React, { createContext, useState, useContext, useEffect, useCallback, use
 import * as SecureStore from 'expo-secure-store';
 import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
+import { makeRedirectUri } from 'expo-auth-session';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
@@ -24,6 +25,7 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [isNewUser, setIsNewUser] = useState(false);
+  const [requiresName, setRequiresName] = useState(false);
   const [pendingPhoneVerification, setPendingPhoneVerification] = useState(null);
 
   // Google Auth configuration using expo-auth-session
@@ -31,6 +33,7 @@ export const AuthProvider = ({ children }) => {
     clientId: GOOGLE_CONFIG.webClientId,
     androidClientId: GOOGLE_CONFIG.androidClientId,
     iosClientId: GOOGLE_CONFIG.iosClientId,
+    redirectUri: makeRedirectUri({ scheme: 'com.lulini.mobile', path: 'redirect' }),
   });
 
   // Handle Google auth response
@@ -58,6 +61,7 @@ export const AuthProvider = ({ children }) => {
         }
 
         setUser(apiResponse.data.data.user);
+        setRequiresName(apiResponse.data.requiresName || false);
       } else {
         setError('Google login failed');
       }
@@ -97,6 +101,7 @@ export const AuthProvider = ({ children }) => {
           const response = await authAPI.getMe();
           if (response.data.success && !isCancelled) {
             setUser(response.data.data.user);
+            setRequiresName(response.data.requiresName || false);
           }
         }
       } catch (err) {
@@ -250,6 +255,7 @@ export const AuthProvider = ({ children }) => {
         }
         setUser(apiResponse.data.data.user);
         setIsNewUser(apiResponse.data.isNewUser || false);
+        setRequiresName(apiResponse.data.requiresName || false);
         return { success: true, isNewUser: apiResponse.data.isNewUser };
       }
 
@@ -319,6 +325,24 @@ export const AuthProvider = ({ children }) => {
     }
   }, []);
 
+  // Update profile (firstName, lastName) — used after social sign-in when name is missing
+  const updateProfile = useCallback(async (firstName, lastName) => {
+    try {
+      setError(null);
+      const response = await authAPI.updateProfile(firstName, lastName);
+      if (response.data.success) {
+        setUser(response.data.data.user);
+        setRequiresName(false);
+        return { success: true };
+      }
+      return { success: false, error: 'Profile update failed' };
+    } catch (err) {
+      const message = err.response?.data?.message || 'Profile update failed';
+      setError(message);
+      return { success: false, error: message };
+    }
+  }, []);
+
   // Complete onboarding (L1: use functional update to avoid stale closure)
   const completeOnboarding = useCallback(async () => {
     try {
@@ -375,6 +399,7 @@ export const AuthProvider = ({ children }) => {
     loading,
     error,
     isNewUser,
+    requiresName,
     pendingPhoneVerification,
     login,
     register,
@@ -382,14 +407,15 @@ export const AuthProvider = ({ children }) => {
     loginWithApple,
     sendPhoneOtp,
     verifyPhoneOtp,
+    updateProfile,
     completeOnboarding,
     logout,
     refreshUser,
     isAuthenticated: !!user,
     googleAuthReady: !!request,
-  }), [user, loading, error, isNewUser, pendingPhoneVerification, request,
+  }), [user, loading, error, isNewUser, requiresName, pendingPhoneVerification, request,
     login, register, loginWithGoogle, loginWithApple, sendPhoneOtp,
-    verifyPhoneOtp, completeOnboarding, logout, refreshUser]);
+    verifyPhoneOtp, updateProfile, completeOnboarding, logout, refreshUser]);
 
   return (
     <AuthContext.Provider value={value}>

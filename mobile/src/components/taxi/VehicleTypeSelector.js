@@ -2,7 +2,8 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
-import { colors, radius, shadows, useTypography } from '../../theme/colors';
+import { radius, shadows, useTypography } from '../../theme/colors';
+import { useTheme } from '../../context/ThemeContext';
 
 const VEHICLE_TYPES = [
   { id: 'economy', icon: 'car-outline', priceMultiplier: 1, passengers: 4 },
@@ -43,7 +44,8 @@ const carIconStyles = StyleSheet.create({
 
 export default function VehicleTypeSelector({ selectedVehicle, onSelect, pricingConfig, routeDistance }) {
   const typography = useTypography();
-  const styles = React.useMemo(() => createStyles(typography), [typography]);
+  const { colors } = useTheme();
+  const styles = React.useMemo(() => createStyles(typography, colors), [typography, colors]);
   const { t } = useTranslation();
 
   const getPrice = (vehicleId) => {
@@ -69,6 +71,9 @@ export default function VehicleTypeSelector({ selectedVehicle, onSelect, pricing
             style={[styles.vehicleCard, isSelected && styles.vehicleCardSelected]}
             onPress={() => onSelect(vehicle.id)}
             activeOpacity={0.7}
+            accessibilityRole="radio"
+            accessibilityLabel={`${getLabel(vehicle.id)}${price ? `, ${price} ₾` : ''}, ${vehicle.passengers} ${t('taxi.passengers', { defaultValue: 'passengers' })}`}
+            accessibilityState={{ checked: isSelected }}
           >
             <CarIcon type={vehicle.id} size={36} color={iconColor} />
 
@@ -101,7 +106,7 @@ export default function VehicleTypeSelector({ selectedVehicle, onSelect, pricing
 
 export { VEHICLE_TYPES };
 
-const createStyles = (typography) => StyleSheet.create({
+const createStyles = (typography, colors) => StyleSheet.create({
   container: {
     flexDirection: 'column',
     gap: 6,

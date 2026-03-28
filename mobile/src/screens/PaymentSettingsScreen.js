@@ -6,11 +6,13 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
-import { colors, spacing, useTypography } from '../theme/colors';
+import { spacing, useTypography } from '../theme/colors';
+import { useTheme } from '../context/ThemeContext';
 
 export default function PaymentSettingsScreen() {
   const typography = useTypography();
-  const styles = React.useMemo(() => createStyles(typography), [typography]);
+  const { colors } = useTheme();
+  const styles = React.useMemo(() => createStyles(typography, colors), [typography, colors]);
   const { t } = useTranslation();
 
   return (
@@ -24,7 +26,7 @@ export default function PaymentSettingsScreen() {
   );
 }
 
-const createStyles = (typography) => StyleSheet.create({
+const createStyles = (typography, colors) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.muted,

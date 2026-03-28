@@ -13,7 +13,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 
 import { useAuth } from '../context/AuthContext';
-import { colors, radius, useTypography } from '../theme/colors';
+import { radius, useTypography } from '../theme/colors';
+import { useTheme } from '../context/ThemeContext';
 
 const CANCELLED_ERRORS = {
   google: 'Google login was cancelled',
@@ -22,7 +23,8 @@ const CANCELLED_ERRORS = {
 
 export default function WelcomeScreen({ navigation }) {
 const typography = useTypography();
-  const styles = React.useMemo(() => createStyles(typography), [typography]);
+  const { colors } = useTheme();
+  const styles = React.useMemo(() => createStyles(typography, colors), [typography, colors]);
     const { t } = useTranslation();
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [isAppleLoading, setIsAppleLoading] = useState(false);
@@ -81,6 +83,9 @@ const typography = useTypography();
             style={[styles.socialButton, isLoading && styles.buttonDisabled]}
             onPress={handleGoogleLogin}
             disabled={isLoading || !googleAuthReady}
+            accessibilityRole="button"
+            accessibilityLabel={t('auth.continueWithGoogle')}
+            accessibilityState={{ disabled: isLoading || !googleAuthReady, busy: isGoogleLoading }}
           >
             {isGoogleLoading ? (
               <ActivityIndicator color={colors.foreground} />
@@ -98,6 +103,9 @@ const typography = useTypography();
               style={[styles.socialButton, styles.appleButton, isLoading && styles.buttonDisabled]}
               onPress={handleAppleLogin}
               disabled={isLoading}
+              accessibilityRole="button"
+              accessibilityLabel={t('auth.continueWithApple')}
+              accessibilityState={{ disabled: isLoading, busy: isAppleLoading }}
             >
               {isAppleLoading ? (
                 <ActivityIndicator color={colors.background} />
@@ -123,6 +131,9 @@ const typography = useTypography();
             style={[styles.phoneButton, isLoading && styles.buttonDisabled]}
             onPress={handleEmailLogin}
             disabled={isLoading}
+            accessibilityRole="button"
+            accessibilityLabel={t('auth.continueWithEmail')}
+            accessibilityState={{ disabled: isLoading }}
           >
             <Ionicons name="mail-outline" size={22} color={colors.primaryForeground} />
             <Text style={styles.phoneButtonText}>{t('auth.continueWithEmail')}</Text>
@@ -133,6 +144,9 @@ const typography = useTypography();
             style={[styles.secondaryButton, isLoading && styles.buttonDisabled]}
             onPress={handlePhoneLogin}
             disabled={isLoading}
+            accessibilityRole="button"
+            accessibilityLabel={t('auth.continueWithPhone')}
+            accessibilityState={{ disabled: isLoading }}
           >
             <Ionicons name="call-outline" size={22} color={colors.foreground} />
             <Text style={styles.secondaryButtonText}>{t('auth.continueWithPhone')}</Text>
@@ -147,7 +161,7 @@ const typography = useTypography();
   );
 }
 
-const createStyles = (typography) => StyleSheet.create({
+const createStyles = (typography, colors) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,

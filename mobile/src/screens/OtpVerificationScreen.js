@@ -17,14 +17,16 @@ import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../context/AuthContext';
-import { colors, radius, useTypography } from '../theme/colors';
+import { radius, useTypography } from '../theme/colors';
+import { useTheme } from '../context/ThemeContext';
 
 const OTP_LENGTH = 6;
 const RESEND_COOLDOWN = 60;
 
 export default function OtpVerificationScreen({ navigation, route }) {
   const typography = useTypography();
-  const styles = React.useMemo(() => createStyles(typography), [typography]);
+  const { colors } = useTheme();
+  const styles = React.useMemo(() => createStyles(typography, colors), [typography, colors]);
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { phone, isRegistered } = route.params;
@@ -118,6 +120,8 @@ export default function OtpVerificationScreen({ navigation, route }) {
         <TouchableOpacity
           style={styles.backButton}
           onPress={() => navigation.goBack()}
+          accessibilityRole="button"
+          accessibilityLabel={t('common.goBack')}
         >
           <Ionicons name="arrow-back" size={24} color={colors.foreground} />
         </TouchableOpacity>
@@ -146,10 +150,17 @@ export default function OtpVerificationScreen({ navigation, route }) {
           autoComplete="sms-otp"
           textContentType="oneTimeCode"
           caretHidden
+          accessibilityLabel={t('auth.verifyPhone')}
+          accessibilityHint={t('auth.enterFullCode')}
         />
 
         {/* Visual OTP boxes - tap to focus hidden input */}
-        <Pressable style={styles.otpContainer} onPress={() => inputRef.current?.focus()}>
+        <Pressable
+          style={styles.otpContainer}
+          onPress={() => inputRef.current?.focus()}
+          accessibilityRole="none"
+          accessibilityLabel={t('auth.otpBoxes', { defaultValue: 'Verification code entry' })}
+        >
           {Array.from({ length: OTP_LENGTH }).map((_, index) => (
             <View
               key={index}
@@ -173,6 +184,9 @@ export default function OtpVerificationScreen({ navigation, route }) {
           ]}
           onPress={() => handleVerify()}
           disabled={otpValue.length !== OTP_LENGTH || isLoading}
+          accessibilityRole="button"
+          accessibilityLabel={t('auth.verify')}
+          accessibilityState={{ disabled: otpValue.length !== OTP_LENGTH || isLoading, busy: isLoading }}
         >
           {isLoading ? (
             <ActivityIndicator color={colors.primaryForeground} />
@@ -187,7 +201,13 @@ export default function OtpVerificationScreen({ navigation, route }) {
               {t('auth.resendIn', { seconds: resendTimer })}
             </Text>
           ) : (
-            <TouchableOpacity onPress={handleResend} disabled={isLoading}>
+            <TouchableOpacity
+              onPress={handleResend}
+              disabled={isLoading}
+              accessibilityRole="button"
+              accessibilityLabel={t('auth.resendCode')}
+              accessibilityState={{ disabled: isLoading, busy: isLoading }}
+            >
               <Text style={styles.resendText}>{t('auth.resendCode')}</Text>
             </TouchableOpacity>
           )}
@@ -197,7 +217,7 @@ export default function OtpVerificationScreen({ navigation, route }) {
   );
 }
 
-const createStyles = (typography) => StyleSheet.create({
+const createStyles = (typography, colors) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
