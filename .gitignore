@@ -28,5 +28,10 @@ Thumbs.db
 nul
 *.log
 
+# Reports and audits
+*AUDIT*.md
+*REPORT*.md
+PRE_LAUNCH_AUDIT.md
+
 # IDE
 .idea/
