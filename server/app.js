@@ -57,22 +57,27 @@ connectDB();
 
 // Middleware
 const allowedOrigins = process.env.NODE_ENV === 'production'
-    ? ['https://lulini.ge', 'https://www.lulini.ge']
-    : ['http://localhost:5173', 'https://lulini.ge', 'https://www.lulini.ge', 'https://api.lulini.ge', 'http://192.168.100.3:3000'];
+    ? ['https://lulini.ge', 'https://www.lulini.ge', 'https://api.lulini.ge']
+    : ['http://localhost:5173', 'http://localhost:3000', 'https://lulini.ge', 'https://www.lulini.ge', 'https://api.lulini.ge', 'http://192.168.100.3:3000'];
+
+// CORS origin checker — used by both Socket.io and Express CORS middleware.
+// Allows null origin (mobile apps, curl, server-to-server) and explicit allowlist.
+// NEVER allows arbitrary origins, even in development.
+function checkOrigin(origin, callback) {
+    // Allow requests with no origin (mobile apps, curl, server-to-server)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) !== -1) {
+        callback(null, true);
+    } else {
+        callback(new Error('Not allowed by CORS'));
+    }
+}
+
 
 // Socket.io setup with CORS
 const io = new Server(server, {
     cors: {
-        origin: function (origin, callback) {
-            if (!origin) return callback(null, true);
-            if (allowedOrigins.indexOf(origin) !== -1) {
-                callback(null, true);
-            } else if (process.env.NODE_ENV !== 'production') {
-                callback(null, true);
-            } else {
-                callback(new Error('Not allowed by CORS'));
-            }
-        },
+        origin: checkOrigin,
         credentials: true
     },
     // Mobile-friendly ping settings (generous timeouts for Android mobile networks)
@@ -108,6 +113,10 @@ app.set('io', io);
 // Trust proxy for accurate IP-based rate limiting behind reverse proxy
 app.set('trust proxy', 1);
 
+// Request ID — unique ID per request for log correlation and debugging
+const { requestId } = require('./middlewares/requestId.middleware');
+app.use(requestId);
+
 // Security headers (HSTS, X-Content-Type-Options, X-Frame-Options, etc.)
 app.use(helmet({
     contentSecurityPolicy: false, // API server — no HTML content to protect
@@ -120,18 +129,9 @@ app.use(compression());
 // HTTP request logging
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
-// CORS — fails closed in production (only explicit origins allowed)
+// CORS — fails closed in ALL environments (only explicit origins allowed)
 app.use(cors({
-    origin: function (origin, callback) {
-        if (!origin) return callback(null, true);
-        if (allowedOrigins.indexOf(origin) !== -1) {
-            callback(null, true);
-        } else if (process.env.NODE_ENV !== 'production') {
-            callback(null, true);
-        } else {
-            callback(new Error('Not allowed by CORS'));
-        }
-    },
+    origin: checkOrigin,
     credentials: true,
     exposedHeaders: ['set-cookie']
 }));
@@ -173,36 +173,77 @@ app.use((req, res, next) => {
 });
 
 app.use(cookieParser());
+
+// CSRF protection — validates Origin header on cookie-authenticated state-changing requests.
+// Mobile clients use Authorization header and are inherently CSRF-safe.
+const { csrfProtection } = require('./middlewares/csrf.middleware');
+app.use(csrfProtection);
+
 app.use(passport.initialize());
 
-// Routes
-app.use('/api/auth', authRouter);
-app.use('/api/drivers', driverRouter);
-app.use('/api/rides', rideRouter);
-app.use('/api/maps', mapsRouter);
-app.use('/api/notifications', notificationRouter);
-app.use('/api/settings', settingsRouter);
-app.use('/api/waitlist', waitlistRouter);
-app.use('/api/payments', paymentRouter);
-app.use('/api/support', supportRouter);
-app.use('/api/safety', safetyRouter);
-app.use('/api/chat', chatRouter);
-app.use('/api/favorites', favoritesRouter);
-app.use('/api/receipts', receiptRouter);
+// Routes — versioned API (v1)
+// All routes are mounted under /api/v1/ with /api/ as backward-compatible alias.
+// When v2 is needed, add new routers under /api/v2/ without breaking existing clients.
+const v1Router = express.Router();
+v1Router.use('/auth', authRouter);
+v1Router.use('/drivers', driverRouter);
+v1Router.use('/rides', rideRouter);
+v1Router.use('/maps', mapsRouter);
+v1Router.use('/notifications', notificationRouter);
+v1Router.use('/settings', settingsRouter);
+v1Router.use('/waitlist', waitlistRouter);
+v1Router.use('/payments', paymentRouter);
+v1Router.use('/support', supportRouter);
+v1Router.use('/safety', safetyRouter);
+v1Router.use('/chat', chatRouter);
+v1Router.use('/favorites', favoritesRouter);
+v1Router.use('/receipts', receiptRouter);
+
+app.use('/api/v1', v1Router);
+app.use('/api', v1Router); // Backward-compatible alias (clients can migrate to /api/v1 gradually)
 
 // Health check (verifies DB connectivity for load balancer routing)
-app.get('/health', (req, res) => {
+app.get('/health', async (req, res) => {
     const mongoose = require('mongoose');
-    const dbState = mongoose.connection.readyState; // 0=disconnected, 1=connected, 2=connecting, 3=disconnecting
-    const isDbHealthy = dbState === 1;
+    const checks = {};
 
-    const status = isDbHealthy ? 'ok' : 'degraded';
-    const httpStatus = isDbHealthy ? 200 : 503;
+    // MongoDB
+    const dbState = mongoose.connection.readyState;
+    checks.mongodb = dbState === 1 ? 'connected' : 'disconnected';
 
-    res.status(httpStatus).json({
+    // Redis (optional — only checked if configured)
+    if (process.env.REDIS_URL) {
+        try {
+            const { getRedisClient } = require('./configs/redis.config');
+            const redis = await getRedisClient();
+            await redis.ping();
+            checks.redis = 'connected';
+        } catch {
+            checks.redis = 'disconnected';
+        }
+    }
+
+    // Memory usage
+    const mem = process.memoryUsage();
+    checks.memory = {
+        heapUsedMB: Math.round(mem.heapUsed / 1024 / 1024),
+        heapTotalMB: Math.round(mem.heapTotal / 1024 / 1024),
+        rssMB: Math.round(mem.rss / 1024 / 1024),
+    };
+
+    // Socket.io connections
+    if (io) {
+        checks.sockets = io.engine ? io.engine.clientsCount : 0;
+    }
+
+    const isHealthy = checks.mongodb === 'connected'
+        && (!process.env.REDIS_URL || checks.redis === 'connected');
+    const status = isHealthy ? 'ok' : 'degraded';
+
+    res.status(isHealthy ? 200 : 503).json({
         status,
-        db: isDbHealthy ? 'connected' : 'disconnected',
         uptime: Math.floor(process.uptime()),
+        checks,
     });
 });
 

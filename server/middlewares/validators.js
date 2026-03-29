@@ -22,7 +22,10 @@ const validateRegister = [
         .isLength({ min: 2, max: 50 }).withMessage('Last name must be 2-50 characters')
         .matches(nameRegex).withMessage('Last name contains invalid characters'),
     body('email').trim().isEmail().withMessage('Valid email is required').normalizeEmail(),
-    body('password').isLength({ min: 6, max: 128 }).withMessage('Password must be 6-128 characters'),
+    body('password').isLength({ min: 8, max: 128 }).withMessage('Password must be 8-128 characters')
+        .matches(/[a-z]/).withMessage('Password must contain at least one lowercase letter')
+        .matches(/[A-Z]/).withMessage('Password must contain at least one uppercase letter')
+        .matches(/\d/).withMessage('Password must contain at least one number'),
     body('phone').optional().matches(/^\+?[\d\s()-]{7,20}$/).withMessage('Invalid phone number'),
     validate
 ];

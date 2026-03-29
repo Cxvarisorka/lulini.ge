@@ -4,6 +4,7 @@ const Driver = require('../models/driver.model');
 const AppError = require('../utils/AppError');
 const catchAsync = require('../utils/catchAsync');
 const { userCache, driverCache, AUTH_CACHE_TTL } = require('../utils/authCache');
+const { isTokenBlocked, isUserTokensRevoked } = require('../utils/tokenBlocklist');
 
 const protect = catchAsync(async (req, res, next) => {
     let token;
@@ -22,6 +23,16 @@ const protect = catchAsync(async (req, res, next) => {
     const decoded = verifyToken(token);
     if (!decoded) {
         return next(new AppError('Invalid or expired token', 401));
+    }
+
+    // Check token blocklist (revoked on logout, password change, account deletion)
+    if (decoded.jti && await isTokenBlocked(decoded.jti)) {
+        return next(new AppError('Token has been revoked', 401));
+    }
+
+    // Check if all user tokens were bulk-revoked (e.g. password change)
+    if (decoded.iat && await isUserTokensRevoked(decoded.id, decoded.iat)) {
+        return next(new AppError('Token has been revoked', 401));
     }
 
     // Check cache first (60s TTL)

@@ -11,11 +11,12 @@ const { sendVerification } = require('../services/sms.service');
 const appleSignin = require('apple-signin-auth');
 const { invalidateUser, invalidateDriver } = require('../utils/authCache');
 const analytics = require('../services/analytics.service');
+const crypto = require('crypto');
 const EmailOTP = require('../models/emailOtp.model');
 const emailService = require('../services/email.service');
 
 function generateEmailCode() {
-    return String(Math.floor(100000 + Math.random() * 900000));
+    return String(crypto.randomInt(100000, 1000000));
 }
 
 // Cookie options
@@ -77,16 +78,18 @@ const register = catchAsync(async (req, res, next) => {
         return next(new AppError('User already exists with this email', 400));
     }
 
-    // Verify that the email was verified via OTP
+    // Verify that the email was verified via OTP (optional if phone is provided)
     const verifiedRecord = await EmailOTP.findOne({
         email: normalizedEmail,
         purpose: 'verification',
         code: 'verified',
     });
-    if (!verifiedRecord) {
+    if (!verifiedRecord && !phone) {
         return next(new AppError('Please verify your email address first', 400));
     }
-    await EmailOTP.deleteOne({ _id: verifiedRecord._id });
+    if (verifiedRecord) {
+        await EmailOTP.deleteOne({ _id: verifiedRecord._id });
+    }
 
     const user = await User.create({
         firstName,
@@ -152,7 +155,22 @@ const login = catchAsync(async (req, res, next) => {
 
 // @desc    Logout user
 // @route   POST /api/auth/logout
-const logout = (req, res) => {
+const logout = async (req, res) => {
+    // Revoke the token so it can't be reused even if the client retains it
+    const token = req.cookies.token
+        || (req.headers.authorization && req.headers.authorization.split(' ')[1]);
+    if (token) {
+        const { decodeToken } = require('../utils/jwt.utils');
+        const { blockToken } = require('../utils/tokenBlocklist');
+        const decoded = decodeToken(token);
+        if (decoded && decoded.jti && decoded.exp) {
+            const ttl = decoded.exp - Math.floor(Date.now() / 1000);
+            if (ttl > 0) {
+                await blockToken(decoded.jti, ttl).catch(() => {});
+            }
+        }
+    }
+
     res.cookie('token', '', {
         ...cookieOptions,
         expires: new Date(0),
@@ -204,12 +222,21 @@ const oauthSuccess = (req, res) => {
     res.redirect(`${process.env.CLIENT_URL || 'http://localhost:5173'}/profile`);
 };
 
-// Allowlist of valid redirect URI schemes for OAuth mobile flow
-const ALLOWED_REDIRECT_SCHEMES = ['lulini://', 'lulinidriver://', 'exp://'];
+// Allowlist of valid redirect URI patterns for OAuth mobile flow.
+// Each entry is a regex that must match the FULL URI — prevents deep link hijacking
+// where an attacker registers a competing app with the same custom scheme.
+const ALLOWED_REDIRECT_PATTERNS = [
+    /^lulini:\/\/auth(\/callback)?(\?.*)?$/,          // lulini://auth or lulini://auth/callback
+    /^lulinidriver:\/\/auth(\/callback)?(\?.*)?$/,     // lulinidriver://auth or lulinidriver://auth/callback
+    /^exp:\/\/192\.168\.\d{1,3}\.\d{1,3}:\d+(\/.*)?\??.*$/, // Expo dev only (local IP)
+    /^exp:\/\/localhost:\d+(\/.*)?\??.*$/,             // Expo dev only (localhost)
+];
 
 const isAllowedRedirectUri = (uri) => {
     if (!uri || typeof uri !== 'string') return false;
-    return ALLOWED_REDIRECT_SCHEMES.some(scheme => uri.startsWith(scheme));
+    // Strip any query params before matching (we append ?token= ourselves)
+    const baseUri = uri.split('?')[0];
+    return ALLOWED_REDIRECT_PATTERNS.some(pattern => pattern.test(baseUri) || pattern.test(uri));
 };
 
 // @desc    Handle OAuth callback success (mobile)
@@ -378,6 +405,13 @@ const verifyPhoneOtp = catchAsync(async (req, res, next) => {
         return next(new AppError('OTP code is required', 400));
     }
 
+    // Phone-level lockout: if user exists and is locked, reject early
+    const existingUser = await User.findOne({ phone });
+    if (existingUser && existingUser.lockUntil && existingUser.lockUntil > new Date()) {
+        const minutesLeft = Math.ceil((existingUser.lockUntil - new Date()) / 60000);
+        return next(new AppError(`Too many failed attempts. Try again in ${minutesLeft} minutes`, 423));
+    }
+
     // Verify OTP against local DB
     const otpRecord = await OTP.findOne({ phone, verified: false });
 
@@ -390,12 +424,26 @@ const verifyPhoneOtp = catchAsync(async (req, res, next) => {
     }
     if (otpRecord.attempts >= 3) {
         await OTP.deleteOne({ _id: otpRecord._id });
+        // Lock the account for 30 min if the user exists
+        if (existingUser) {
+            existingUser.failedLoginAttempts = (existingUser.failedLoginAttempts || 0) + 3;
+            existingUser.lockUntil = new Date(Date.now() + 30 * 60 * 1000);
+            await existingUser.save({ validateBeforeSave: false });
+        }
         return next(new AppError('Too many failed attempts. Please request a new code', 400));
     }
     const codeMatches = await otpRecord.compareCode(code);
     if (!codeMatches) {
         otpRecord.attempts += 1;
         await otpRecord.save();
+        // Track failed attempts on the user record too
+        if (existingUser) {
+            existingUser.failedLoginAttempts = (existingUser.failedLoginAttempts || 0) + 1;
+            if (existingUser.failedLoginAttempts >= 5) {
+                existingUser.lockUntil = new Date(Date.now() + 30 * 60 * 1000);
+            }
+            await existingUser.save({ validateBeforeSave: false });
+        }
         return next(new AppError('Invalid OTP code', 400));
     }
 
@@ -435,6 +483,11 @@ const verifyPhoneOtp = catchAsync(async (req, res, next) => {
     } else {
         user.isPhoneVerified = true;
         user.isVerified = true;
+        // Reset lockout counters on successful verification
+        if (user.failedLoginAttempts > 0 || user.lockUntil) {
+            user.failedLoginAttempts = 0;
+            user.lockUntil = null;
+        }
         await user.save();
     }
 
@@ -995,8 +1048,10 @@ const deleteAccount = catchAsync(async (req, res, next) => {
     user.deletionScheduledAt = new Date(Date.now() + GRACE_PERIOD_DAYS * 24 * 60 * 60 * 1000);
     await user.save({ validateBeforeSave: false });
 
-    // --- 6. Invalidate auth cache so the user is rejected on next request ---
+    // --- 6. Invalidate auth cache + revoke all tokens ---
     invalidateUser(userId);
+    const { revokeAllUserTokens } = require('../utils/tokenBlocklist');
+    await revokeAllUserTokens(userId).catch(() => {});
 
     // --- 7. Force-disconnect connected socket clients ---
     if (io) {

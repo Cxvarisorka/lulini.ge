@@ -1,14 +1,15 @@
 const https = require('https');
+const crypto = require('crypto');
 
 const apiKey = process.env.SMS_API;
 const SMS_SENDER = process.env.SMS_SENDER || 'Lulini';
 
 /**
- * Generate a random 6-digit OTP code
+ * Generate a cryptographically secure random 6-digit OTP code
  * @returns {string} 6-digit OTP code
  */
 const generateOTP = () => {
-    return Math.floor(100000 + Math.random() * 900000).toString();
+    return String(crypto.randomInt(100000, 1000000));
 };
 
 /**

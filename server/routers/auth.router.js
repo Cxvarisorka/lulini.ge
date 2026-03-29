@@ -60,12 +60,12 @@ router.get('/google/callback',
 router.post('/google/token', authLimiter, googleTokenAuth);
 
 // Phone OTP authentication routes
-router.post('/phone/send-otp', otpSendLimiter, validateSendPhoneOtp, sendPhoneOtp);
-router.post('/phone/verify-otp', otpVerifyLimiter, verifyPhoneOtp);
+router.post('/phone/send-otp', validateSendPhoneOtp, sendPhoneOtp);
+router.post('/phone/verify-otp', verifyPhoneOtp);
 
 // Phone update routes (authenticated)
-router.post('/phone/update-send-otp', protect, otpSendLimiter, validateSendPhoneOtp, sendPhoneUpdateOtp);
-router.post('/phone/update-verify-otp', protect, otpVerifyLimiter, verifyPhoneUpdateOtp);
+router.post('/phone/update-send-otp', protect, validateSendPhoneOtp, sendPhoneUpdateOtp);
+router.post('/phone/update-verify-otp', protect, verifyPhoneUpdateOtp);
 
 // Apple Sign-In route
 router.post('/apple/token', authLimiter, appleTokenAuth);
@@ -77,12 +77,12 @@ router.post('/complete-onboarding', protect, completeOnboarding);
 router.patch('/profile', protect, updateProfile);
 
 // Email verification (authenticated — add/update email)
-router.post('/email/send-code', protect, otpSendLimiter, sendEmailCode);
-router.post('/email/verify-code', protect, otpVerifyLimiter, verifyEmailCode);
+router.post('/email/send-code', protect, sendEmailCode);
+router.post('/email/verify-code', protect, verifyEmailCode);
 
 // Email verification (unauthenticated — for registration)
-router.post('/email/send-verification', otpSendLimiter, sendEmailVerification);
-router.post('/email/verify-registration', otpVerifyLimiter, verifyEmailForRegistration);
+router.post('/email/send-verification', sendEmailVerification);
+router.post('/email/verify-registration', verifyEmailForRegistration);
 
 // Account deletion (Apple App Store requirement)
 // DELETE /account        - schedule deletion (30-day grace period)

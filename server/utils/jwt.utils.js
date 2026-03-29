@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 
 const JWT_OPTIONS = {
     issuer: 'lulini',
@@ -6,26 +7,33 @@ const JWT_OPTIONS = {
 };
 
 const generateToken = (userId) => {
-    return jwt.sign({ id: userId }, process.env.JWT_SECRET, {
-        expiresIn: process.env.JWT_EXPIRES_IN || '7d',
-        ...JWT_OPTIONS,
-    });
+    return jwt.sign(
+        { id: userId, jti: crypto.randomUUID() },
+        process.env.JWT_SECRET,
+        {
+            expiresIn: process.env.JWT_EXPIRES_IN || '7d',
+            ...JWT_OPTIONS,
+        }
+    );
 };
 
 const verifyToken = (token) => {
     try {
         return jwt.verify(token, process.env.JWT_SECRET, JWT_OPTIONS);
-    } catch (err) {
-        // Graceful migration: accept tokens without iss/aud from before this change
-        if (err.message === 'jwt issuer invalid' || err.message === 'jwt audience invalid') {
-            try {
-                return jwt.verify(token, process.env.JWT_SECRET);
-            } catch {
-                return null;
-            }
-        }
+    } catch {
         return null;
     }
 };
 
-module.exports = { generateToken, verifyToken };
+/**
+ * Decode a token without verification (for extracting jti/exp on logout).
+ */
+const decodeToken = (token) => {
+    try {
+        return jwt.decode(token);
+    } catch {
+        return null;
+    }
+};
+
+module.exports = { generateToken, verifyToken, decodeToken };

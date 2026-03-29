@@ -25,12 +25,12 @@ function makeStore(prefix) {
     return undefined;
 }
 
-// Global: 1500 requests per 15 min per IP
-// Real-time apps (driver location every 5s + polling + API calls) need generous limits.
+// Global: 300 requests per 15 min per IP (20/min)
+// Driver location updates are exempted (they have their own limiter).
 // Specific stricter limits are applied per-route for sensitive endpoints.
 const globalLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 1500,
+    max: 300,
     standardHeaders: true,
     legacyHeaders: false,
     store: makeStore('global'),
