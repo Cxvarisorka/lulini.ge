@@ -264,8 +264,8 @@ export default function ProfileScreen({ navigation }) {
             </View>
             <View style={styles.infoContent}>
               <Text style={styles.infoLabel} numberOfLines={1}>{t('profile.accountStatus')}</Text>
-              <Text style={[styles.infoValue, { color: user.isVerified ? colors.success : colors.warning }]} numberOfLines={1}>
-                {user.isVerified ? t('profile.verified') : t('profile.unverified')}
+              <Text style={[styles.infoValue, { color: (user.isVerified || user.isPhoneVerified) ? colors.success : colors.warning }]} numberOfLines={1}>
+                {(user.isVerified || user.isPhoneVerified) ? t('profile.verified') : t('profile.unverified')}
               </Text>
             </View>
           </View>

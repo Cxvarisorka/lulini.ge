@@ -295,6 +295,7 @@
     "fillAllFields": "Please fill in all fields",
     "passwordsNotMatch": "Passwords do not match",
     "passwordTooShort": "Password must be at least 8 characters",
+    "passwordComplexity": "Password must contain at least one uppercase letter, one lowercase letter, and one number",
     "pleaseLogin": "Please login to continue",
     "newUserHint": "New number? You'll create an account after verification",
     "hidePassword": "Hide password",

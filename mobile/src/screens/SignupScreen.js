@@ -134,10 +134,7 @@ export default function SignupScreen({ navigation }) {
       return;
     }
 
-    if (!emailVerified) {
-      Alert.alert(t('errors.error'), t('profile.verifyEmailFirst'));
-      return;
-    }
+    // Email verification is optional - phone verification is sufficient
 
     if (password !== confirmPassword) {
       Alert.alert(t('errors.error'), t('auth.passwordsNotMatch'));
@@ -146,6 +143,11 @@ export default function SignupScreen({ navigation }) {
 
     if (password.length < 8) {
       Alert.alert(t('errors.error'), t('auth.passwordTooShort'));
+      return;
+    }
+
+    if (!/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/\d/.test(password)) {
+      Alert.alert(t('errors.error'), t('auth.passwordComplexity'));
       return;
     }
 

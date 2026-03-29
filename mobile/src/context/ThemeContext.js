@@ -1,7 +1,7 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { useColorScheme } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { colors, darkColors, getColors } from '../theme/colors';
+import { colors, darkColors } from '../theme/colors';
 
 const THEME_STORAGE_KEY = '@app_theme_preference';
 
@@ -40,20 +40,19 @@ export function ThemeProvider({ children }) {
     themePreference === 'dark' ||
     (themePreference === 'system' && systemColorScheme === 'dark');
 
-  const resolvedColors = getColors(isDark);
+  // Memoize the context value so consumers only re-render when isDark or themePreference actually change
+  const value = useMemo(() => ({
+    themePreference,
+    isDark,
+    colors: isDark ? darkColors : colors,
+    setThemePreference,
+  }), [themePreference, isDark, setThemePreference]);
 
   // Don't render children until we know the user's stored preference
   if (!loaded) return null;
 
   return (
-    <ThemeContext.Provider
-      value={{
-        themePreference,
-        isDark,
-        colors: resolvedColors,
-        setThemePreference,
-      }}
-    >
+    <ThemeContext.Provider value={value}>
       {children}
     </ThemeContext.Provider>
   );

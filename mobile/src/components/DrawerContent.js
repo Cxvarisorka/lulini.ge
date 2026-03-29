@@ -156,12 +156,12 @@ export default function DrawerContent({ navigation }) {
         <View style={styles.statItem}>
           <View style={styles.statIconValue}>
             <Ionicons
-              name={user?.isVerified ? 'checkmark-circle' : 'alert-circle'}
+              name={(user?.isVerified || user?.isPhoneVerified) ? 'checkmark-circle' : 'alert-circle'}
               size={18}
-              color={user?.isVerified ? colors.success : colors.warning}
+              color={(user?.isVerified || user?.isPhoneVerified) ? colors.success : colors.warning}
             />
             <Text style={styles.statValue}>
-              {user?.isVerified ? t('drawer.verified') : t('drawer.unverified')}
+              {(user?.isVerified || user?.isPhoneVerified) ? t('drawer.verified') : t('drawer.unverified')}
             </Text>
           </View>
         </View>

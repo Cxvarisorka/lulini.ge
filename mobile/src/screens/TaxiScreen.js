@@ -263,6 +263,14 @@ export default function TaxiScreen({ navigation }) {
   // Only updated when the position passes the 5m threshold, preventing re-renders from GPS noise.
   const driverLocationRef = useRef(null);
 
+  // Time-based throttle for driver location state updates.
+  // Limits setDriverLocation to at most once per 2s, with a trailing-edge timer
+  // so the final position always arrives (keeps marker accurate when driver stops).
+  const DRIVER_LOC_THROTTLE_MS = 2000;
+  const driverLocLastFlushRef = useRef(0);
+  const driverLocTrailingRef = useRef(null); // setTimeout id for trailing flush
+  const pendingDriverLocRef = useRef(null);  // { loc, distance, eta } awaiting flush
+
   // Track shown alerts to prevent duplicates (key: "rideId:eventType")
   const shownAlertsRef = useRef(new Set());
 
@@ -308,9 +316,6 @@ export default function TaxiScreen({ navigation }) {
 
   // Cached last destination for instant re-selection
   const [lastDestination, setLastDestination] = useState(null);
-
-  // Throttle driver route fetching
-  const lastDriverRouteFetchRef = useRef(0);
 
   // Debounce zoom level updates to avoid re-renders during pinch/pan
   const zoomDebounceRef = useRef(null);
@@ -838,30 +843,39 @@ export default function TaxiScreen({ navigation }) {
     };
   }, [bookingStep]);
 
-  // Fetch driver route when driver location updates (throttled)
-  //   - DRIVER_FOUND / DRIVER_ARRIVED → driver → pickup
-  //   - IN_PROGRESS → driver → destination (live route shown on map)
+  // Fetch driver route on a fixed interval (reads from driverLocationRef, not state).
+  // This avoids re-running the effect on every driver location state update.
+  //   - DRIVER_FOUND / DRIVER_ARRIVED → driver → pickup (every 15s)
+  //   - IN_PROGRESS → driver → destination (every 10s)
   useEffect(() => {
-    if (!driverLocation) return;
+    const isTracking =
+      bookingStep === BOOKING_STEPS.DRIVER_FOUND ||
+      bookingStep === BOOKING_STEPS.DRIVER_ARRIVED ||
+      bookingStep === BOOKING_STEPS.IN_PROGRESS;
+    if (!isTracking) return;
 
-    const now = Date.now();
+    const intervalMs = bookingStep === BOOKING_STEPS.IN_PROGRESS ? 10000 : 15000;
 
-    if (bookingStep === BOOKING_STEPS.DRIVER_FOUND || bookingStep === BOOKING_STEPS.DRIVER_ARRIVED) {
-      if (!effectivePickup) return;
-      if (now - lastDriverRouteFetchRef.current < 15000) return; // 15s throttle
-      lastDriverRouteFetchRef.current = now;
-      fetchRouteOSRM(driverLocation, effectivePickup).then(setDriverRoute);
-      return;
-    }
+    const fetchRoute = () => {
+      const dLoc = driverLocationRef.current;
+      if (!dLoc) return;
 
-    if (bookingStep === BOOKING_STEPS.IN_PROGRESS) {
-      const dest = savedDestinationCoordsRef.current || destinationCoords;
-      if (!dest) return;
-      if (now - lastDriverRouteFetchRef.current < 10000) return; // 10s throttle during ride
-      lastDriverRouteFetchRef.current = now;
-      fetchRouteOSRM(driverLocation, dest).then(setDriverRoute);
-    }
-  }, [driverLocation, bookingStep, effectivePickup, destinationCoords]);
+      if (bookingStep === BOOKING_STEPS.DRIVER_FOUND || bookingStep === BOOKING_STEPS.DRIVER_ARRIVED) {
+        const pickup = customPickup || locationRef.current;
+        if (!pickup) return;
+        fetchRouteOSRM(dLoc, pickup).then(setDriverRoute);
+      } else {
+        const dest = savedDestinationCoordsRef.current || destinationCoords;
+        if (!dest) return;
+        fetchRouteOSRM(dLoc, dest).then(setDriverRoute);
+      }
+    };
+
+    // Fetch once immediately, then on interval
+    fetchRoute();
+    const id = setInterval(fetchRoute, intervalMs);
+    return () => clearInterval(id);
+  }, [bookingStep, destinationCoords, customPickup]);
 
   // Fit map to driver + pickup — only on first driver location, not every update.
   // Constant fitToCoordinates prevents user from panning the map manually.
@@ -896,6 +910,19 @@ export default function TaxiScreen({ navigation }) {
     if (shownAlertsRef.current.has(key)) return;
     shownAlertsRef.current.add(key);
     Alert.alert(title, message, buttons);
+  }, []);
+
+  // Flush pending driver location to state (called by throttle logic).
+  // Batches setDriverLocation + setDriverDistance + setDriverETA into one render.
+  const flushDriverLoc = useCallback(() => {
+    driverLocLastFlushRef.current = Date.now();
+    driverLocTrailingRef.current = null;
+    const pending = pendingDriverLocRef.current;
+    if (!pending) return;
+    pendingDriverLocRef.current = null;
+    setDriverLocation(pending.loc);
+    if (pending.distance != null) setDriverDistance(pending.distance);
+    if (pending.eta != null) setDriverETA(pending.eta);
   }, []);
 
   // Socket event listeners - only re-register when socket instance changes
@@ -989,14 +1016,6 @@ export default function TaxiScreen({ navigation }) {
         const dlng = (longitude - prev.longitude) * 111320 * Math.cos(prev.latitude * 0.01745329);
         const distM = Math.sqrt(dlat * dlat + dlng * dlng);
 
-        // Teleport detection: if moved >500m in <2s, snap marker (don't animate)
-        if (ts && prev._ts && distM > 500) {
-          const timeDiffS = (ts - prev._ts) / 1000;
-          if (timeDiffS > 0 && timeDiffS < 2) {
-            // Unreasonable speed — likely stale data after reconnect, snap to new position
-          }
-        }
-
         // Skip minor jitter (heartbeats and GPS noise)
         if (distM < 5 && type !== 'heartbeat') return;
       }
@@ -1008,29 +1027,37 @@ export default function TaxiScreen({ navigation }) {
         newLoc.heading = heading;
       }
       driverLocationRef.current = newLoc;
-      setDriverLocation(newLoc);
 
-      // During IN_PROGRESS: measure distance to destination (not passenger)
-      // During DRIVER_FOUND/ARRIVED: measure distance to passenger (pickup)
+      // Compute ETA/distance for the pending flush
       const dest = savedDestinationCoordsRef.current;
       const measureTo = (ride?.status === 'in_progress' && dest) ? dest : loc;
-
+      let distance = null;
+      let eta = null;
       if (measureTo) {
-        const distance = haversineKm(
-          latitude,
-          longitude,
-          measureTo.latitude,
-          measureTo.longitude
-        );
-        setDriverDistance(distance);
-        const eta = Math.round((distance / 30) * 60);
-        setDriverETA(eta);
+        distance = haversineKm(latitude, longitude, measureTo.latitude, measureTo.longitude);
+        eta = Math.round((distance / 30) * 60);
 
-        // One-time "driver is close" notification when within threshold
+        // One-time "driver is close" notification — fires immediately (not throttled)
         if (ride && !driverCloseNotifiedRef.current && distance <= DRIVER_CLOSE_THRESHOLD_KM) {
           driverCloseNotifiedRef.current = true;
           showRideNotification('accepted', extractDriverInfo(ride), eta);
         }
+      }
+
+      // Time-based throttle: batch state updates to max ~1 per 2s.
+      // Keeps the ref (used by AnimatedCarMarker) always fresh,
+      // but limits expensive TaxiScreen re-renders.
+      pendingDriverLocRef.current = { loc: newLoc, distance, eta };
+
+      const now = Date.now();
+      const elapsed = now - driverLocLastFlushRef.current;
+
+      if (elapsed >= DRIVER_LOC_THROTTLE_MS) {
+        // Enough time passed — flush immediately
+        flushDriverLoc();
+      } else if (!driverLocTrailingRef.current) {
+        // Schedule trailing flush so final position always arrives
+        driverLocTrailingRef.current = setTimeout(flushDriverLoc, DRIVER_LOC_THROTTLE_MS - elapsed);
       }
     });
 
@@ -1264,6 +1291,11 @@ export default function TaxiScreen({ navigation }) {
     });
 
     return () => {
+      // Clear trailing driver location flush timer
+      if (driverLocTrailingRef.current) {
+        clearTimeout(driverLocTrailingRef.current);
+        driverLocTrailingRef.current = null;
+      }
       socket.off('ride:accepted');
       socket.off('driver:locationUpdate');
       socket.off('ride:driverApproaching');
@@ -1433,6 +1465,12 @@ export default function TaxiScreen({ navigation }) {
     routeDistanceRef.current = null;
     driverLocationRef.current = null;
     driverCloseNotifiedRef.current = false;
+    pendingDriverLocRef.current = null;
+    driverLocLastFlushRef.current = 0;
+    if (driverLocTrailingRef.current) {
+      clearTimeout(driverLocTrailingRef.current);
+      driverLocTrailingRef.current = null;
+    }
     setUnreadChatCount(0);
     savedDestinationRef.current = null;
     savedDestinationCoordsRef.current = null;
