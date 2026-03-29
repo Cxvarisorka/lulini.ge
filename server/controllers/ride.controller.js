@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Ride = require('../models/ride.model');
 const Driver = require('../models/driver.model');
 const User = require('../models/user.model');
@@ -13,6 +14,7 @@ const analytics = require('../services/analytics.service');
 const { maskPhone } = require('../utils/phoneMask');
 const RideShare = require('../models/rideShare.model');
 const emailService = require('../services/email.service');
+const { publishRideEvent } = require('../queues/rideEvents');
 
 // Proximity threshold: driver must be within this distance to confirm arrival/completion
 const ARRIVAL_PROXIMITY_KM = 0.5; // 500 meters
@@ -278,30 +280,47 @@ const createRide = catchAsync(async (req, res, next) => {
     });
 
     // Fire-and-forget: push notifications — skip for scheduled rides (drivers notified later)
+    // Use BullMQ queue if available (guarantees delivery with retries), otherwise inline fallback.
     if (!isScheduledRide) {
-        setImmediate(async () => {
-            try {
-                const onlineDrivers = await Driver.find({
-                    status: 'online',
-                    isActive: true,
-                    isApproved: true,
-                    'vehicle.type': { $in: getEligibleDriverTypes(vehicleType) }
-                }).select('user').lean();
+        let queued = null;
+        try {
+            queued = await publishRideEvent('ride:request', {
+                rideId: ride._id.toString(),
+                vehicleType,
+                pickupAddress: pickup?.address || '',
+            }, {
+                broadcastDrivers: true,
+                pushTitleKey: 'ride_request_title',
+                pushBodyKey: 'ride_request_body',
+            });
+        } catch { /* queue unavailable, use inline fallback */ }
 
-                const driverUserIds = onlineDrivers.map(d => d.user.toString());
-                if (driverUserIds.length > 0) {
-                    await pushService.sendToUsers(
-                        driverUserIds,
-                        'ride_request_title',
-                        'ride_request_body',
-                        { rideId: ride._id.toString(), channelId: 'ride-requests' },
-                        { address: pickup?.address || '' }
-                    );
+        // Fallback: inline push if queue not available
+        if (!queued) {
+            setImmediate(async () => {
+                try {
+                    const onlineDrivers = await Driver.find({
+                        status: 'online',
+                        isActive: true,
+                        isApproved: true,
+                        'vehicle.type': { $in: getEligibleDriverTypes(vehicleType) }
+                    }).select('user').lean();
+
+                    const driverUserIds = onlineDrivers.map(d => d.user.toString());
+                    if (driverUserIds.length > 0) {
+                        await pushService.sendToUsers(
+                            driverUserIds,
+                            'ride_request_title',
+                            'ride_request_body',
+                            { rideId: ride._id.toString(), channelId: 'ride-requests' },
+                            { address: pickup?.address || '' }
+                        );
+                    }
+                } catch (err) {
+                    console.error('Push error (createRide):', err.message);
                 }
-            } catch (err) {
-                console.error('Push error (createRide):', err.message);
-            }
-        });
+            });
+        }
     }
 });
 
@@ -451,40 +470,66 @@ const acceptRide = catchAsync(async (req, res, next) => {
         return next(new AppError('Driver must be online to accept rides', 400));
     }
 
-    // Atomic update: only transitions pending → accepted AND assigns this driver
-    // This is the most race-critical transition (multiple drivers competing)
-    const ride = await Ride.findOneAndUpdate(
-        {
-            _id: req.params.id,
-            status: 'pending',
-            $or: [
-                { expiresAt: { $gt: new Date() } },
-                { expiresAt: null },
-            ],
-        },
-        {
-            $set: {
-                status: 'accepted',
-                driver: driver._id,
-            },
-        },
-        { new: true }
-    );
-
-    if (!ride) {
-        const existingRide = await Ride.findById(req.params.id);
-        if (!existingRide) return next(new AppError('Ride not found', 404));
-        if (existingRide.expiresAt && new Date() > existingRide.expiresAt) {
-            return next(new AppError('This ride request has expired', 400));
-        }
-        return next(new AppError('This ride is no longer available', 400));
+    // Guard: prevent double-assignment — driver must not have another active ride
+    const existingDriverRide = await Ride.findOne({
+        driver: driver._id,
+        status: { $in: ['accepted', 'driver_arrived', 'in_progress'] }
+    }).select('_id').lean();
+    if (existingDriverRide) {
+        return next(new AppError('You already have an active ride', 409));
     }
 
-    // Update driver status to busy (atomic — prevents status mismatch if save fails)
-    await Driver.updateOne(
-        { _id: driver._id, status: 'online' },
-        { $set: { status: 'busy' } }
-    );
+    // Transaction: atomically assign ride + set driver busy
+    // Prevents inconsistent state if either operation fails
+    const session = await mongoose.startSession();
+    let ride;
+    try {
+        session.startTransaction();
+
+        // Atomic update: only transitions pending → accepted AND assigns this driver
+        // This is the most race-critical transition (multiple drivers competing)
+        ride = await Ride.findOneAndUpdate(
+            {
+                _id: req.params.id,
+                status: 'pending',
+                $or: [
+                    { expiresAt: { $gt: new Date() } },
+                    { expiresAt: null },
+                ],
+            },
+            {
+                $set: {
+                    status: 'accepted',
+                    driver: driver._id,
+                },
+            },
+            { new: true, session }
+        );
+
+        if (!ride) {
+            await session.abortTransaction();
+            const existingRide = await Ride.findById(req.params.id);
+            if (!existingRide) return next(new AppError('Ride not found', 404));
+            if (existingRide.expiresAt && new Date() > existingRide.expiresAt) {
+                return next(new AppError('This ride request has expired', 400));
+            }
+            return next(new AppError('This ride is no longer available', 400));
+        }
+
+        // Update driver status to busy within the same transaction
+        await Driver.updateOne(
+            { _id: driver._id, status: 'online' },
+            { $set: { status: 'busy' } },
+            { session }
+        );
+
+        await session.commitTransaction();
+    } catch (err) {
+        await session.abortTransaction();
+        throw err;
+    } finally {
+        session.endSession();
+    }
 
     const populatedRide = await Ride.findById(ride._id)
         .populate('user', 'firstName lastName email phone')
@@ -861,28 +906,54 @@ const completeRide = catchAsync(async (req, res, next) => {
     const commissionPercent = pricing.commissionPercent;
     const commission = Math.round(finalFare * (commissionPercent / 100) * 100) / 100;
 
-    // Atomic update: only transitions in_progress → completed
-    const ride = await Ride.findOneAndUpdate(
-        {
-            _id: req.params.id,
-            status: 'in_progress',
-            driver: driver._id,
-        },
-        {
-            $set: {
-                status: 'completed',
-                endTime: new Date(),
-                fare: finalFare,
-                commission,
-                commissionPercent,
-                paymentStatus: 'completed',
-            },
-        },
-        { new: true }
-    );
+    // Transaction: atomically complete ride + update driver stats
+    // Prevents inconsistent state (e.g. completed ride but driver still busy)
+    const session = await mongoose.startSession();
+    let ride;
+    try {
+        session.startTransaction();
 
-    if (!ride) {
-        return next(new AppError('Ride transition failed — status may have changed', 409));
+        // Atomic update: only transitions in_progress → completed
+        ride = await Ride.findOneAndUpdate(
+            {
+                _id: req.params.id,
+                status: 'in_progress',
+                driver: driver._id,
+            },
+            {
+                $set: {
+                    status: 'completed',
+                    endTime: new Date(),
+                    fare: finalFare,
+                    commission,
+                    commissionPercent,
+                    paymentStatus: 'completed',
+                },
+            },
+            { new: true, session }
+        );
+
+        if (!ride) {
+            await session.abortTransaction();
+            return next(new AppError('Ride transition failed — status may have changed', 409));
+        }
+
+        // Update driver stats within the same transaction
+        await Driver.updateOne(
+            { _id: driver._id },
+            {
+                $set: { status: 'online' },
+                $inc: { totalTrips: 1, totalEarnings: ride.fare }
+            },
+            { session }
+        );
+
+        await session.commitTransaction();
+    } catch (err) {
+        await session.abortTransaction();
+        throw err;
+    } finally {
+        session.endSession();
     }
 
     // Expire any live ride-share documents for this ride — set TTL to endTime + 1 hour
@@ -892,15 +963,6 @@ const completeRide = catchAsync(async (req, res, next) => {
         { ride: ride._id },
         { $set: { expiresAt: rideShareExpiry } }
     ).catch(err => console.error('[completeRide] RideShare expiry update failed:', err.message));
-
-    // Update driver stats atomically (prevents race conditions on concurrent completions)
-    await Driver.updateOne(
-        { _id: driver._id },
-        {
-            $set: { status: 'online' },
-            $inc: { totalTrips: 1, totalEarnings: ride.fare }
-        }
-    );
 
     const populatedRide = await Ride.findById(ride._id)
         .populate('user', 'firstName lastName email phone preferredLanguage')
@@ -1107,33 +1169,64 @@ const cancelRide = catchAsync(async (req, res, next) => {
         return next(new AppError('Invalid cancellation reason', 400));
     }
 
-    // Atomic cancel — prevents race condition with concurrent status changes
-    const cancelledRide = await Ride.findOneAndUpdate(
-        {
-            _id: req.params.id,
-            status: { $nin: ['completed', 'cancelled'] },
-        },
-        {
-            $set: {
-                status: 'cancelled',
-                cancelledBy,
-                cancellationReason: reason || null,
-                cancellationNote: note || null,
-            },
-        },
-        { new: true }
-    );
-
-    if (!cancelledRide) {
-        return next(new AppError('Ride could not be cancelled — status may have changed', 409));
+    // Calculate cancellation fee:
+    // - Pending rides (no driver yet): free cancellation
+    // - After driver accepted: 2 GEL fee for passenger cancellation
+    // - After driver arrived: 3 GEL fee for passenger cancellation
+    // - In progress: 5 GEL fee for passenger cancellation
+    // - Driver/admin cancellation: no fee
+    let cancellationFee = 0;
+    if (cancelledBy === 'user' && ride.driver) {
+        switch (ride.status) {
+            case 'accepted': cancellationFee = 2; break;
+            case 'driver_arrived': cancellationFee = 3; break;
+            case 'in_progress': cancellationFee = 5; break;
+        }
     }
 
-    // If driver was assigned, set them back to online (atomic)
-    if (cancelledRide.driver) {
-        await Driver.updateOne(
-            { _id: cancelledRide.driver, status: 'busy' },
-            { $set: { status: 'online' } }
+    // Transaction: atomically cancel ride + release driver back to online
+    const session = await mongoose.startSession();
+    let cancelledRide;
+    try {
+        session.startTransaction();
+
+        cancelledRide = await Ride.findOneAndUpdate(
+            {
+                _id: req.params.id,
+                status: { $nin: ['completed', 'cancelled'] },
+            },
+            {
+                $set: {
+                    status: 'cancelled',
+                    cancelledBy,
+                    cancellationReason: reason || null,
+                    cancellationNote: note || null,
+                    cancellationFee,
+                },
+            },
+            { new: true, session }
         );
+
+        if (!cancelledRide) {
+            await session.abortTransaction();
+            return next(new AppError('Ride could not be cancelled — status may have changed', 409));
+        }
+
+        // If driver was assigned, set them back to online within the same transaction
+        if (cancelledRide.driver) {
+            await Driver.updateOne(
+                { _id: cancelledRide.driver, status: 'busy' },
+                { $set: { status: 'online' } },
+                { session }
+            );
+        }
+
+        await session.commitTransaction();
+    } catch (err) {
+        await session.abortTransaction();
+        throw err;
+    } finally {
+        session.endSession();
     }
 
     const populatedRide = await Ride.findById(cancelledRide._id)

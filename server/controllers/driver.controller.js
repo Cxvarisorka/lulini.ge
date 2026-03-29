@@ -1307,7 +1307,8 @@ const registerDriver = catchAsync(async (req, res, next) => {
 // Includes original types + new car photo types for vehicle inspection
 const VALID_DOCUMENT_TYPES = [
     'licenseImage', 'vehicleRegistration', 'insurance',
-    'driverLicense', 'front', 'back', 'left', 'right', 'inside'
+    'driverLicense', 'licenseFront', 'licenseBack', 'profilePhoto',
+    'front', 'back', 'left', 'right', 'inside'
 ];
 
 // @desc    Upload a document for the driver profile (works for unapproved drivers too)

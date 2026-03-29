@@ -164,6 +164,10 @@ const rideSchema = new mongoose.Schema({
         type: String,
         default: null
     },
+    cancellationFee: {
+        type: Number,
+        default: 0
+    },
     rating: {
         type: Number,
         min: 1,
@@ -225,6 +229,7 @@ const rideSchema = new mongoose.Schema({
         default: null
     },
     // Route points recorded during in_progress phase (for ride reconstruction)
+    // Capped at 2000 points (~2.8h at 5s interval). Older points are downsampled when cap is hit.
     routePoints: [{
         lat: Number,
         lng: Number,
@@ -236,6 +241,19 @@ const rideSchema = new mongoose.Schema({
     }]
 }, {
     timestamps: true
+});
+
+// Cap routePoints to prevent unbounded document growth.
+// When over limit, downsample by keeping every 2nd point from the older half.
+// Note: Mongoose 9 does NOT pass `next` to pre-save hooks — just return.
+const MAX_ROUTE_POINTS = 2000;
+rideSchema.pre('save', function () {
+    if (this.routePoints && this.routePoints.length > MAX_ROUTE_POINTS) {
+        const half = Math.floor(this.routePoints.length / 2);
+        const downsampled = this.routePoints.slice(0, half).filter((_, i) => i % 2 === 0);
+        const recent = this.routePoints.slice(half);
+        this.routePoints = [...downsampled, ...recent];
+    }
 });
 
 // Indexes for faster queries

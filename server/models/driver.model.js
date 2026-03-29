@@ -100,8 +100,12 @@ const driverSchema = new mongoose.Schema({
         licenseImage: { type: String, default: null },
         vehicleRegistration: { type: String, default: null },
         insurance: { type: String, default: null },
-        // Driver license photo
+        // Driver license photos (front & back)
         driverLicense: { type: String, default: null },
+        licenseFront: { type: String, default: null },
+        licenseBack: { type: String, default: null },
+        // Driver profile photo (face)
+        profilePhoto: { type: String, default: null },
         // Vehicle inspection photos (front, back, left, right, inside)
         front: { type: String, default: null },
         back: { type: String, default: null },
