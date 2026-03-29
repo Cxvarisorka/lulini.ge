@@ -118,8 +118,8 @@ export const authAPI = {
   sendPhoneOtp: (phone) =>
     api.post('/auth/phone/send-otp', { phone }),
 
-  verifyPhoneOtp: (phone, code, firstName, lastName) =>
-    api.post('/auth/phone/verify-otp', { phone, code, firstName, lastName }),
+  verifyPhoneOtp: (phone, code, firstName, lastName, verificationToken) =>
+    api.post('/auth/phone/verify-otp', { phone, code, firstName, lastName, verificationToken }),
 
   // Phone update (authenticated)
   sendPhoneUpdateOtp: (phone) =>

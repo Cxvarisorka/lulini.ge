@@ -80,7 +80,7 @@ export default function OtpVerificationScreen({ navigation, route }) {
 
     if (result.success) {
       if (result.requiresRegistration) {
-        navigation.replace('PhoneRegistration', { phone });
+        navigation.replace('PhoneRegistration', { phone, verificationToken: result.verificationToken });
       }
     } else {
       Alert.alert(t('errors.error'), result.error);

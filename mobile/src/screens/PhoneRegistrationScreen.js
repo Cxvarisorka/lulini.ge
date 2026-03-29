@@ -25,7 +25,7 @@ export default function PhoneRegistrationScreen({ navigation, route }) {
   const styles = React.useMemo(() => createStyles(typography, colors), [typography, colors]);
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
-  const { phone } = route.params;
+  const { phone, verificationToken } = route.params;
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -42,7 +42,7 @@ export default function PhoneRegistrationScreen({ navigation, route }) {
     }
 
     setIsLoading(true);
-    const result = await verifyPhoneOtp(phone, null, firstName.trim(), lastName.trim());
+    const result = await verifyPhoneOtp(phone, null, firstName.trim(), lastName.trim(), verificationToken);
     setIsLoading(false);
 
     if (!result.success) {

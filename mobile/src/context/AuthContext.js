@@ -293,17 +293,18 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   // Phone OTP - Verify OTP
-  const verifyPhoneOtp = useCallback(async (phone, code, firstName = null, lastName = null) => {
+  const verifyPhoneOtp = useCallback(async (phone, code, firstName = null, lastName = null, verificationToken = null) => {
     try {
       setError(null);
 
-      const response = await authAPI.verifyPhoneOtp(phone, code, firstName, lastName);
+      const response = await authAPI.verifyPhoneOtp(phone, code, firstName, lastName, verificationToken);
 
       if (response.data.success) {
         if (response.data.requiresRegistration) {
           return {
             success: true,
             requiresRegistration: true,
+            verificationToken: response.data.verificationToken,
             phone
           };
         }

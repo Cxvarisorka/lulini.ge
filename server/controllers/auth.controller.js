@@ -3,7 +3,7 @@ const Driver = require('../models/driver.model');
 const Ride = require('../models/ride.model');
 const RideOffer = require('../models/rideOffer.model');
 const OTP = require('../models/otp.model');
-const { generateToken } = require('../utils/jwt.utils');
+const { generateToken, verifyToken } = require('../utils/jwt.utils');
 const AppError = require('../utils/AppError');
 const catchAsync = require('../utils/catchAsync');
 const { OAuth2Client } = require('google-auth-library');
@@ -12,6 +12,7 @@ const appleSignin = require('apple-signin-auth');
 const { invalidateUser, invalidateDriver } = require('../utils/authCache');
 const analytics = require('../services/analytics.service');
 const crypto = require('crypto');
+const jwt = require('jsonwebtoken');
 const EmailOTP = require('../models/emailOtp.model');
 const emailService = require('../services/email.service');
 
@@ -384,11 +385,14 @@ const verifyPhoneOtp = catchAsync(async (req, res, next) => {
 
     // Registration completion flow (phone already verified, no code needed)
     if (!code && firstName) {
-        const verifiedRecord = await OTP.findOne({ phone, verified: true });
-        if (!verifiedRecord) {
+        const { verificationToken } = req.body;
+        if (!verificationToken) {
             return next(new AppError('Phone not verified. Please verify your phone first', 400));
         }
-        await OTP.deleteOne({ _id: verifiedRecord._id });
+        const decoded = verifyToken(verificationToken);
+        if (!decoded || decoded.purpose !== 'phone-registration' || decoded.phone !== phone) {
+            return next(new AppError('Phone not verified. Please verify your phone first', 400));
+        }
 
         const user = await User.create({
             firstName,
@@ -447,7 +451,6 @@ const verifyPhoneOtp = catchAsync(async (req, res, next) => {
         return next(new AppError('Invalid OTP code', 400));
     }
 
-    const isValid = true;
     await OTP.deleteOne({ _id: otpRecord._id });
 
     // OTP verified - find or create user
@@ -456,17 +459,17 @@ const verifyPhoneOtp = catchAsync(async (req, res, next) => {
 
     if (!user) {
         if (!firstName) {
-            // Save a verified record so registration can complete without re-verifying
-            await OTP.create({
-                phone,
-                code: 'verified',
-                verified: true,
-                expiresAt: new Date(Date.now() + 10 * 60 * 1000) // 10 min to complete registration
-            });
+            // Issue a short-lived JWT as proof of phone verification (stateless — no DB record needed)
+            const verificationToken = jwt.sign(
+                { phone, purpose: 'phone-registration' },
+                process.env.JWT_SECRET,
+                { expiresIn: '10m', issuer: 'lulini', audience: 'lulini-api' }
+            );
             return res.status(200).json({
                 success: true,
                 isNewUser: true,
                 requiresRegistration: true,
+                verificationToken,
                 message: 'Phone verified. Please complete registration'
             });
         }
