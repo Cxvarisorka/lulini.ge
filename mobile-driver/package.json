@@ -20,6 +20,7 @@
     "@sentry/react-native": "~7.2.0",
     "axios": "^1.13.2",
     "expo": "~54.0.33",
+    "expo-camera": "~17.0.10",
     "expo-dev-client": "~6.0.20",
     "expo-image-picker": "~17.0.10",
     "expo-keep-awake": "~15.0.8",

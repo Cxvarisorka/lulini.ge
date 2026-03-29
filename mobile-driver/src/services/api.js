@@ -56,6 +56,8 @@ export const authAPI = {
   verifyPhoneOtp: (data) => api.post('/auth/phone/verify-otp', data),
   sendPhoneUpdateOtp: (data) => api.post('/auth/phone/update-send-otp', data),
   verifyPhoneUpdateOtp: (data) => api.post('/auth/phone/update-verify-otp', data),
+  sendEmailVerification: (email, language) => api.post('/auth/email/send-verification', { email, language }),
+  verifyEmailForRegistration: (email, code) => api.post('/auth/email/verify-registration', { email, code }),
 };
 
 // Driver endpoints

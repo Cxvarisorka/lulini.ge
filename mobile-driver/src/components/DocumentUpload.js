@@ -8,12 +8,14 @@ import {
   StyleSheet,
   Alert,
   Platform,
+  Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 
 import { colors, shadows, radius, useTypography } from '../theme/colors';
 import { driverAPI } from '../services/api';
+import CameraWithOverlay from './CameraWithOverlay';
 
 // expo-image-picker must be installed: npx expo install expo-image-picker
 let ImagePicker = null;
@@ -38,15 +40,17 @@ const STATUS_COLORS = {
  * DocumentUpload
  *
  * Props:
- *   type        {string}   — document type key, e.g. 'license', 'registration', 'insurance'
- *   label       {string}   — human-readable label
- *   description {string}   — short helper text (optional)
- *   status      {string}   — 'none' | 'pending' | 'approved' | 'rejected'
- *   uri         {string}   — existing preview URI (optional)
- *   onUploaded  {function} — called with { type, uri, status: 'pending' } after successful upload
+ *   type         {string}   — document type key sent to server
+ *   overlayType  {string}   — overlay guide: 'licenseFront' | 'licenseBack' | 'profilePhoto' (optional)
+ *   label        {string}
+ *   description  {string}
+ *   status       {string}   — 'none' | 'pending' | 'approved' | 'rejected'
+ *   uri          {string}
+ *   onUploaded   {function}
  */
 export default function DocumentUpload({
   type,
+  overlayType,
   label,
   description,
   status = 'none',
@@ -61,6 +65,7 @@ export default function DocumentUpload({
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [currentStatus, setCurrentStatus] = useState(status);
+  const [showCamera, setShowCamera] = useState(false);
 
   // Keep in sync if parent changes status (e.g. after polling)
   React.useEffect(() => { setCurrentStatus(status); }, [status]);
@@ -82,6 +87,29 @@ export default function DocumentUpload({
   };
 
   const pickImage = async (useCamera) => {
+    // If overlayType is set and user wants camera, open custom camera with guide overlay
+    if (useCamera && overlayType) {
+      const { status: camStatus } = await (ImagePicker
+        ? ImagePicker.requestCameraPermissionsAsync()
+        : Promise.resolve({ status: 'undetermined' }));
+      if (camStatus !== 'granted') {
+        // Try expo-camera permissions
+        try {
+          const { Camera } = require('expo-camera');
+          const { status: camStatus2 } = await Camera.requestCameraPermissionsAsync();
+          if (camStatus2 !== 'granted') {
+            Alert.alert(t('common.error'), t('onboarding.permissions.cameraDenied', 'Camera access is required.'));
+            return;
+          }
+        } catch (_) {
+          Alert.alert(t('common.error'), t('onboarding.permissions.cameraDenied', 'Camera access is required.'));
+          return;
+        }
+      }
+      setShowCamera(true);
+      return;
+    }
+
     if (!ImagePicker) {
       Alert.alert(
         t('common.error'),
@@ -131,6 +159,11 @@ export default function DocumentUpload({
     } catch (err) {
       Alert.alert(t('common.error'), t('errors.somethingWentWrong'));
     }
+  };
+
+  const handleCameraCapture = async ({ uri: photoUri }) => {
+    setShowCamera(false);
+    await uploadDocument({ uri: photoUri });
   };
 
   const uploadDocument = async (asset) => {
@@ -290,6 +323,17 @@ export default function DocumentUpload({
           </Text>
         </View>
       )}
+
+      {/* Camera overlay modal */}
+      {overlayType && (
+        <Modal visible={showCamera} animationType="slide" statusBarTranslucent>
+          <CameraWithOverlay
+            overlayType={overlayType}
+            onCapture={handleCameraCapture}
+            onClose={() => setShowCamera(false)}
+          />
+        </Modal>
+      )}
     </View>
   );
 }
@@ -297,7 +341,10 @@ export default function DocumentUpload({
 function getDocumentIcon(type) {
   switch (type) {
     case 'license':
-    case 'driverLicense': return 'card-outline';
+    case 'driverLicense':
+    case 'licenseFront':
+    case 'licenseBack': return 'card-outline';
+    case 'profilePhoto': return 'person-circle-outline';
     case 'registration': return 'document-text-outline';
     case 'insurance': return 'shield-checkmark-outline';
     case 'front':

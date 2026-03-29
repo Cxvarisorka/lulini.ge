@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -10,27 +10,21 @@ import {
   ActivityIndicator,
   Alert,
   ScrollView,
+  Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { authAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { colors, shadows, radius, useTypography } from '../theme/colors';
 
-/**
- * RegisterScreen
- *
- * Two-step form:
- *   Step 1 — Account credentials (email + password)
- *   Step 2 — Personal details (first name, last name, phone)
- *
- * On success, logs the user in via AuthContext.login and the navigator
- * sends them to the Onboarding flow automatically (handled in AppNavigator).
- */
+const CACHE_KEY = 'driver_register_draft';
+
 export default function RegisterScreen({ navigation }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { login } = useAuth();
   const insets = useSafeAreaInsets();
   const typography = useTypography();
@@ -43,6 +37,15 @@ export default function RegisterScreen({ navigation }) {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
+  // Email verification modal
+  const [showVerifyModal, setShowVerifyModal] = useState(false);
+  const [emailCode, setEmailCode] = useState('');
+  const [emailVerifyLoading, setEmailVerifyLoading] = useState(false);
+  const [resendTimer, setResendTimer] = useState(0);
+  const resendTimerRef = useRef(null);
+  const codeInputRef = useRef(null);
+  const [emailVerified, setEmailVerified] = useState(false);
+
   // Step 2 fields
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -50,8 +53,60 @@ export default function RegisterScreen({ navigation }) {
 
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [cacheLoaded, setCacheLoaded] = useState(false);
 
-  // ─── Validation helpers ────────────────────────────────────────────────────
+  // ─── Cache: restore on mount ────────────────────────────────────────────
+  useEffect(() => {
+    AsyncStorage.getItem(CACHE_KEY).then(raw => {
+      if (raw) {
+        try {
+          const data = JSON.parse(raw);
+          if (data.email) setEmail(data.email);
+          if (data.firstName) setFirstName(data.firstName);
+          if (data.lastName) setLastName(data.lastName);
+          if (data.phone) setPhone(data.phone);
+          if (data.step) setStep(data.step);
+          if (data.emailVerified) setEmailVerified(true);
+        } catch {}
+      }
+      setCacheLoaded(true);
+    });
+  }, []);
+
+  // ─── Cache: persist on change ───────────────────────────────────────────
+  const saveCache = useCallback(() => {
+    const data = { email, firstName, lastName, phone, step, emailVerified };
+    AsyncStorage.setItem(CACHE_KEY, JSON.stringify(data)).catch(() => {});
+  }, [email, firstName, lastName, phone, step, emailVerified]);
+
+  useEffect(() => {
+    if (cacheLoaded) saveCache();
+  }, [cacheLoaded, saveCache]);
+
+  const clearCache = () => AsyncStorage.removeItem(CACHE_KEY).catch(() => {});
+
+  // ─── Timer helper ───────────────────────────────────────────────────────
+  const startResendTimer = () => {
+    setResendTimer(60);
+    if (resendTimerRef.current) clearInterval(resendTimerRef.current);
+    resendTimerRef.current = setInterval(() => {
+      setResendTimer(prev => {
+        if (prev <= 1) {
+          clearInterval(resendTimerRef.current);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (resendTimerRef.current) clearInterval(resendTimerRef.current);
+    };
+  }, []);
+
+  // ─── Validation helpers ────────────────────────────────────────────────
 
   const validateStep1 = () => {
     const trimmedEmail = email.trim().toLowerCase();
@@ -70,6 +125,10 @@ export default function RegisterScreen({ navigation }) {
     }
     if (password.length < 8) {
       Alert.alert(t('common.error'), t('register.passwordTooShort'));
+      return false;
+    }
+    if (!/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/\d/.test(password)) {
+      Alert.alert(t('common.error'), t('register.passwordComplexity'));
       return false;
     }
     if (password !== confirmPassword) {
@@ -92,7 +151,6 @@ export default function RegisterScreen({ navigation }) {
       Alert.alert(t('common.error'), t('register.phoneRequired'));
       return false;
     }
-    // Loose phone validation — E.164-ish
     if (!/^\+?[0-9\s\-()]{7,15}$/.test(phone.trim())) {
       Alert.alert(t('common.error'), t('register.phoneInvalid'));
       return false;
@@ -100,11 +158,88 @@ export default function RegisterScreen({ navigation }) {
     return true;
   };
 
-  // ─── Handlers ─────────────────────────────────────────────────────────────
+  // ─── Handlers ─────────────────────────────────────────────────────────
 
-  const handleNextStep = () => {
+  const handleNextStep = async () => {
     if (!validateStep1()) return;
-    setStep(2);
+
+    // If email already verified, skip to step 2
+    if (emailVerified) {
+      setStep(2);
+      return;
+    }
+
+    // Send email verification code and show modal
+    setLoading(true);
+    try {
+      const response = await authAPI.sendEmailVerification(
+        email.trim().toLowerCase(),
+        i18n.language
+      );
+      if (response.data.success) {
+        setEmailCode('');
+        setShowVerifyModal(true);
+        startResendTimer();
+        setTimeout(() => codeInputRef.current?.focus(), 400);
+      }
+    } catch (error) {
+      const serverMessage = error.response?.data?.message;
+      if (serverMessage?.toLowerCase().includes('already')) {
+        Alert.alert(t('common.error'), t('register.emailAlreadyExists'));
+      } else {
+        Alert.alert(t('common.error'), serverMessage || t('errors.somethingWentWrong'));
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyEmail = async () => {
+    if (emailCode.trim().length !== 6) {
+      Alert.alert(t('common.error'), t('register.enterVerificationCode'));
+      return;
+    }
+
+    setEmailVerifyLoading(true);
+    try {
+      const response = await authAPI.verifyEmailForRegistration(
+        email.trim().toLowerCase(),
+        emailCode.trim()
+      );
+      if (response.data.success) {
+        if (resendTimerRef.current) clearInterval(resendTimerRef.current);
+        setEmailVerified(true);
+        setShowVerifyModal(false);
+        setStep(2);
+      }
+    } catch (error) {
+      const message = error.response?.data?.message || t('errors.somethingWentWrong');
+      Alert.alert(t('common.error'), message);
+    } finally {
+      setEmailVerifyLoading(false);
+    }
+  };
+
+  const handleResendCode = async () => {
+    if (resendTimer > 0) return;
+    setEmailVerifyLoading(true);
+    try {
+      await authAPI.sendEmailVerification(
+        email.trim().toLowerCase(),
+        i18n.language
+      );
+      startResendTimer();
+    } catch (error) {
+      const message = error.response?.data?.message || t('errors.somethingWentWrong');
+      Alert.alert(t('common.error'), message);
+    } finally {
+      setEmailVerifyLoading(false);
+    }
+  };
+
+  const handleCloseVerifyModal = () => {
+    setShowVerifyModal(false);
+    if (resendTimerRef.current) clearInterval(resendTimerRef.current);
   };
 
   const handleRegister = async () => {
@@ -112,7 +247,6 @@ export default function RegisterScreen({ navigation }) {
 
     setLoading(true);
     try {
-      // Create account (starts as regular user, becomes driver after onboarding + approval)
       const registerResponse = await authAPI.register({
         email: email.trim().toLowerCase(),
         password,
@@ -129,10 +263,12 @@ export default function RegisterScreen({ navigation }) {
         return;
       }
 
+      // Clear cache on successful registration
+      clearCache();
+
       // Auto-login after registration
       const loginResult = await login(email.trim().toLowerCase(), password);
       if (!loginResult.success) {
-        // Registration succeeded but auto-login failed — send to login screen
         Alert.alert(
           t('register.successTitle'),
           t('register.successLoginManually')
@@ -140,7 +276,6 @@ export default function RegisterScreen({ navigation }) {
         navigation.replace('Login');
         return;
       }
-      // Navigator will re-render and route to Onboarding automatically (AppNavigator logic)
     } catch (error) {
       const serverMessage = error.response?.data?.message;
       if (serverMessage?.toLowerCase().includes('already')) {
@@ -153,7 +288,23 @@ export default function RegisterScreen({ navigation }) {
     }
   };
 
-  // ─── Render ───────────────────────────────────────────────────────────────
+  const handleEmailChange = (text) => {
+    setEmail(text);
+    // Reset verification if email changes
+    if (emailVerified) {
+      setEmailVerified(false);
+    }
+  };
+
+  const handleBack = () => {
+    if (step === 2) {
+      setStep(1);
+    } else {
+      navigation.goBack();
+    }
+  };
+
+  // ─── Render ───────────────────────────────────────────────────────────
 
   return (
     <KeyboardAvoidingView
@@ -168,7 +319,7 @@ export default function RegisterScreen({ navigation }) {
         {/* Back button */}
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => (step === 2 ? setStep(1) : navigation.goBack())}
+          onPress={handleBack}
           accessibilityLabel={t('common.back')}
           accessibilityRole="button"
         >
@@ -202,14 +353,19 @@ export default function RegisterScreen({ navigation }) {
             <Text style={styles.sectionTitle}>{t('register.accountDetails')}</Text>
 
             {/* Email */}
-            <View style={styles.inputContainer} accessible accessibilityLabel={t('auth.email')}>
-              <Ionicons name="mail-outline" size={20} color={colors.mutedForeground} style={styles.inputIcon} />
+            <View style={[styles.inputContainer, emailVerified && styles.inputVerified]}>
+              <Ionicons
+                name={emailVerified ? 'checkmark-circle' : 'mail-outline'}
+                size={20}
+                color={emailVerified ? colors.success : colors.mutedForeground}
+                style={styles.inputIcon}
+              />
               <TextInput
                 style={styles.input}
                 placeholder={t('auth.email')}
                 placeholderTextColor={colors.mutedForeground}
                 value={email}
-                onChangeText={setEmail}
+                onChangeText={handleEmailChange}
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoComplete="email"
@@ -220,7 +376,7 @@ export default function RegisterScreen({ navigation }) {
             </View>
 
             {/* Password */}
-            <View style={styles.inputContainer} accessible accessibilityLabel={t('auth.password')}>
+            <View style={styles.inputContainer}>
               <Ionicons name="lock-closed-outline" size={20} color={colors.mutedForeground} style={styles.inputIcon} />
               <TextInput
                 style={[styles.input, styles.passwordInput]}
@@ -248,7 +404,7 @@ export default function RegisterScreen({ navigation }) {
             </View>
 
             {/* Confirm password */}
-            <View style={styles.inputContainer} accessible accessibilityLabel={t('register.confirmPassword')}>
+            <View style={styles.inputContainer}>
               <Ionicons name="lock-closed-outline" size={20} color={colors.mutedForeground} style={styles.inputIcon} />
               <TextInput
                 style={[styles.input, styles.passwordInput]}
@@ -278,13 +434,20 @@ export default function RegisterScreen({ navigation }) {
             <Text style={styles.passwordHint}>{t('register.passwordHint')}</Text>
 
             <TouchableOpacity
-              style={styles.primaryButton}
+              style={[styles.primaryButton, loading && styles.primaryButtonDisabled]}
               onPress={handleNextStep}
+              disabled={loading}
               accessibilityLabel={t('common.continue')}
               accessibilityRole="button"
             >
-              <Text style={styles.primaryButtonText}>{t('common.continue')}</Text>
-              <Ionicons name="arrow-forward" size={20} color={colors.primaryForeground} />
+              {loading ? (
+                <ActivityIndicator color={colors.primaryForeground} />
+              ) : (
+                <>
+                  <Text style={styles.primaryButtonText}>{t('common.continue')}</Text>
+                  <Ionicons name="arrow-forward" size={20} color={colors.primaryForeground} />
+                </>
+              )}
             </TouchableOpacity>
           </View>
         ) : (
@@ -293,7 +456,7 @@ export default function RegisterScreen({ navigation }) {
             <Text style={styles.sectionTitle}>{t('register.personalDetails')}</Text>
 
             {/* First name */}
-            <View style={styles.inputContainer} accessible accessibilityLabel={t('register.firstName')}>
+            <View style={styles.inputContainer}>
               <Ionicons name="person-outline" size={20} color={colors.mutedForeground} style={styles.inputIcon} />
               <TextInput
                 style={styles.input}
@@ -302,14 +465,13 @@ export default function RegisterScreen({ navigation }) {
                 value={firstName}
                 onChangeText={setFirstName}
                 autoCapitalize="words"
-                autoComplete="given-name"
+                autoComplete="off"
                 editable={!loading}
-                accessibilityLabel={t('register.firstName')}
               />
             </View>
 
             {/* Last name */}
-            <View style={styles.inputContainer} accessible accessibilityLabel={t('register.lastName')}>
+            <View style={styles.inputContainer}>
               <Ionicons name="person-outline" size={20} color={colors.mutedForeground} style={styles.inputIcon} />
               <TextInput
                 style={styles.input}
@@ -318,14 +480,13 @@ export default function RegisterScreen({ navigation }) {
                 value={lastName}
                 onChangeText={setLastName}
                 autoCapitalize="words"
-                autoComplete="family-name"
+                autoComplete="off"
                 editable={!loading}
-                accessibilityLabel={t('register.lastName')}
               />
             </View>
 
             {/* Phone */}
-            <View style={styles.inputContainer} accessible accessibilityLabel={t('profile.phone')}>
+            <View style={styles.inputContainer}>
               <Ionicons name="call-outline" size={20} color={colors.mutedForeground} style={styles.inputIcon} />
               <TextInput
                 style={styles.input}
@@ -334,9 +495,8 @@ export default function RegisterScreen({ navigation }) {
                 value={phone}
                 onChangeText={setPhone}
                 keyboardType="phone-pad"
-                autoComplete="tel"
+                autoComplete="off"
                 editable={!loading}
-                accessibilityLabel={t('profile.phone')}
               />
             </View>
 
@@ -372,6 +532,96 @@ export default function RegisterScreen({ navigation }) {
           </TouchableOpacity>
         </View>
       </ScrollView>
+
+      {/* ── Email Verification Modal ── */}
+      <Modal
+        visible={showVerifyModal}
+        transparent
+        animationType="slide"
+        onRequestClose={handleCloseVerifyModal}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <TouchableOpacity
+            style={styles.modalBackdrop}
+            activeOpacity={1}
+            onPress={handleCloseVerifyModal}
+          />
+          <View style={[styles.modalContent, { paddingBottom: insets.bottom + 24 }]}>
+            {/* Handle bar */}
+            <View style={styles.modalHandle} />
+
+            {/* Close button */}
+            <TouchableOpacity
+              style={styles.modalCloseButton}
+              onPress={handleCloseVerifyModal}
+              accessibilityLabel={t('common.close')}
+            >
+              <Ionicons name="close" size={24} color={colors.mutedForeground} />
+            </TouchableOpacity>
+
+            {/* Icon + title */}
+            <View style={styles.modalHeader}>
+              <View style={styles.modalIconContainer}>
+                <Ionicons name="mail-open-outline" size={40} color={colors.primary} />
+              </View>
+              <Text style={styles.modalTitle}>{t('register.checkYourEmail')}</Text>
+              <Text style={styles.modalSubtitle}>
+                {t('register.codeSentTo', { email: email.trim().toLowerCase() })}
+              </Text>
+            </View>
+
+            {/* Code input */}
+            <View style={styles.modalInputContainer}>
+              <Ionicons name="keypad-outline" size={20} color={colors.mutedForeground} style={styles.inputIcon} />
+              <TextInput
+                ref={codeInputRef}
+                style={[styles.input, styles.codeInput]}
+                placeholder="000000"
+                placeholderTextColor={colors.mutedForeground}
+                value={emailCode}
+                onChangeText={(text) => setEmailCode(text.replace(/[^0-9]/g, '').slice(0, 6))}
+                keyboardType="number-pad"
+                maxLength={6}
+                editable={!emailVerifyLoading}
+                returnKeyType="done"
+                onSubmitEditing={handleVerifyEmail}
+              />
+            </View>
+
+            {/* Verify button */}
+            <TouchableOpacity
+              style={[styles.primaryButton, emailVerifyLoading && styles.primaryButtonDisabled]}
+              onPress={handleVerifyEmail}
+              disabled={emailVerifyLoading}
+            >
+              {emailVerifyLoading ? (
+                <ActivityIndicator color={colors.primaryForeground} />
+              ) : (
+                <>
+                  <Text style={styles.primaryButtonText}>{t('register.verifyEmail')}</Text>
+                  <Ionicons name="checkmark-circle-outline" size={20} color={colors.primaryForeground} />
+                </>
+              )}
+            </TouchableOpacity>
+
+            {/* Resend */}
+            <TouchableOpacity
+              onPress={handleResendCode}
+              disabled={resendTimer > 0 || emailVerifyLoading}
+              style={styles.resendButton}
+            >
+              <Text style={[styles.resendText, resendTimer > 0 && styles.resendTextDisabled]}>
+                {resendTimer > 0
+                  ? t('register.resendIn', { seconds: resendTimer })
+                  : t('register.resendCode')}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -458,6 +708,10 @@ const createStyles = (typography) => StyleSheet.create({
     height: 56,
     ...shadows.sm,
   },
+  inputVerified: {
+    borderWidth: 1.5,
+    borderColor: colors.success,
+  },
   inputIcon: {
     marginRight: 12,
   },
@@ -480,6 +734,11 @@ const createStyles = (typography) => StyleSheet.create({
     marginBottom: 20,
     marginTop: -6,
     paddingHorizontal: 4,
+  },
+  codeInput: {
+    letterSpacing: 6,
+    fontSize: 20,
+    fontWeight: '600',
   },
   primaryButton: {
     flexDirection: 'row',
@@ -514,5 +773,87 @@ const createStyles = (typography) => StyleSheet.create({
     ...typography.bodySmall,
     color: colors.primary,
     fontWeight: '600',
+  },
+
+  // ── Modal styles ──
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+  },
+  modalContent: {
+    backgroundColor: colors.background,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 24,
+    paddingTop: 12,
+  },
+  modalHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.border,
+    alignSelf: 'center',
+    marginBottom: 16,
+  },
+  modalCloseButton: {
+    position: 'absolute',
+    top: 16,
+    right: 20,
+    zIndex: 1,
+    padding: 4,
+  },
+  modalHeader: {
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  modalIconContainer: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: `${colors.primary}10`,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  modalTitle: {
+    ...typography.h2,
+    fontWeight: '600',
+    color: colors.foreground,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  modalSubtitle: {
+    ...typography.bodySmall,
+    color: colors.mutedForeground,
+    textAlign: 'center',
+    paddingHorizontal: 16,
+  },
+  modalInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.muted,
+    borderRadius: radius.lg,
+    marginBottom: 14,
+    paddingHorizontal: 16,
+    height: 56,
+    ...shadows.sm,
+  },
+  resendButton: {
+    alignSelf: 'center',
+    marginTop: 16,
+    paddingVertical: 8,
+  },
+  resendText: {
+    ...typography.bodySmall,
+    color: colors.primary,
+    fontWeight: '600',
+  },
+  resendTextDisabled: {
+    color: colors.mutedForeground,
+    fontWeight: '400',
   },
 });

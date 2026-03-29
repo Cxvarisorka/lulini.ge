@@ -70,9 +70,11 @@ export default function OnboardingScreen({ navigation }) {
   const [licensePlate, setLicensePlate] = useState('');
   const [vehicleColor, setVehicleColor] = useState('');
 
-  // Photo state — driver license + 5 car photos
+  // Photo state — profile photo + license front/back + 5 car photos
   const [photos, setPhotos] = useState({
-    driverLicense: { uri: null, status: 'none' },
+    profilePhoto: { uri: null, status: 'none' },
+    licenseFront: { uri: null, status: 'none' },
+    licenseBack: { uri: null, status: 'none' },
     front: { uri: null, status: 'none' },
     back: { uri: null, status: 'none' },
     left: { uri: null, status: 'none' },
@@ -195,9 +197,18 @@ export default function OnboardingScreen({ navigation }) {
   };
 
   const validatePhotos = () => {
-    // Driver license is required
-    if (!photos.driverLicense.uri) {
-      Alert.alert(t('common.error'), t('onboarding.photos.licenseRequired'));
+    // Profile photo is required
+    if (!photos.profilePhoto.uri) {
+      Alert.alert(t('common.error'), t('onboarding.photos.profileRequired'));
+      return false;
+    }
+    // License front and back are required
+    if (!photos.licenseFront.uri) {
+      Alert.alert(t('common.error'), t('onboarding.photos.licenseFrontRequired'));
+      return false;
+    }
+    if (!photos.licenseBack.uri) {
+      Alert.alert(t('common.error'), t('onboarding.photos.licenseBackRequired'));
       return false;
     }
     // All 5 car photos are required
@@ -590,14 +601,38 @@ export default function OnboardingScreen({ navigation }) {
       </Text>
       <Text style={styles.stepSubtitle}>{t('onboarding.photos.subtitle')}</Text>
 
-      {/* Driver License */}
-      <Text style={styles.sectionLabel}>{t('onboarding.photos.driverLicenseSection')}</Text>
+      {/* Profile Photo */}
+      <Text style={styles.sectionLabel}>{t('onboarding.photos.profileSection')}</Text>
+      <Text style={styles.sectionHint}>{t('onboarding.photos.profileHint')}</Text>
       <DocumentUpload
-        type="driverLicense"
-        label={t('onboarding.photos.driverLicense')}
-        description={t('onboarding.photos.driverLicenseDesc')}
-        status={photos.driverLicense.status}
-        uri={photos.driverLicense.uri}
+        type="profilePhoto"
+        overlayType="profilePhoto"
+        label={t('onboarding.photos.profilePhoto')}
+        description={t('onboarding.photos.profilePhotoDesc')}
+        status={photos.profilePhoto.status}
+        uri={photos.profilePhoto.uri}
+        onUploaded={handlePhotoUploaded}
+      />
+
+      {/* Driver License — Front & Back */}
+      <Text style={[styles.sectionLabel, { marginTop: 24 }]}>{t('onboarding.photos.driverLicenseSection')}</Text>
+      <Text style={styles.sectionHint}>{t('onboarding.photos.licenseHint')}</Text>
+      <DocumentUpload
+        type="licenseFront"
+        overlayType="licenseFront"
+        label={t('onboarding.photos.licenseFront')}
+        description={t('onboarding.photos.licenseFrontDesc')}
+        status={photos.licenseFront.status}
+        uri={photos.licenseFront.uri}
+        onUploaded={handlePhotoUploaded}
+      />
+      <DocumentUpload
+        type="licenseBack"
+        overlayType="licenseBack"
+        label={t('onboarding.photos.licenseBack')}
+        description={t('onboarding.photos.licenseBackDesc')}
+        status={photos.licenseBack.status}
+        uri={photos.licenseBack.uri}
         onUploaded={handlePhotoUploaded}
       />
 

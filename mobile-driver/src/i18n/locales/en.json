@@ -408,6 +408,7 @@
     "emailRequired": "Email is required",
     "passwordRequired": "Password is required",
     "passwordTooShort": "Password must be at least 8 characters",
+    "passwordComplexity": "Password must contain at least one uppercase letter, one lowercase letter, and one number",
     "passwordMismatch": "Passwords do not match",
     "firstNameRequired": "First name is required",
     "lastNameRequired": "Last name is required",
@@ -416,7 +417,15 @@
     "emailAlreadyExists": "An account with this email already exists",
     "successTitle": "Account Created",
     "successLoginManually": "Your account has been created. Please sign in.",
-    "invalidEmail": "Please enter a valid email address"
+    "invalidEmail": "Please enter a valid email address",
+    "emailVerification": "EMAIL VERIFICATION",
+    "checkYourEmail": "Check Your Email",
+    "codeSentTo": "We sent a 6-digit verification code to {{email}}",
+    "verificationCode": "Verification Code",
+    "verifyEmail": "Verify Email",
+    "enterVerificationCode": "Please enter the 6-digit verification code",
+    "resendCode": "Resend Code",
+    "resendIn": "Resend in {{seconds}}s"
   },
   "onboarding": {
     "stepOf": "{{current}} / {{total}}",
@@ -478,10 +487,20 @@
     },
     "photos": {
       "title": "Upload Photos",
-      "subtitle": "Upload your driver's license and photos of your vehicle for inspection.",
+      "subtitle": "Upload your profile photo, driver's license (front & back), and vehicle photos.",
+      "profileSection": "Profile Photo",
+      "profileHint": "Take a clear front-facing photo of yourself. This will be your driver profile picture visible to passengers.",
+      "profilePhoto": "Face Photo",
+      "profilePhotoDesc": "Clear front-facing photo — look straight at the camera",
+      "profileRequired": "Profile photo is required",
       "driverLicenseSection": "Driver's License",
-      "driverLicense": "Driver's License Photo",
-      "driverLicenseDesc": "Clear photo of the front of your valid driver's license",
+      "licenseHint": "Upload clear photos of both sides of your driver's license. Use the camera for best results — a guide overlay will help you align the card.",
+      "licenseFront": "License — Front Side",
+      "licenseFrontDesc": "Front side showing your name and photo",
+      "licenseBack": "License — Back Side",
+      "licenseBackDesc": "Back side showing categories and expiry date",
+      "licenseFrontRequired": "Front side of your license is required",
+      "licenseBackRequired": "Back side of your license is required",
       "carPhotosSection": "Vehicle Photos",
       "carPhotosHint": "Take clear photos of your car from all sides and the interior. These are used for vehicle inspection.",
       "front": "Front View",
@@ -530,6 +549,16 @@
       "checkStatus": "Check Approval Status",
       "notYetApproved": "Not Approved Yet",
       "notYetApprovedDesc": "Your application is still being reviewed. Please check back later."
+    }
+  },
+  "camera": {
+    "capture": "Take photo",
+    "hintFace": "Make sure your face is clearly visible and well-lit",
+    "hintCard": "Keep the card flat and avoid glare",
+    "overlay": {
+      "licenseFront": "Position the FRONT of your license in the frame",
+      "licenseBack": "Position the BACK of your license in the frame",
+      "profilePhoto": "Position your face in the oval"
     }
   },
   "documents": {
