@@ -9,6 +9,25 @@ const { emitCritical } = require('../utils/socketHelpers');
 
 const CALLBACK_BASE_URL = process.env.BOG_CALLBACK_URL || 'https://api.lulini.ge';
 
+// BOG payment response codes → user-friendly error keys (for i18n on client)
+const BOG_RESPONSE_CODES = {
+    100: 'payment.success',
+    101: 'payment.errors.cardRestricted',
+    102: 'payment.errors.savedCardNotFound',
+    103: 'payment.errors.invalidCard',
+    104: 'payment.errors.transactionLimitExceeded',
+    105: 'payment.errors.cardExpired',
+    106: 'payment.errors.amountLimitExceeded',
+    107: 'payment.errors.insufficientFunds',
+    108: 'payment.errors.authDeclined',
+    109: 'payment.errors.technicalIssue',
+    110: 'payment.errors.transactionExpired',
+    111: 'payment.errors.authTimeout',
+    112: 'payment.errors.generalError',
+    199: 'payment.errors.unknownError',
+    200: 'payment.preauthSuccess'
+};
+
 // ──────────────────────────────────────────────────────
 // Card Management
 // ──────────────────────────────────────────────────────
@@ -184,6 +203,21 @@ const setDefaultCard = catchAsync(async (req, res, next) => {
 });
 
 // ──────────────────────────────────────────────────────
+// Helpers — Card Validation
+// ──────────────────────────────────────────────────────
+
+function isCardExpired(expiryDate) {
+    if (!expiryDate || expiryDate === 'N/A') return false; // can't determine — let BOG reject
+    const parts = expiryDate.split('/');
+    if (parts.length !== 2) return false;
+    const [mm, yy] = parts.map(Number);
+    if (!mm || !yy) return false;
+    // Card is valid through the last day of the expiry month
+    const expiryEnd = new Date(2000 + yy, mm, 0, 23, 59, 59);
+    return Date.now() > expiryEnd.getTime();
+}
+
+// ──────────────────────────────────────────────────────
 // Ride Payment with Preauthorization
 // ──────────────────────────────────────────────────────
 // Flow:
@@ -215,12 +249,17 @@ const preauthRide = catchAsync(async (req, res, next) => {
         return next(new AppError('No saved card found. Please add a card first.', 400));
     }
 
+    if (isCardExpired(card.expiryDate)) {
+        return next(new AppError('Card has expired. Please add a new card.', 400));
+    }
+
     const externalOrderId = `preauth_${userId}_${Date.now()}`;
 
     // Create a recurrent order with manual capture (preauthorization)
-    // This charges the saved card's parent order, user sees BOG page briefly
+    // capture: 'manual' tells BOG to hold funds instead of capturing immediately
     const order = await bogService.chargeRecurrent(card.bogOrderId, {
         amount,
+        capture: 'manual',
         externalOrderId,
         callbackUrl: `${CALLBACK_BASE_URL}/api/payments/callback`,
         description: 'Lulini Ride - Hold',
@@ -275,6 +314,10 @@ const chargeRide = catchAsync(async (req, res, next) => {
         return next(new AppError('No saved card found. Please add a card first.', 400));
     }
 
+    if (isCardExpired(card.expiryDate)) {
+        return next(new AppError('Card has expired. Please add a new card.', 400));
+    }
+
     const externalOrderId = `ride_${rideId || userId}_${Date.now()}`;
 
     const order = await bogService.chargeRecurrent(card.bogOrderId, {
@@ -314,7 +357,7 @@ const chargeRide = catchAsync(async (req, res, next) => {
 // @access  Private
 const payRide = catchAsync(async (req, res, next) => {
     const userId = req.user._id || req.user.id;
-    const { amount, rideId, paymentMethods, lang } = req.body;
+    const { amount, rideId, paymentMethods, lang, capture } = req.body;
 
     if (!amount || amount <= 0) {
         return next(new AppError('Invalid payment amount', 400));
@@ -326,7 +369,9 @@ const payRide = catchAsync(async (req, res, next) => {
         ? paymentMethods
         : ['card'];
 
-    const externalOrderId = `pay_${rideId || userId}_${Date.now()}`;
+    const captureMode = capture || 'automatic';
+    const isPreauth = captureMode === 'manual';
+    const externalOrderId = `${isPreauth ? 'preauth' : 'pay'}_${rideId || userId}_${Date.now()}`;
 
     const order = await bogService.createOrder({
         amount,
@@ -335,9 +380,10 @@ const payRide = catchAsync(async (req, res, next) => {
         callbackUrl: `${CALLBACK_BASE_URL}/api/payments/callback`,
         redirectSuccess: `${CALLBACK_BASE_URL}/api/payments/redirect/success`,
         redirectFail: `${CALLBACK_BASE_URL}/api/payments/redirect/fail`,
-        description: 'Lulini Ride Payment',
+        description: isPreauth ? 'Lulini Ride - Hold' : 'Lulini Ride Payment',
         lang: lang || 'ka',
         ttl: 30,
+        capture: captureMode,
         paymentMethods: methods,
         idempotencyKey: crypto.randomUUID()
     });
@@ -346,10 +392,11 @@ const payRide = catchAsync(async (req, res, next) => {
         user: userId,
         bogOrderId: order.id,
         externalOrderId,
-        type: 'ride_payment',
+        type: isPreauth ? 'ride_preauth' : 'ride_payment',
         amount,
         currency: 'GEL',
         status: 'created',
+        captureMode,
         ride: rideId || null
     });
 
@@ -487,7 +534,10 @@ const verifyRidePayment = catchAsync(async (req, res, next) => {
             payment.status = 'rejected';
             payment.rejectReason = details.reject_reason;
             await payment.save();
-            return res.json({ success: true, data: { status: 'rejected' } });
+
+            const bogCode = paymentDetail.code ? parseInt(paymentDetail.code) : null;
+            const errorKey = bogCode ? BOG_RESPONSE_CODES[bogCode] || 'payment.errors.generalError' : null;
+            return res.json({ success: true, data: { status: 'rejected', errorKey, bogCode } });
         }
 
         return res.json({ success: true, data: { status: orderStatus || payment.status } });
@@ -536,6 +586,63 @@ const linkPaymentToRide = catchAsync(async (req, res, next) => {
     }
 
     res.json({ success: true, message: 'Payment linked to ride' });
+});
+
+// ──────────────────────────────────────────────────────
+// Refund
+// ──────────────────────────────────────────────────────
+
+// @desc    Refund a completed payment (full or partial)
+// @route   POST /api/payments/:paymentId/refund
+// @access  Private
+const refundPayment = catchAsync(async (req, res, next) => {
+    const userId = req.user._id || req.user.id;
+    const { amount, reason } = req.body;
+
+    const payment = await Payment.findOne({
+        _id: req.params.paymentId,
+        user: userId,
+        status: { $in: ['completed', 'captured'] }
+    });
+
+    if (!payment) {
+        return next(new AppError('Payment not found or not in refundable state', 404));
+    }
+
+    const refundAmount = amount || payment.capturedAmount || payment.amount;
+
+    if (amount && amount > (payment.capturedAmount || payment.amount)) {
+        return next(new AppError('Refund amount exceeds payment amount', 400));
+    }
+
+    const result = await bogService.refundPayment(payment.bogOrderId, {
+        amount: amount || undefined,
+        idempotencyKey: crypto.randomUUID()
+    });
+
+    const isPartial = amount && amount < (payment.capturedAmount || payment.amount);
+    payment.status = isPartial ? 'refunded_partially' : 'refunded';
+    payment.refundAmount = refundAmount;
+    payment.refundReason = reason || null;
+    await payment.save();
+
+    if (payment.ride) {
+        await Ride.updateOne({ _id: payment.ride }, { paymentStatus: 'refunded' });
+    }
+
+    const io = req.app.get('io');
+    emitCritical(io, `user:${payment.user}`, 'payment:refunded', {
+        paymentId: payment._id,
+        orderId: payment.bogOrderId,
+        rideId: payment.ride,
+        refundAmount,
+        isPartial
+    });
+
+    res.json({
+        success: true,
+        data: { actionId: result.actionId, refundAmount, isPartial }
+    });
 });
 
 // ──────────────────────────────────────────────────────
@@ -623,17 +730,22 @@ const handleCallback = catchAsync(async (req, res) => {
         payment.status = 'rejected';
         payment.rejectReason = body.reject_reason;
 
+        const bogCode = paymentDetail.code ? parseInt(paymentDetail.code) : null;
+        const errorKey = bogCode ? BOG_RESPONSE_CODES[bogCode] || 'payment.errors.generalError' : null;
+
         emitCritical(io, `user:${payment.user}`, 'payment:failed', {
             paymentId: payment._id,
             orderId: payment.bogOrderId,
             rideId: payment.ride,
-            reason: body.reject_reason
+            reason: body.reject_reason,
+            errorKey,
+            bogCode
         });
     } else {
         const statusMap = {
             'processing': 'processing',
             'refunded': 'refunded',
-            'refunded_partially': 'refunded',
+            'refunded_partially': 'refunded_partially',
             'partial_completed': 'completed'
         };
         payment.status = statusMap[orderStatus] || payment.status;
@@ -779,6 +891,7 @@ module.exports = {
     rejectRidePayment,
     verifyRidePayment,
     linkPaymentToRide,
+    refundPayment,
     handleCallback,
     getPaymentStatus,
     handleRedirectSuccess,

@@ -109,7 +109,8 @@ async function createOrder(options) {
         },
         payment_method: paymentMethods,
         capture: options.capture || 'automatic',
-        ttl: options.ttl || 15
+        ttl: options.ttl || 15,
+        application_type: options.applicationType || 'mobile'
     };
 
     // Apple Pay / Google Pay: BOG handles on their payment page (external: false)
@@ -252,6 +253,7 @@ async function saveCardForSubscription(orderId, idempotencyKey) {
  * @param {string} [options.externalOrderId] - Our internal order ID
  * @param {string} [options.description] - Description
  * @param {string} [options.lang] - Language
+ * @param {string} [options.capture] - 'automatic' (default) or 'manual' (preauth)
  * @param {string} [options.idempotencyKey] - UUID v4
  * @returns {Object} { id, redirectUrl, detailsUrl }
  */
@@ -270,6 +272,10 @@ async function chargeRecurrent(parentOrderId, options) {
             }]
         }
     };
+
+    if (options.capture) {
+        body.capture = options.capture;
+    }
 
     if (options.externalOrderId) {
         body.external_order_id = options.externalOrderId;
@@ -496,6 +502,58 @@ async function rejectPreauth(orderId, options = {}) {
 }
 
 // ──────────────────────────────────────────────────────
+// Refund
+// ──────────────────────────────────────────────────────
+
+/**
+ * Refund a completed payment (full or partial).
+ * Endpoint: POST /payment/refund/:order_id
+ *
+ * Full refund: omit amount. Partial refund: pass amount < total.
+ * Supported for card, Apple Pay, Google Pay payments.
+ * BOG authorization (bog_p2p) supports full refund only.
+ *
+ * @param {string} orderId - BOG order ID
+ * @param {Object} [options]
+ * @param {number} [options.amount] - Partial refund amount (omit for full refund)
+ * @param {string} [options.idempotencyKey] - UUID v4
+ * @returns {Object} { key, message, actionId }
+ */
+async function refundPayment(orderId, options = {}) {
+    const token = await getAccessToken();
+
+    const body = {};
+    if (options.amount !== undefined) body.amount = options.amount;
+
+    const headers = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+    };
+
+    if (options.idempotencyKey) {
+        headers['Idempotency-Key'] = options.idempotencyKey;
+    }
+
+    const response = await fetch(`${getApiUrl()}/payment/refund/${orderId}`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body)
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`BOG refund failed (${response.status}): ${errorText}`);
+    }
+
+    const data = await response.json();
+    return {
+        key: data.key,
+        message: data.message,
+        actionId: data.action_id
+    };
+}
+
+// ──────────────────────────────────────────────────────
 // Callback Signature Verification
 // ──────────────────────────────────────────────────────
 
@@ -531,5 +589,6 @@ module.exports = {
     deleteSavedCard,
     approvePreauth,
     rejectPreauth,
+    refundPayment,
     verifyCallbackSignature
 };

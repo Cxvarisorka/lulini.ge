@@ -14,6 +14,7 @@ const {
     rejectRidePayment,
     verifyRidePayment,
     linkPaymentToRide,
+    refundPayment,
     handleCallback,
     getPaymentStatus,
     handleRedirectSuccess,
@@ -36,6 +37,9 @@ router.post('/ride/approve/:paymentId', protect, approveRidePayment);
 router.post('/ride/reject/:paymentId', protect, rejectRidePayment);
 router.post('/ride/verify/:orderId', protect, verifyRidePayment);
 router.patch('/:paymentId/link-ride', protect, linkPaymentToRide);
+
+// Refund (authenticated)
+router.post('/:paymentId/refund', protect, refundPayment);
 
 // Payment status & history (authenticated)
 router.get('/history', protect, getPaymentHistory);

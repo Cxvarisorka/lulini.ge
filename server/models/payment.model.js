@@ -43,14 +43,15 @@ const paymentSchema = new mongoose.Schema({
     status: {
         type: String,
         enum: [
-            'created',      // Order created, awaiting payment
-            'processing',   // Payment in progress
-            'completed',    // Payment successful
-            'rejected',     // Payment declined
-            'refunded',     // Fully refunded
-            'blocked',      // Preauth: funds held on card
-            'captured',     // Preauth: funds captured (approved)
-            'cancelled'     // Preauth: hold released (rejected)
+            'created',              // Order created, awaiting payment
+            'processing',           // Payment in progress
+            'completed',            // Payment successful
+            'rejected',             // Payment declined
+            'refunded',             // Fully refunded
+            'refunded_partially',   // Partially refunded
+            'blocked',              // Preauth: funds held on card
+            'captured',             // Preauth: funds captured (approved)
+            'cancelled'             // Preauth: hold released (rejected)
         ],
         default: 'created'
     },
@@ -87,6 +88,14 @@ const paymentSchema = new mongoose.Schema({
         default: null
     },
     rejectReason: {
+        type: String,
+        default: null
+    },
+    refundAmount: {
+        type: Number,
+        default: null
+    },
+    refundReason: {
         type: String,
         default: null
     }
