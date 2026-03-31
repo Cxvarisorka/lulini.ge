@@ -222,15 +222,24 @@ const createRide = catchAsync(async (req, res, next) => {
         isScheduled: isScheduledRide
     });
 
-    // Link pre-paid card payment to this ride
-    if (paymentId && ['card', 'saved_card'].includes(paymentMethod || '')) {
+    // Link payment to this ride (preauth hold or completed payment)
+    if (paymentId && paymentMethod !== 'cash') {
         const Payment = require('../models/payment.model');
-        await Payment.updateOne(
-            { _id: paymentId, user: req.user.id, type: 'ride_payment', status: 'completed', ride: null },
-            { ride: ride._id }
+        const linked = await Payment.findOneAndUpdate(
+            {
+                _id: paymentId,
+                user: req.user.id,
+                type: { $in: ['ride_payment', 'ride_preauth'] },
+                status: { $in: ['completed', 'blocked'] },
+                ride: null
+            },
+            { ride: ride._id },
+            { new: true }
         );
-        ride.paymentStatus = 'completed';
-        await ride.save();
+        if (linked) {
+            ride.paymentStatus = linked.status === 'completed' ? 'completed' : 'held';
+            await ride.save();
+        }
     }
 
     // Populate user in-place (avoids re-fetching the ride from DB)
@@ -956,6 +965,34 @@ const completeRide = catchAsync(async (req, res, next) => {
         session.endSession();
     }
 
+    // Auto-capture preauthorized payment if one is linked to this ride
+    if (ride.paymentMethod !== 'cash') {
+        const Payment = require('../models/payment.model');
+        const bogService = require('../services/bog.service');
+        const preauthPayment = await Payment.findOne({
+            ride: ride._id,
+            type: 'ride_preauth',
+            captureMode: 'manual',
+            status: 'blocked'
+        });
+        if (preauthPayment) {
+            try {
+                await bogService.approvePreauth(preauthPayment.bogOrderId, {
+                    amount: finalFare,
+                    description: `Ride fare for ride ${ride._id}`,
+                    idempotencyKey: require('crypto').randomUUID()
+                });
+                preauthPayment.capturedAmount = finalFare;
+                preauthPayment.status = 'captured';
+                await preauthPayment.save();
+                ride.paymentStatus = 'completed';
+                await ride.save();
+            } catch (err) {
+                console.error(`[completeRide] Auto-capture preauth failed for ride ${ride._id}:`, err.message);
+            }
+        }
+    }
+
     // Expire any live ride-share documents for this ride — set TTL to endTime + 1 hour
     // so the MongoDB TTL index cleans them up automatically.
     const rideShareExpiry = new Date(ride.endTime.getTime() + 60 * 60 * 1000);
@@ -1227,6 +1264,30 @@ const cancelRide = catchAsync(async (req, res, next) => {
         throw err;
     } finally {
         session.endSession();
+    }
+
+    // Auto-release preauthorized payment if one is linked to this ride
+    if (cancelledRide.paymentMethod !== 'cash') {
+        const Payment = require('../models/payment.model');
+        const bogService = require('../services/bog.service');
+        const preauthPayment = await Payment.findOne({
+            ride: cancelledRide._id,
+            type: 'ride_preauth',
+            captureMode: 'manual',
+            status: 'blocked'
+        });
+        if (preauthPayment) {
+            try {
+                await bogService.rejectPreauth(preauthPayment.bogOrderId, {
+                    description: `Ride ${cancelledRide._id} cancelled by ${cancelledBy}`,
+                    idempotencyKey: require('crypto').randomUUID()
+                });
+                preauthPayment.status = 'cancelled';
+                await preauthPayment.save();
+            } catch (err) {
+                console.error(`[cancelRide] Auto-release preauth failed for ride ${cancelledRide._id}:`, err.message);
+            }
+        }
     }
 
     const populatedRide = await Ride.findById(cancelledRide._id)
@@ -1746,6 +1807,29 @@ const expireOldRides = async (io) => {
             }
         );
 
+        // Release preauthorized payments for expired rides
+        const Payment = require('../models/payment.model');
+        const bogService = require('../services/bog.service');
+        const rideIds = expiredRides.map(r => r._id);
+        const preauthPayments = await Payment.find({
+            ride: { $in: rideIds },
+            type: 'ride_preauth',
+            captureMode: 'manual',
+            status: 'blocked'
+        });
+        for (const payment of preauthPayments) {
+            try {
+                await bogService.rejectPreauth(payment.bogOrderId, {
+                    description: 'Ride request expired',
+                    idempotencyKey: require('crypto').randomUUID()
+                });
+                payment.status = 'cancelled';
+                await payment.save();
+            } catch (err) {
+                console.error(`[expireOldRides] Auto-release preauth failed for payment ${payment._id}:`, err.message);
+            }
+        }
+
         // Emit socket events and send pushes to offline users (uses presence system — no fetchSockets)
         for (const ride of expiredRides) {
             if (io) {
@@ -1822,6 +1906,29 @@ const expireWaitingRides = async (io) => {
                 { _id: { $in: driverIds }, status: 'busy' },
                 { $set: { status: 'online' } }
             );
+        }
+
+        // Release preauthorized payments for waiting-expired rides
+        const Payment = require('../models/payment.model');
+        const bogService = require('../services/bog.service');
+        const waitingRideIds = waitingExpiredRides.map(r => r._id);
+        const waitingPreauthPayments = await Payment.find({
+            ride: { $in: waitingRideIds },
+            type: 'ride_preauth',
+            captureMode: 'manual',
+            status: 'blocked'
+        });
+        for (const payment of waitingPreauthPayments) {
+            try {
+                await bogService.rejectPreauth(payment.bogOrderId, {
+                    description: 'Ride cancelled - waiting timeout',
+                    idempotencyKey: require('crypto').randomUUID()
+                });
+                payment.status = 'cancelled';
+                await payment.save();
+            } catch (err) {
+                console.error(`[expireWaitingRides] Auto-release preauth failed for payment ${payment._id}:`, err.message);
+            }
         }
 
         // Notify via socket + push (uses presence system — no fetchSockets)
