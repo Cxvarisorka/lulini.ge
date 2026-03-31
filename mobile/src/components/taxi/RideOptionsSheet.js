@@ -47,11 +47,8 @@ export default function RideOptionsSheet({
         routeDistance={routeDistance}
       />
 
-      {/* Cash payment indicator */}
-      <View style={styles.cashRow}>
-        <Ionicons name="cash-outline" size={18} color={colors.success} />
-        <Text style={styles.cashLabel}>{t('taxi.cash')}</Text>
-      </View>
+      {/* Payment method selector */}
+      <PaymentMethodSelector selected={paymentMethod} onPress={onPaymentPress} />
 
       {/* Schedule for later */}
       {onScheduleRide && (
@@ -114,12 +111,6 @@ const createStyles = (typography, colors) => StyleSheet.create({
     marginBottom: 5,
     marginTop: 8,
   },
-  cashRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 10,
-  },
   scheduleButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -136,10 +127,6 @@ const createStyles = (typography, colors) => StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     color: colors.primary,
-  },
-  cashLabel: {
-    ...typography.bodySmall,
-    color: colors.mutedForeground,
   },
   bottomRow: {
     flexDirection: 'row',

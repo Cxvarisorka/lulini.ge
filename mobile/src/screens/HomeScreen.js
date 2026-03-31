@@ -8,7 +8,6 @@ import {
   Image,
   Animated,
   Easing,
-  Alert,
   Linking,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -262,13 +261,7 @@ export default function HomeScreen({ navigation }) {
                 key={action.id}
                 style={styles.quickActionCard}
                 delay={200 + index * 50}
-                onPress={() => {
-                  if (action.id === 'payment') {
-                    Alert.alert(t('payment.comingSoon'), t('payment.comingSoonMessage'));
-                    return;
-                  }
-                  navigation.navigate(action.screen);
-                }}
+                onPress={() => navigation.navigate(action.screen)}
                 accessibilityLabel={action.label}
               >
                 <View style={styles.quickActionInner}>

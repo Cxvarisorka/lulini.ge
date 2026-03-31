@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   Image,
   ScrollView,
-  Alert,
   Share,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -42,7 +41,7 @@ export default function DrawerContent({ navigation }) {
         {
           icon: 'card',
           label: t('drawer.paymentSettings'),
-          onPress: () => Alert.alert(t('payment.comingSoon'), t('payment.comingSoonMessage')),
+          onPress: () => navigation.navigate('PaymentSettings'),
         },
       ],
     },

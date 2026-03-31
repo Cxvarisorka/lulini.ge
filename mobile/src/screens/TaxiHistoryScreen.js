@@ -492,7 +492,7 @@ export default function TaxiHistoryScreen({ navigation }) {
         <Ionicons name="chevron-forward" size={16} color={colors.primary} />
       </View>
     </TouchableOpacity>
-  ), [navigation, t, styles]);
+  ), [navigation, t, styles, colors, getStatusColor]);
 
   const renderEmptyList = () => {
     if (hasActiveFilters) {

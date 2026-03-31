@@ -8,6 +8,7 @@ import { useTheme } from '../../context/ThemeContext';
 const PAYMENT_ICONS = {
   cash: 'cash-outline',
   card: 'card-outline',
+  saved_card: 'card',
   apple_pay: 'logo-apple',
   google_pay: 'logo-google',
 };
@@ -22,6 +23,7 @@ export default function PaymentMethodSelector({ selected, onPress }) {
     switch (selected) {
       case 'apple_pay': return t('taxi.applePay');
       case 'google_pay': return t('taxi.googlePay');
+      case 'saved_card': return t('taxi.card');
       case 'card': return t('taxi.card');
       default: return t('taxi.cash');
     }

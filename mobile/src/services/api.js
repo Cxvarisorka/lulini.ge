@@ -244,8 +244,9 @@ export const paymentAPI = {
     api.post('/payments/ride/charge', { cardId, amount, rideId, lang }),
 
   // One-time payment (card / Apple Pay / Google Pay) without saved card
-  payRide: (amount, rideId, paymentMethods, lang) =>
-    api.post('/payments/ride/pay', { amount, rideId, paymentMethods, lang }),
+  // capture: 'manual' for preauth (hold funds), 'automatic' for immediate charge
+  payRide: (amount, rideId, paymentMethods, lang, capture) =>
+    api.post('/payments/ride/pay', { amount, rideId, paymentMethods, lang, capture }),
 
   // Preauthorize ride payment (hold funds on saved card)
   preauthRide: (cardId, amount, lang) =>
@@ -264,6 +265,10 @@ export const paymentAPI = {
 
   getPaymentStatus: (paymentId) =>
     api.get(`/payments/${paymentId}/status`),
+
+  // Refund a completed payment (full or partial)
+  refundPayment: (paymentId, amount, reason) =>
+    api.post(`/payments/${paymentId}/refund`, { amount, reason }),
 
   getPaymentHistory: (page = 1, limit = 20) =>
     api.get('/payments/history', { params: { page, limit } }),
