@@ -23,6 +23,14 @@ const CSRF_EXEMPT_PATHS = [
     '/api/auth/google/callback',   // OAuth callback
     '/api/auth/google/mobile/callback',
     '/api/auth/failure',
+    '/api/auth/apple/token',       // Mobile Apple Sign-In (no cookie auth)
+    '/api/auth/google/token',      // Mobile Google Sign-In (no cookie auth)
+    '/api/auth/phone/send-otp',    // Phone OTP send (unauthenticated)
+    '/api/auth/phone/verify-otp',  // Phone OTP verify (unauthenticated)
+    '/api/auth/login',             // Traditional login (unauthenticated)
+    '/api/auth/register',          // Registration (unauthenticated)
+    '/api/auth/email/send-verification',  // Email verification for registration
+    '/api/auth/email/verify-registration', // Email verification for registration
 ];
 
 const allowedOrigins = process.env.NODE_ENV === 'production'
