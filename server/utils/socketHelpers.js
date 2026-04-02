@@ -4,6 +4,10 @@
 const pushService = require('../services/pushNotification.service');
 const { isUserOnline, isUserOnlineAsync } = require('../socket/presence');
 
+// Warn once at startup if running multi-instance without Redis adapter
+// (presence checks will be local-only, causing phantom "offline" results)
+let _clusterWarned = false;
+
 /**
  * Send push notification only if the user has NO active socket connection.
  * Uses the presence system (O(1) local + async Redis fallback) instead of
@@ -20,7 +24,9 @@ async function pushIfOffline(io, userId, titleKey, bodyKey, data = {}, params = 
         // Slow path: cross-process Redis check (covers multi-process deployments)
         if (await isUserOnlineAsync(uid)) return;
     } catch {
-        // If presence check fails, fall through and send the push as a safety net
+        // If presence check fails and presence is unreliable, don't spam push
+        if (!process.env.REDIS_URL && process.env.PM2_INSTANCES > 1) return;
+        // Otherwise fall through and send the push as a safety net
     }
     return pushService.sendToUser(userId, titleKey, bodyKey, data, params);
 }
@@ -47,6 +53,15 @@ async function pushIfOffline(io, userId, titleKey, bodyKey, data = {}, params = 
 async function emitCritical(io, room, event, data, pushOpts) {
     if (!io) return;
 
+    // Guard: if no Redis adapter and we're in a cluster, presence is unreliable.
+    // Skip push to avoid duplicates — the socket emit may still miss if user is
+    // on another process, but that's better than guaranteed false push spam.
+    if (!_clusterWarned && !process.env.REDIS_URL && process.env.PM2_INSTANCES > 1) {
+        console.warn('[socketHelpers] WARNING: Multi-instance without REDIS_URL — push fallback disabled (presence unreliable)');
+        _clusterWarned = true;
+    }
+    const presenceReliable = !!process.env.REDIS_URL || !(process.env.PM2_INSTANCES > 1);
+
     // Check presence BEFORE emitting so we know the user's online state at decision time.
     // This avoids the race where a user disconnects between emit and presence check
     // (causing a duplicate push) or connects after check but before emit (missing both).
@@ -67,7 +82,7 @@ async function emitCritical(io, room, event, data, pushOpts) {
 
     io.to(room).emit(event, data);
 
-    if (shouldPush) {
+    if (shouldPush && presenceReliable) {
         pushService.sendToUser(
             pushOpts.userId,
             pushOpts.titleKey,

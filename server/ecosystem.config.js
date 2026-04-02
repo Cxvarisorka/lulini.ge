@@ -3,7 +3,7 @@ module.exports = {
         {
             name: 'lulini-api',
             script: 'app.js',
-            instances: process.env.PM2_INSTANCES || 2,
+            instances: process.env.PM2_INSTANCES || 1,
             exec_mode: 'cluster',
             env: {
                 NODE_ENV: 'production',
