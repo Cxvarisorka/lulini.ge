@@ -3,6 +3,7 @@
 // Events are published to the queue and consumed by the rideEventWorker.
 
 const { Queue } = require('bullmq');
+const { getBullMQConnection } = require('../configs/redis.config');
 
 let rideEventQueue = null;
 
@@ -11,7 +12,7 @@ function getRideEventQueue() {
     if (!process.env.REDIS_URL) return null;
 
     rideEventQueue = new Queue('ride-events', {
-        connection: { url: process.env.REDIS_URL },
+        connection: getBullMQConnection(),
         defaultJobOptions: {
             attempts: 3,
             backoff: { type: 'exponential', delay: 1000 },

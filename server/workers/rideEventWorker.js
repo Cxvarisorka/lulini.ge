@@ -10,6 +10,9 @@ require('dotenv').config();
 const { Worker } = require('bullmq');
 const mongoose = require('mongoose');
 const connectDB = require('../configs/db.config');
+const { getBullMQConnection } = require('../configs/redis.config');
+
+let _subClient = null; // Track for graceful shutdown
 
 async function startRideEventWorker() {
     await connectDB();
@@ -24,9 +27,9 @@ async function startRideEventWorker() {
         try {
             io = new Server();
             const pubClient = await getRedisClient();
-            const subClient = pubClient.duplicate();
-            await subClient.connect();
-            io.adapter(createAdapter(pubClient, subClient));
+            _subClient = pubClient.duplicate();
+            await _subClient.connect();
+            io.adapter(createAdapter(pubClient, _subClient));
             console.log('RideEventWorker: Socket.io Redis adapter enabled');
         } catch (err) {
             console.error('RideEventWorker: Redis adapter failed:', err.message);
@@ -83,7 +86,7 @@ async function startRideEventWorker() {
         }
 
     }, {
-        connection: { url: process.env.REDIS_URL },
+        connection: getBullMQConnection(),
         concurrency: 10,
     });
 
@@ -114,6 +117,7 @@ async function gracefulShutdown(signal) {
             await _workerInstance.close();
             console.log('RideEventWorker: Worker closed');
         }
+        if (_subClient) await _subClient.quit().catch(() => {});
     } catch (err) {
         console.error('RideEventWorker: Error closing worker:', err.message);
     }

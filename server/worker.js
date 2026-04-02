@@ -10,6 +10,8 @@ require('dotenv').config();
 const mongoose = require('mongoose');
 const connectDB = require('./configs/db.config');
 
+let _subClient = null; // Track for graceful shutdown
+
 async function startWorker() {
     await connectDB();
 
@@ -23,9 +25,9 @@ async function startWorker() {
         try {
             io = new Server();
             const pubClient = await getRedisClient();
-            const subClient = pubClient.duplicate();
-            await subClient.connect();
-            io.adapter(createAdapter(pubClient, subClient));
+            _subClient = pubClient.duplicate();
+            await _subClient.connect();
+            io.adapter(createAdapter(pubClient, _subClient));
             console.log('Worker: Socket.io Redis adapter enabled');
         } catch (err) {
             console.error('Worker: Redis adapter failed, socket events will not propagate:', err.message);
@@ -67,14 +69,16 @@ async function startWorker() {
 }
 
 // Graceful shutdown
-function gracefulShutdown(signal) {
+async function gracefulShutdown(signal) {
     console.log(`\nWorker: ${signal} received. Shutting down...`);
-    mongoose.connection.close().then(() => {
-        console.log('Worker: MongoDB connection closed');
+    try {
+        if (_subClient) await _subClient.quit().catch(() => {});
+        await mongoose.connection.close();
+        console.log('Worker: Connections closed');
         process.exit(0);
-    }).catch(() => {
+    } catch {
         process.exit(1);
-    });
+    }
 
     setTimeout(() => {
         console.error('Worker: Graceful shutdown timed out, forcing exit');
