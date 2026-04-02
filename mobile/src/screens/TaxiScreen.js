@@ -118,6 +118,11 @@ const DEFAULT_LOCATION = {
   longitude: 44.8015,
 };
 
+// Module-level last region — survives TaxiScreen unmount/remount.
+// When user navigates Home → TaxiScreen, the map opens exactly where
+// they left off instead of flashing from Tbilisi center to their location.
+let _lastMapRegion = null;
+
 // Timeout duration for ride request (30 seconds)
 const RIDE_REQUEST_TIMEOUT = 30000;
 
@@ -1151,12 +1156,13 @@ export default function TaxiScreen({ navigation }) {
       // Update persistent notification
       showRideNotification('in_progress', extractDriverInfo(ride), ride.quote?.duration || null);
 
-      // Clear driver-to-pickup route (no longer relevant).
-      // Keep driverLocation so the car marker stays visible during the ride.
-      setDriverRoute(null);
+      // Don't clear driverRoute — keep the old driver→pickup polyline visible
+      // until the new driver→destination route arrives. This eliminates the
+      // visual gap where no polyline is shown during the transition.
 
       const savedCoords = savedDestinationCoordsRef.current;
       const loc = locationRef.current;
+      const dLoc = driverLocationRef.current;
 
       // Restore stops from server ride data (authoritative)
       const rideStops = ride.stops?.length > 0
@@ -1175,12 +1181,15 @@ export default function TaxiScreen({ navigation }) {
           .filter(s => s.coords)
           .map(s => s.coords);
 
-        // Fetch full route for distance calculation only — driverRoute
-        // useEffect handles the live polyline during IN_PROGRESS.
+        // Immediately fetch driver→destination route to replace the old
+        // driver→pickup polyline with zero visible gap.
+        if (dLoc) {
+          fetchRouteOSRM(dLoc, savedCoords, waypoints).then(setDriverRoute);
+        }
+
+        // Also fetch full route for distance calculation
         if (loc) {
           fetchRouteOSRM(loc, savedCoords, waypoints).then(coords => {
-            // Calculate total distance from polyline (don't set routePolyline —
-            // driverRoute takes priority during IN_PROGRESS via render logic)
             let totalDist = 0;
             for (let i = 1; i < coords.length; i++) {
               totalDist += haversineKm(
@@ -2251,6 +2260,9 @@ export default function TaxiScreen({ navigation }) {
   // Handle map press for location selection (routed to the correct input)
   // Sets pin immediately, then reverse geocodes address in background
   const handleRegionChangeComplete = useCallback((region) => {
+    // Persist region so remount starts where the user left off (no flash)
+    _lastMapRegion = region;
+
     // Only track zoom when DriverCluster is rendered (RIDE_OPTIONS / SEARCHING)
     if (!driversVisibleRef.current) return;
     if (zoomDebounceRef.current) clearTimeout(zoomDebounceRef.current);
@@ -2412,6 +2424,72 @@ export default function TaxiScreen({ navigation }) {
     stops, lastDestination,
   ]);
 
+  // Memoized map children — markers + polylines only re-render when map-relevant
+  // state changes. Unrelated state (modals, sheets, loading, chat) won't cause
+  // native marker/polyline reconstruction.
+  const mapChildren = useMemo(() => {
+    const isSearchPhase = bookingStep === BOOKING_STEPS.LOCATION_SEARCH || bookingStep === BOOKING_STEPS.RIDE_OPTIONS;
+    const routeStyle = isDark ? ROUTE_STYLE_DARK : ROUTE_STYLE;
+
+    return (
+      <>
+        {/* Custom pickup pin — draggable during search phase */}
+        {customPickup && isSearchPhase && (
+          <DraggablePickupMarker
+            coordinate={customPickup}
+            onDragEnd={handlePickupDragEnd}
+          />
+        )}
+
+        {/* Static pickup pin — during active ride steps (not draggable) */}
+        {customPickup && !isSearchPhase && (
+          <Marker
+            coordinate={customPickup}
+            image={markerImages.pickup}
+            anchor={ANCHOR_BOTTOM}
+            tracksViewChanges={false}
+            zIndex={6}
+          />
+        )}
+
+        {/* Destination marker - red pin with flag */}
+        {destinationCoords && <DestinationMarker coordinate={destinationCoords} />}
+
+        {/* Stop markers */}
+        {stops.map((stop, index) => stop.coords && (
+          <StopMarker
+            key={`stop-${index}`}
+            coordinate={stop.coords}
+            index={index}
+          />
+        ))}
+
+        {/* Driver marker - animated car with rotation */}
+        {driverLocation && (
+          <AnimatedCarMarker coordinate={driverLocation} isAssigned={true} />
+        )}
+
+        {/* Nearby drivers while searching - clustered when zoomed out */}
+        {nearbyDrivers.length > 0 && (
+          <DriverCluster drivers={nearbyDrivers} zoomLevel={mapZoomLevel} />
+        )}
+
+        {/* Route polyline — only ONE line on screen at a time.
+            driverRoute (live) takes priority over routePolyline (static).
+            PolylineWrapper auto-simplifies high-density OSRM routes. */}
+        {driverRoute && driverRoute.length > 1 ? (
+          <Polyline id="driver-route" coordinates={driverRoute} {...routeStyle} />
+        ) : routePolyline && routePolyline.length > 1 ? (
+          <Polyline id="route-main" coordinates={routePolyline} {...routeStyle} />
+        ) : null}
+      </>
+    );
+  }, [
+    bookingStep, isDark, customPickup, destinationCoords, stops,
+    driverLocation, nearbyDrivers, mapZoomLevel, driverRoute, routePolyline,
+    handlePickupDragEnd,
+  ]);
+
   // Memoize showsUserLocation — avoids native map reconfiguration on unrelated re-renders.
   // Only actually changes when entering/leaving IN_PROGRESS.
   const showsUserLocation = useMemo(
@@ -2419,13 +2497,17 @@ export default function TaxiScreen({ navigation }) {
     [bookingStep]
   );
 
-  // Stable ref — initialRegion is only read on mount, must not change per-render
-  const initialRegion = useRef({
-    latitude: DEFAULT_LOCATION.latitude,
-    longitude: DEFAULT_LOCATION.longitude,
-    latitudeDelta: 0.02,
-    longitudeDelta: 0.02,
-  }).current;
+  // Stable ref — initialRegion is only read on mount, must not change per-render.
+  // Uses _lastMapRegion (module-level) so remount starts where user left off,
+  // eliminating the flash from Tbilisi center → user location.
+  const initialRegion = useRef(
+    _lastMapRegion || {
+      latitude: DEFAULT_LOCATION.latitude,
+      longitude: DEFAULT_LOCATION.longitude,
+      latitudeDelta: 0.02,
+      longitudeDelta: 0.02,
+    }
+  ).current;
 
   return (
     <View style={styles.container}>
@@ -2489,56 +2571,9 @@ export default function TaxiScreen({ navigation }) {
           rotateEnabled={false}
           onRegionChangeComplete={handleRegionChangeComplete}
         >
-          {/* User location — native blue dot (hidden during IN_PROGRESS, only car visible) */}
-
-          {/* Custom pickup pin — only when user chose a different starting location */}
-          {customPickup && (bookingStep === BOOKING_STEPS.LOCATION_SEARCH || bookingStep === BOOKING_STEPS.RIDE_OPTIONS) && (
-            <DraggablePickupMarker
-              coordinate={customPickup}
-              onDragEnd={handlePickupDragEnd}
-            />
-          )}
-
-          {/* Static pickup pin — during active ride steps (not draggable) */}
-          {customPickup && bookingStep !== BOOKING_STEPS.LOCATION_SEARCH && bookingStep !== BOOKING_STEPS.RIDE_OPTIONS && (
-            <Marker
-              coordinate={customPickup}
-              image={markerImages.pickup}
-              anchor={ANCHOR_BOTTOM}
-              tracksViewChanges={false}
-              zIndex={6}
-            />
-          )}
-
-          {/* Destination marker - red pin with flag */}
-          {destinationCoords && <DestinationMarker coordinate={destinationCoords} />}
-
-          {/* Stop markers - custom orange pins (not pinColor, which Apple Maps hides on zoom out) */}
-          {stops.map((stop, index) => stop.coords && (
-            <StopMarker
-              key={`stop-${index}`}
-              coordinate={stop.coords}
-              index={index}
-            />
-          ))}
-
-          {/* Driver marker - animated car with rotation */}
-          {driverLocation && (
-            <AnimatedCarMarker coordinate={driverLocation} isAssigned={true} />
-          )}
-
-          {/* Nearby drivers while searching - clustered when zoomed out */}
-          {nearbyDrivers.length > 0 && (
-            <DriverCluster drivers={nearbyDrivers} zoomLevel={mapZoomLevel} />
-          )}
-
-          {/* Route polyline — only ONE line on screen at a time.
-              driverRoute (live) takes priority over routePolyline (static). */}
-          {driverRoute && driverRoute.length > 1 ? (
-            <Polyline id="driver-route" coordinates={driverRoute} {...(isDark ? ROUTE_STYLE_DARK : ROUTE_STYLE)} />
-          ) : routePolyline && routePolyline.length > 1 ? (
-            <Polyline id="route-main" coordinates={routePolyline} {...(isDark ? ROUTE_STYLE_DARK : ROUTE_STYLE)} />
-          ) : null}
+          {/* Memoized map children — only re-creates when map-relevant state changes.
+              Prevents marker/polyline re-renders from unrelated state (modals, sheets, loading). */}
+          {mapChildren}
         </MapView>
 
         {/* Loading Overlay */}
