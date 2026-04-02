@@ -107,7 +107,6 @@ function AdminDriversContent() {
       });
       if (response.success) {
         setPendingDrivers((prev) => prev.filter((d) => d._id !== driverId));
-        setDrivers((prev) => [response.data.driver, ...prev]);
         setShowApproveModal(null);
         alert('Driver approved successfully!');
       }
@@ -287,6 +286,8 @@ function AdminDriversContent() {
         return 'bg-green-100 text-green-800';
       case 'busy':
         return 'bg-yellow-100 text-yellow-800';
+      case 'resting':
+        return 'bg-blue-100 text-blue-800';
       case 'offline':
         return 'bg-gray-100 text-gray-800';
       default:
@@ -577,7 +578,7 @@ function AdminDriversContent() {
 
       {/* Filter Tabs */}
       <div className="flex gap-2 border-b">
-        {['all', 'online', 'offline', 'busy'].map((status) => (
+        {['all', 'online', 'offline', 'busy', 'resting'].map((status) => (
           <button
             key={status}
             onClick={() => setFilterStatus(status)}

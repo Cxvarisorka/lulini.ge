@@ -8,7 +8,7 @@ const driverActivitySchema = new mongoose.Schema({
     },
     type: {
         type: String,
-        enum: ['online', 'offline'],
+        enum: ['online', 'offline', 'resting', 'rest_end'],
         required: true
     },
     timestamp: {

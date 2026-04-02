@@ -63,8 +63,20 @@ const driverSchema = new mongoose.Schema({
     },
     status: {
         type: String,
-        enum: ['online', 'offline', 'busy'],
+        enum: ['online', 'offline', 'busy', 'resting'],
         default: 'offline'
+    },
+    restingStartedAt: {
+        type: Date,
+        default: null
+    },
+    dailyRestingSeconds: {
+        type: Number,
+        default: 0
+    },
+    dailyRestingDate: {
+        type: String,
+        default: null
     },
     location: {
         type: locationSchema,

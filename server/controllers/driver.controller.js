@@ -289,13 +289,30 @@ const getDriverProfile = catchAsync(async (req, res, next) => {
     });
 });
 
-// @desc    Update driver status (online/offline/busy)
+// Helper: get today's date string (YYYY-MM-DD) for daily resting reset
+function getTodayDateString() {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
+
+// Helper: get driver's daily resting seconds, resetting if date changed
+function getDailyRestingSeconds(driver) {
+    const today = getTodayDateString();
+    if (driver.dailyRestingDate !== today) {
+        return 0;
+    }
+    return driver.dailyRestingSeconds || 0;
+}
+
+const MAX_DAILY_RESTING_SECONDS = 3 * 60 * 60; // 3 hours
+
+// @desc    Update driver status (online/offline/busy/resting)
 // @route   PATCH /api/drivers/status
 // @access  Private/Driver
 const updateDriverStatus = catchAsync(async (req, res, next) => {
     const { status } = req.body;
 
-    if (!['online', 'offline', 'busy'].includes(status)) {
+    if (!['online', 'offline', 'busy', 'resting'].includes(status)) {
         return next(new AppError('Invalid status', 400));
     }
 
@@ -304,18 +321,59 @@ const updateDriverStatus = catchAsync(async (req, res, next) => {
         return next(new AppError('Driver profile not found', 404));
     }
 
-    // Prevent going offline while driver has active rides
-    if (status === 'offline') {
+    // Prevent going offline/resting while driver has active rides
+    if (status === 'offline' || status === 'resting') {
         const activeRide = await Ride.findOne({
             driver: driver._id,
             status: { $in: ['accepted', 'driver_arrived', 'in_progress'] }
         });
         if (activeRide) {
-            return next(new AppError('Cannot go offline while you have an active ride', 400));
+            return next(new AppError(`Cannot go ${status} while you have an active ride`, 400));
+        }
+    }
+
+    // Enforce 3-hour daily resting limit
+    if (status === 'resting') {
+        const usedSeconds = getDailyRestingSeconds(driver);
+        if (usedSeconds >= MAX_DAILY_RESTING_SECONDS) {
+            return next(new AppError('Daily resting limit reached (3 hours maximum)', 400));
         }
     }
 
     const previousStatus = driver.status;
+
+    // Finalize previous resting session: accumulate elapsed rest time
+    if (previousStatus === 'resting' && status !== 'resting' && driver.restingStartedAt) {
+        const elapsedSeconds = Math.floor((Date.now() - driver.restingStartedAt.getTime()) / 1000);
+        const today = getTodayDateString();
+        if (driver.dailyRestingDate === today) {
+            driver.dailyRestingSeconds = (driver.dailyRestingSeconds || 0) + elapsedSeconds;
+        } else {
+            // New day — start fresh with only this session's time
+            driver.dailyRestingDate = today;
+            driver.dailyRestingSeconds = elapsedSeconds;
+        }
+        driver.restingStartedAt = null;
+
+        DriverActivity.create({ driver: driver._id, type: 'rest_end' }).catch(err =>
+            console.error('Failed to log driver rest_end activity:', err.message)
+        );
+    }
+
+    // Start new resting session
+    if (status === 'resting') {
+        driver.restingStartedAt = new Date();
+        const today = getTodayDateString();
+        if (driver.dailyRestingDate !== today) {
+            driver.dailyRestingDate = today;
+            driver.dailyRestingSeconds = 0;
+        }
+
+        DriverActivity.create({ driver: driver._id, type: 'resting' }).catch(err =>
+            console.error('Failed to log driver resting activity:', err.message)
+        );
+    }
+
     driver.status = status;
     await driver.save();
 
@@ -357,8 +415,8 @@ const updateDriverStatus = catchAsync(async (req, res, next) => {
                     }
                 }
             } catch { /* ignore fetch errors */ }
-        } else if (status === 'offline') {
-            // Remove from broadcast rooms when going offline
+        } else if (status === 'offline' || status === 'resting') {
+            // Remove from broadcast rooms when going offline or resting
             const leaveRooms = ['drivers:all'];
             if (typeRoom) leaveRooms.push(typeRoom);
             io.in(userRoom).socketsLeave(leaveRooms);
@@ -463,7 +521,7 @@ const updateDriverLocation = catchAsync(async (req, res, next) => {
 // @access  Private/Driver
 const getDriverStats = catchAsync(async (req, res, next) => {
     const driver = await Driver.findOne({ user: req.user.id })
-        .select('_id totalEarnings totalTrips rating totalReviews status').lean();
+        .select('_id totalEarnings totalTrips rating totalReviews status restingStartedAt dailyRestingSeconds dailyRestingDate').lean();
     if (!driver) {
         return next(new AppError('Driver profile not found', 404));
     }
@@ -498,6 +556,14 @@ const getDriverStats = catchAsync(async (req, res, next) => {
 
     const s = statsResult[0] || {};
 
+    // Calculate daily resting time (accumulated + current session if resting)
+    const today = getTodayDateString();
+    let dailyRestingSeconds = (driver.dailyRestingDate === today) ? (driver.dailyRestingSeconds || 0) : 0;
+    if (driver.status === 'resting' && driver.restingStartedAt) {
+        dailyRestingSeconds += Math.floor((Date.now() - new Date(driver.restingStartedAt).getTime()) / 1000);
+    }
+    const dailyRestingRemainingSeconds = Math.max(0, MAX_DAILY_RESTING_SECONDS - dailyRestingSeconds);
+
     res.json({
         success: true,
         data: {
@@ -510,7 +576,13 @@ const getDriverStats = catchAsync(async (req, res, next) => {
                 rating: driver.rating,
                 totalReviews: driver.totalReviews || 0,
                 pendingRides,
-                status: driver.status
+                status: driver.status,
+                resting: {
+                    dailyUsedSeconds: dailyRestingSeconds,
+                    dailyRemainingSeconds: dailyRestingRemainingSeconds,
+                    maxDailySeconds: MAX_DAILY_RESTING_SECONDS,
+                    isResting: driver.status === 'resting'
+                }
             }
         }
     });
