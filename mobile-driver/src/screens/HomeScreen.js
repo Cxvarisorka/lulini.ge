@@ -53,6 +53,8 @@ export default function HomeScreen({ navigation }) {
   const insets = useSafeAreaInsets();
   const mapRef = useRef(null);
   const hasFitted = useRef(false);
+  const mapReadyRef = useRef(false);
+  const pendingFitRef = useRef(null); // { coords, opts } queued before map ready
   const typography = useTypography();
 
   const { user } = useAuth();
@@ -202,10 +204,13 @@ export default function HomeScreen({ navigation }) {
     }
 
     if (coords.length >= 2) {
+      const fitOpts = { edgePadding: { top: 80, right: 40, bottom: 40, left: 40 } };
+      if (!mapReadyRef.current) {
+        pendingFitRef.current = { coords, opts: fitOpts };
+        return;
+      }
       hasFitted.current = true;
-      safeFitToCoordinates(mapRef, coords, {
-        edgePadding: { top: 80, right: 40, bottom: 40, left: 40 },
-      });
+      safeFitToCoordinates(mapRef, coords, fitOpts);
     }
   }, [activeRide?._id, activeRide?.status, location, isBuiltinMap]);
 
@@ -510,7 +515,7 @@ export default function HomeScreen({ navigation }) {
   // Track what we animated to — re-animate if we first got DEFAULT_LOCATION then real GPS
   const animatedToLocationRef = useRef(null); // null | 'default' | 'real'
   useEffect(() => {
-    if (!location || !mapRef.current) return;
+    if (!location || !mapRef.current || !mapReadyRef.current) return;
 
     const isDefault =
       location.latitude === 41.7151 && location.longitude === 44.8271;
@@ -575,6 +580,26 @@ export default function HomeScreen({ navigation }) {
         style={StyleSheet.absoluteFill}
         customMapStyle={mapStyle}
         initialRegion={initialMapRegion}
+        onMapReady={() => {
+          mapReadyRef.current = true;
+          // Flush queued ride fit that arrived before map was ready
+          if (pendingFitRef.current) {
+            const { coords, opts } = pendingFitRef.current;
+            pendingFitRef.current = null;
+            hasFitted.current = true;
+            safeFitToCoordinates(mapRef, coords, opts);
+          } else if (location && !animatedToLocationRef.current) {
+            // No pending fit — center on driver location
+            const isDefault = location.latitude === 41.7151 && location.longitude === 44.8271;
+            animatedToLocationRef.current = isDefault ? 'default' : 'real';
+            safeAnimateToRegion(mapRef, {
+              latitude: location.latitude,
+              longitude: location.longitude,
+              latitudeDelta: 0.01,
+              longitudeDelta: 0.01,
+            }, 600);
+          }
+        }}
         showsUserLocation={false}
         showsMyLocationButton={false}
         showsCompass={false}

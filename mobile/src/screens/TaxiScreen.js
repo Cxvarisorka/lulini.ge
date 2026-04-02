@@ -256,6 +256,11 @@ export default function TaxiScreen({ navigation }) {
   const [totalDistance, setTotalDistance] = useState(null); // Total route KM (pickup → stops → destination)
   const routeDistanceRef = useRef(null); // Persists route distance across closures
 
+  // Map readiness gate — native map calls (fitToCoordinates, animateToRegion)
+  // silently fail when issued before the native map is initialized.
+  const mapReadyRef = useRef(false);
+  const pendingFitRef = useRef(null); // { coords, opts } queued before map ready
+
   // Refs for values used inside socket handlers to avoid re-registering listeners
   const locationRef = useRef(null);
   const currentRideRef = useRef(null);
@@ -706,7 +711,7 @@ export default function TaxiScreen({ navigation }) {
   // Center map on user location immediately when first obtained
   const didInitialCenter = useRef(false);
   useEffect(() => {
-    if (location && mapRef.current && !didInitialCenter.current) {
+    if (location && mapRef.current && !didInitialCenter.current && mapReadyRef.current) {
       didInitialCenter.current = true;
       safeAnimate(mapRef,{
         latitude: location.latitude,
@@ -874,15 +879,20 @@ export default function TaxiScreen({ navigation }) {
 
     // Only auto-fit once when driver is first found, let user pan freely after
     if (didFitToDriverRef.current) return;
-    didFitToDriverRef.current = true;
 
     const loc = locationRef.current;
     if (!loc) return;
 
-    safeFit(mapRef, [driverLocation, loc], {
-      edgePadding: EDGE_PAD_DRIVER,
-      animated: true,
-    });
+    const fitData = { coords: [driverLocation, loc], opts: { edgePadding: EDGE_PAD_DRIVER, animated: true } };
+
+    if (!mapReadyRef.current) {
+      // Map not ready yet — queue for onMapReady
+      pendingFitRef.current = fitData;
+      return;
+    }
+
+    didFitToDriverRef.current = true;
+    safeFit(mapRef, fitData.coords, fitData.opts);
   }, [driverLocation, bookingStep]);
 
   // Reset fit flag when booking state changes (new ride = new fit)
@@ -2451,6 +2461,25 @@ export default function TaxiScreen({ navigation }) {
           style={styles.map}
           customMapStyle={isDark ? mapStyleDark : mapStyle}
           initialRegion={initialRegion}
+          onMapReady={() => {
+            mapReadyRef.current = true;
+            // Flush queued fit (driver+pickup) that arrived before map was ready
+            if (pendingFitRef.current) {
+              const { coords, opts } = pendingFitRef.current;
+              pendingFitRef.current = null;
+              didFitToDriverRef.current = true;
+              safeFit(mapRef, coords, opts);
+            } else if (!didInitialCenter.current && locationRef.current) {
+              // No pending fit — center on user location
+              didInitialCenter.current = true;
+              safeAnimate(mapRef, {
+                latitude: locationRef.current.latitude,
+                longitude: locationRef.current.longitude,
+                latitudeDelta: 0.015,
+                longitudeDelta: 0.015,
+              }, 500);
+            }
+          }}
           onPress={isSelectingOnMap != null ? handleMapPress : undefined}
           showsUserLocation={showsUserLocation}
           showsMyLocationButton={false}
