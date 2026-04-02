@@ -28,13 +28,16 @@ const registerToken = catchAsync(async (req, res, next) => {
         updateFields.preferredLanguage = language;
     }
 
-    // Step 1: Remove token from this user + all other users in parallel
-    // (different documents, no conflict)
+    const appName = app || 'passenger';
+
+    // Step 1: Remove this exact token from all users + remove stale tokens
+    // for the same app+platform on this user (a device can only have one
+    // valid Expo push token per app, so older tokens are unreachable).
     await Promise.all([
         User.updateOne(
             { _id: req.user.id },
             {
-                $pull: { deviceTokens: { token } },
+                $pull: { deviceTokens: { $or: [{ token }, { app: appName, platform }] } },
                 ...Object.keys(updateFields).length > 0 ? { $set: updateFields } : {}
             }
         ),
@@ -47,7 +50,7 @@ const registerToken = catchAsync(async (req, res, next) => {
     // Step 2: Add new token (must wait for $pull to complete on same doc)
     await User.updateOne(
         { _id: req.user.id },
-        { $push: { deviceTokens: { token, platform, app: app || 'passenger' } } }
+        { $push: { deviceTokens: { token, platform, app: appName } } }
     );
 
     res.status(200).json({
