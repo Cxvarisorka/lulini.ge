@@ -557,8 +557,8 @@ const getDriverStats = catchAsync(async (req, res, next) => {
     const s = statsResult[0] || {};
 
     // Calculate daily resting time (accumulated + current session if resting)
-    const today = getTodayDateString();
-    let dailyRestingSeconds = (driver.dailyRestingDate === today) ? (driver.dailyRestingSeconds || 0) : 0;
+    const todayDateStr = getTodayDateString();
+    let dailyRestingSeconds = (driver.dailyRestingDate === todayDateStr) ? (driver.dailyRestingSeconds || 0) : 0;
     if (driver.status === 'resting' && driver.restingStartedAt) {
         dailyRestingSeconds += Math.floor((Date.now() - new Date(driver.restingStartedAt).getTime()) / 1000);
     }
