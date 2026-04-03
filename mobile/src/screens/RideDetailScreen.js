@@ -378,6 +378,7 @@ export default function RideDetailScreen({ route, navigation }) {
               label={t('history.started')}
               value={formatDate(ride.startTime)}
               styles={styles}
+              colors={colors}
             />
           )}
           {ride.arrivalTime && (
@@ -386,6 +387,7 @@ export default function RideDetailScreen({ route, navigation }) {
               label={t('history.driverArrived')}
               value={formatDate(ride.arrivalTime)}
               styles={styles}
+              colors={colors}
             />
           )}
           {ride.endTime && (
@@ -394,6 +396,7 @@ export default function RideDetailScreen({ route, navigation }) {
               label={t('history.ended')}
               value={formatDate(ride.endTime)}
               styles={styles}
+              colors={colors}
             />
           )}
         </View>
