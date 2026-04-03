@@ -244,6 +244,7 @@ export default function TaxiScreen({ navigation }) {
   const [paymentModalMode, setPaymentModalMode] = useState('select');
   const [selectedPaymentId, setSelectedPaymentId] = useState(null);
   const [selectedCardId, setSelectedCardId] = useState(null);
+  const [selectedCardLast4, setSelectedCardLast4] = useState(null);
   const timeoutTimerRef = useRef(null);
   const progressAnim = useRef(new Animated.Value(0)).current;
   const progress = progressAnim;
@@ -1920,15 +1921,24 @@ export default function TaxiScreen({ navigation }) {
     }
   };
 
-  const handlePaymentMethodSelect = (method, cardId, paymentId) => {
+  const handlePaymentMethodSelect = (method, cardId, paymentId, cardLast4) => {
     if (method === 'card' && cardId) {
       setPaymentMethod('saved_card');
       setSelectedCardId(cardId);
+      setSelectedCardLast4(cardLast4 || null);
     } else {
       setPaymentMethod(method);
       setSelectedCardId(null);
+      setSelectedCardLast4(null);
     }
     setSelectedPaymentId(paymentId || null);
+  };
+
+  const handleSelectCash = () => {
+    setPaymentMethod('cash');
+    setSelectedCardId(null);
+    setSelectedCardLast4(null);
+    setSelectedPaymentId(null);
   };
 
   const submitRideRequest = async (method, paymentId) => {
@@ -2384,10 +2394,12 @@ export default function TaxiScreen({ navigation }) {
           estimatedPrice={estimatedPrice}
           estimatedDuration={estimatedDuration}
           onVehicleChange={handleVehicleSelect}
-          onPaymentPress={() => {
+          onSelectCash={handleSelectCash}
+          onSelectCard={() => {
             setPaymentModalMode('select');
             setShowPaymentMethodModal(true);
           }}
+          selectedCardLast4={selectedCardLast4}
           onRequestRide={handleRequestRide}
           onBack={handleBackToSearch}
           isRequesting={isRequesting}

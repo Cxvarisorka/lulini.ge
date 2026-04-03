@@ -139,15 +139,19 @@ export default function PaymentMethodModal({ visible, onClose, onSelect, amount,
     }
   };
 
+  const getCardLast4 = (card) => card.maskedPan?.slice(-4) || '****';
+
   const handleSelectCard = async (card) => {
+    const last4 = getCardLast4(card);
+
     if (mode === 'select') {
-      onSelect('card', card._id, null);
+      onSelect('card', card._id, null, last4);
       onClose();
       return;
     }
 
     if (!amount || amount <= 0) {
-      onSelect('card', card._id, null);
+      onSelect('card', card._id, null, last4);
       onClose();
       return;
     }
@@ -172,7 +176,7 @@ export default function PaymentMethodModal({ visible, onClose, onSelect, amount,
       const confirmedPaymentId = verifyRes.data?.data?.paymentId || paymentId;
 
       if (status === 'completed') {
-        onSelect('card', card._id, confirmedPaymentId);
+        onSelect('card', card._id, confirmedPaymentId, last4);
         onClose();
       } else if (status === 'rejected') {
         Alert.alert(t('errors.error'), t('payment.cardPaymentFailed'));
