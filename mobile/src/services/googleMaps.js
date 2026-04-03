@@ -106,7 +106,14 @@ export async function searchPlacesNominatim(query, location = null) {
 
   try {
     // viewbox format: <x1>,<y1>,<x2>,<y2> (lon1,lat1,lon2,lat2)
-    const viewbox = `${GEORGIA_CONFIG.viewport.southwest.lng},${GEORGIA_CONFIG.viewport.southwest.lat},${GEORGIA_CONFIG.viewport.northeast.lng},${GEORGIA_CONFIG.viewport.northeast.lat}`;
+    // If user location available, use a ~30km box around them for local-first results
+    let viewbox;
+    if (location?.latitude && location?.longitude) {
+      const offset = 0.3; // ~30km
+      viewbox = `${location.longitude - offset},${location.latitude - offset},${location.longitude + offset},${location.latitude + offset}`;
+    } else {
+      viewbox = `${GEORGIA_CONFIG.viewport.southwest.lng},${GEORGIA_CONFIG.viewport.southwest.lat},${GEORGIA_CONFIG.viewport.northeast.lng},${GEORGIA_CONFIG.viewport.northeast.lat}`;
+    }
 
     const params = new URLSearchParams({
       q: query,
@@ -137,6 +144,15 @@ export async function searchPlacesNominatim(query, location = null) {
 
     if (!data || data.length === 0) {
       return [];
+    }
+
+    // Sort by proximity to user's location when available
+    if (location?.latitude && location?.longitude) {
+      data.sort((a, b) => {
+        const distA = Math.pow(parseFloat(a.lat) - location.latitude, 2) + Math.pow(parseFloat(a.lon) - location.longitude, 2);
+        const distB = Math.pow(parseFloat(b.lat) - location.latitude, 2) + Math.pow(parseFloat(b.lon) - location.longitude, 2);
+        return distA - distB;
+      });
     }
 
     return data.map(item => {
@@ -391,7 +407,9 @@ export async function searchPlaces(query, location = null) {
   }
 
   // Check cache first
-  const cacheKey = `search:${query}:${location?.latitude || ''}`;
+  // Include rounded location in cache key so different cities get different results
+  const locKey = location?.latitude ? `${location.latitude.toFixed(2)},${location.longitude.toFixed(2)}` : '';
+  const cacheKey = `search:${query}:${locKey}`;
   const cached = searchCache.get(cacheKey);
   if (cached && Date.now() - cached.timestamp < SEARCH_CACHE_TTL) {
     return cached.results;
@@ -529,8 +547,10 @@ async function searchPlacesAutocomplete(query, location = null) {
       key: GOOGLE_MAPS_API_KEY,
       // Both addresses and establishments
       types: 'geocode|establishment',
-      // Center on Kutaisi
-      location: `${GEORGIA_CONFIG.latitude},${GEORGIA_CONFIG.longitude}`,
+      // Center on user's location or fallback to Georgia center
+      location: location?.latitude
+        ? `${location.latitude},${location.longitude}`
+        : `${GEORGIA_CONFIG.latitude},${GEORGIA_CONFIG.longitude}`,
       // 30km radius
       radius: `${GEORGIA_CONFIG.radius}`,
       // Strict bounds
