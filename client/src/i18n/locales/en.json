@@ -567,5 +567,25 @@
       "benefit4Title": "Wide Selection",
       "benefit4Desc": "From economy to luxury, find the perfect ride for any occasion"
     }
+  },
+  "sharedRide": {
+    "title": "Shared Ride",
+    "loading": "Loading ride details...",
+    "notFound": "Shared ride not found",
+    "expired": "Link Expired",
+    "expiredDesc": "This ride share link is no longer available.",
+    "error": "Something went wrong",
+    "pickup": "Pickup",
+    "dropoff": "Dropoff",
+    "startedAt": "Started at",
+    "endedAt": "Ended at",
+    "status": {
+      "pending": "Waiting for driver",
+      "accepted": "Driver accepted",
+      "driver_arrived": "Driver arrived",
+      "in_progress": "In progress",
+      "completed": "Completed",
+      "cancelled": "Cancelled"
+    }
   }
 }
