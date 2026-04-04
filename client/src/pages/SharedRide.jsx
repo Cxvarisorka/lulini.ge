@@ -118,7 +118,7 @@ export function SharedRide() {
     intervalId = setInterval(fetchRide, isActive ? POLL_ACTIVE : POLL_IDLE);
 
     return () => { cancelled = true; clearInterval(intervalId); };
-  }, [token, t, ride?.status]);
+  }, [urlToken, t, ride?.status]);
 
   // Calculate route directions
   useEffect(() => {
