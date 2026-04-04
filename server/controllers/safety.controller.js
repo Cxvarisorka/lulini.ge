@@ -408,6 +408,25 @@ const getRideShareStatus = catchAsync(async (req, res, next) => {
     });
 });
 
+/**
+ * GET /api/safety/rides/track/:rideId
+ * Public endpoint — resolve a rideId to its share token and redirect.
+ * Used for legacy /track/:rideId links.
+ */
+const resolveTrackLink = catchAsync(async (req, res, next) => {
+    const { rideId } = req.params;
+
+    const share = await RideShare.findOne({ ride: rideId }).select('shareToken').lean();
+    if (!share) {
+        return next(new AppError('Shared ride not found', 404));
+    }
+
+    res.json({
+        success: true,
+        data: { shareToken: share.shareToken }
+    });
+});
+
 module.exports = {
     addEmergencyContact,
     getEmergencyContacts,
@@ -416,5 +435,6 @@ module.exports = {
     triggerSOS,
     resolveSOSAlert,
     shareRide,
-    getRideShareStatus
+    getRideShareStatus,
+    resolveTrackLink
 };

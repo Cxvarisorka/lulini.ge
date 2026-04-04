@@ -8,7 +8,8 @@ const {
     triggerSOS,
     resolveSOSAlert,
     shareRide,
-    getRideShareStatus
+    getRideShareStatus,
+    resolveTrackLink
 } = require('../controllers/safety.controller');
 const { protect, authorize } = require('../middlewares/auth.middleware');
 const rateLimit = require('express-rate-limit');
@@ -37,6 +38,7 @@ const shareStatusLimiter = rateLimit({
 // ── Public routes (no auth required) ──────────────────────────────────────────
 // IMPORTANT: these must be registered BEFORE router.use(protect)
 router.get('/rides/shared/:token', shareStatusLimiter, getRideShareStatus);
+router.get('/rides/track/:rideId', shareStatusLimiter, resolveTrackLink);
 
 // All remaining safety routes require authentication
 router.use(protect);

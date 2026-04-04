@@ -7,6 +7,7 @@ import { Contact } from './pages/Contact';
 import { Careers } from './pages/Careers';
 import { Privacy } from './pages/Privacy';
 import { SharedRide } from './pages/SharedRide';
+import { TrackRedirect } from './pages/TrackRedirect';
 import { Terms } from './pages/Terms';
 import { SignIn } from './pages/SignIn';
 import { Support } from './pages/Support';
@@ -49,6 +50,7 @@ function AppContent() {
             <Route path="/privacy" element={<Privacy />} />
             <Route path="/terms" element={<Terms />} />
             <Route path="/ride/shared/:token" element={<SharedRide />} />
+            <Route path="/track/:rideId" element={<TrackRedirect />} />
             <Route path="/support" element={<Support />} />
             <Route path="/signin" element={<SignIn />} />
             <Route path="/profile" element={<ProtectedRoute><UserProfile /></ProtectedRoute>} />
