@@ -53,13 +53,12 @@ export default function RideStatusSheet({
   const [sosModalVisible, setSosModalVisible] = useState(false);
   const [sosLoading, setSosLoading] = useState(false);
   const [shareLoading, setShareLoading] = useState(false);
-  const [etaShareLoading, setEtaShareLoading] = useState(false);
 
   // Pulsing animation for waiting fee accrual
   const pulseAnim = useRef(new Animated.Value(1)).current;
   // Active ride states where SOS and Share are relevant
   const isActiveRide = ['found', 'driver_arrived', 'in_progress'].includes(rideStatus);
-  const canShareETA = ['found', 'in_progress'].includes(rideStatus);
+
   const rideId = currentRide?._id || currentRide?.id;
 
   // Start pulsing animation when waiting fee begins accruing
@@ -77,28 +76,6 @@ export default function RideStatusSheet({
       pulseAnim.setValue(1);
     }
   }, [waitingFee > 0]);
-
-  const handleShareETA = useCallback(async () => {
-    if (!rideId) return;
-    setEtaShareLoading(true);
-    try {
-      const res = await safetyAPI.shareRide(rideId);
-      const shareUrl = res.data?.shareUrl || `https://lulini.ge/ride/shared/${res.data?.shareToken || rideId}`;
-      const etaText = driverETA ? `${driverETA} min` : '';
-      const message = t('taxi.shareETAMessage', {
-        eta: etaText,
-        url: shareUrl,
-        defaultValue: `I'm on my way! ${etaText ? `ETA: ${etaText}. ` : ''}Track my ride: ${shareUrl}`,
-      });
-      await Share.share({ message, url: shareUrl, title: t('taxi.shareETA') });
-    } catch (error) {
-      if (error?.message !== 'The user did not share') {
-        Alert.alert(t('common.error'), t('errors.somethingWentWrong'));
-      }
-    } finally {
-      setEtaShareLoading(false);
-    }
-  }, [rideId, driverETA, t]);
 
   const handleSOSConfirm = useCallback(async () => {
     setSosLoading(true);
@@ -143,9 +120,15 @@ export default function RideStatusSheet({
     setShareLoading(true);
     try {
       const res = await safetyAPI.shareRide(rideId);
-      const shareUrl = res.data?.shareUrl || res.data?.url || `https://lulini.ge/track/${rideId}`;
+      const shareUrl = res.data?.shareUrl || `https://lulini.ge/ride/shared/${res.data?.shareToken || rideId}`;
+      const etaText = driverETA ? `${driverETA} min` : '';
+      const message = t('taxi.shareETAMessage', {
+        eta: etaText,
+        url: shareUrl,
+        defaultValue: `I'm on my way! ${etaText ? `ETA: ${etaText}. ` : ''}Track my ride: ${shareUrl}`,
+      });
       await Share.share({
-        message: t('safety.shareTripMessage', { url: shareUrl }),
+        message,
         url: shareUrl,
         title: t('safety.shareTripTitle'),
       });
@@ -156,7 +139,7 @@ export default function RideStatusSheet({
     } finally {
       setShareLoading(false);
     }
-  }, [rideId, t]);
+  }, [rideId, driverETA, t]);
 
   const renderSearchingStatus = () => (
     <>
@@ -412,22 +395,6 @@ export default function RideStatusSheet({
                 onPress={onOpenChat}
                 unreadCount={unreadChatCount}
               />
-            )}
-
-            {canShareETA && (
-              <TouchableOpacity
-                style={styles.actionButton}
-                onPress={handleShareETA}
-                disabled={etaShareLoading}
-                accessibilityRole="button"
-                accessibilityLabel={t('taxi.shareETA')}
-              >
-                {etaShareLoading ? (
-                  <ActivityIndicator size="small" color={colors.primary} />
-                ) : (
-                  <Ionicons name="location-outline" size={18} color={colors.primary} />
-                )}
-              </TouchableOpacity>
             )}
 
             <TouchableOpacity

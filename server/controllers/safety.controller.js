@@ -370,21 +370,29 @@ const getRideShareStatus = catchAsync(async (req, res, next) => {
         }
     }
 
-    // Round coordinates to 2 decimal places (~1.1 km precision) for privacy
-    const roundCoord = (val) => (val != null ? Math.round(val * 100) / 100 : null);
+    const isActive = ['accepted', 'driver_arrived', 'in_progress'].includes(ride.status);
+
+    // Build driver location from the Driver model's GeoJSON coordinates
+    let driverLocation = null;
+    if (isActive && ride.driver && ride.driver.location && ride.driver.location.coordinates) {
+        const [lng, lat] = ride.driver.location.coordinates;
+        if (lat && lng) {
+            driverLocation = { lat, lng };
+        }
+    }
 
     const sanitised = {
         status: ride.status,
         vehicleType: ride.vehicleType,
         pickup: ride.pickup ? {
             address: ride.pickup.address,
-            lat: roundCoord(ride.pickup.lat),
-            lng: roundCoord(ride.pickup.lng)
+            lat: ride.pickup.lat,
+            lng: ride.pickup.lng
         } : null,
         dropoff: ride.dropoff ? {
             address: ride.dropoff.address,
-            lat: roundCoord(ride.dropoff.lat),
-            lng: roundCoord(ride.dropoff.lng)
+            lat: ride.dropoff.lat,
+            lng: ride.dropoff.lng
         } : null,
         driver: ride.driver ? {
             firstName: ride.driver.user ? ride.driver.user.firstName : null,
@@ -395,7 +403,8 @@ const getRideShareStatus = catchAsync(async (req, res, next) => {
                 color: ride.driver.vehicle.color,
                 licensePlate: ride.driver.vehicle.licensePlate
             } : null,
-            rating: ride.driver.rating || null
+            rating: ride.driver.rating || null,
+            location: driverLocation
         } : null,
         createdAt: ride.createdAt,
         startTime: ride.startTime || null,
