@@ -82,7 +82,8 @@ export default function RideStatusSheet({
     if (!rideId) return;
     setEtaShareLoading(true);
     try {
-      const shareUrl = `https://lulini.ge/track/${rideId}`;
+      const res = await safetyAPI.shareRide(rideId);
+      const shareUrl = res.data?.shareUrl || `https://lulini.ge/ride/shared/${res.data?.shareToken || rideId}`;
       const etaText = driverETA ? `${driverETA} min` : '';
       const message = t('taxi.shareETAMessage', {
         eta: etaText,
