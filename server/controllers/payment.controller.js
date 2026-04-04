@@ -262,6 +262,8 @@ const preauthRide = catchAsync(async (req, res, next) => {
         capture: 'manual',
         externalOrderId,
         callbackUrl: `${CALLBACK_BASE_URL}/api/payments/callback`,
+        redirectSuccess: `${CALLBACK_BASE_URL}/api/payments/redirect/success`,
+        redirectFail: `${CALLBACK_BASE_URL}/api/payments/redirect/fail`,
         description: 'Lulini Ride - Hold',
         lang: lang || 'ka',
         idempotencyKey: crypto.randomUUID()
@@ -324,6 +326,8 @@ const chargeRide = catchAsync(async (req, res, next) => {
         amount,
         externalOrderId,
         callbackUrl: `${CALLBACK_BASE_URL}/api/payments/callback`,
+        redirectSuccess: `${CALLBACK_BASE_URL}/api/payments/redirect/success`,
+        redirectFail: `${CALLBACK_BASE_URL}/api/payments/redirect/fail`,
         description: 'Lulini Ride Payment',
         lang: lang || 'ka',
         idempotencyKey: crypto.randomUUID()

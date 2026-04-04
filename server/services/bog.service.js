@@ -281,6 +281,12 @@ async function chargeRecurrent(parentOrderId, options) {
         body.external_order_id = options.externalOrderId;
     }
 
+    if (options.redirectSuccess || options.redirectFail) {
+        body.redirect_urls = {};
+        if (options.redirectSuccess) body.redirect_urls.success = options.redirectSuccess;
+        if (options.redirectFail) body.redirect_urls.fail = options.redirectFail;
+    }
+
     const headers = {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`,
