@@ -425,9 +425,22 @@ const getRideShareStatus = catchAsync(async (req, res, next) => {
 const resolveTrackLink = catchAsync(async (req, res, next) => {
     const { rideId } = req.params;
 
-    const share = await RideShare.findOne({ ride: rideId }).select('shareToken').lean();
+    // Try to find an existing share
+    let share = await RideShare.findOne({ ride: rideId }).select('shareToken').lean();
+
+    // If no share exists, create one (legacy links were shared without calling the API)
     if (!share) {
-        return next(new AppError('Shared ride not found', 404));
+        const ride = await Ride.findById(rideId).select('_id user').lean();
+        if (!ride) {
+            return next(new AppError('Ride not found', 404));
+        }
+
+        const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+        share = await RideShare.create({
+            ride: rideId,
+            sharedBy: ride.user,
+            expiresAt
+        });
     }
 
     res.json({
