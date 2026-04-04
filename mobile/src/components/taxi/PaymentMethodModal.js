@@ -5,9 +5,9 @@ import {
   StyleSheet,
   Modal,
   TouchableOpacity,
+  Pressable,
   ActivityIndicator,
   Alert,
-  FlatList,
   Platform,
   ScrollView,
 } from 'react-native';
@@ -167,13 +167,21 @@ export default function PaymentMethodModal({ visible, onClose, onSelect, amount,
         throw new Error('No order ID returned');
       }
 
-      if (redirectUrl) {
-        await WebBrowser.openAuthSessionAsync(redirectUrl, 'lulini://');
-      }
+      // Saved card: BOG processes recurrent charges server-to-server (no browser needed).
+      // Poll until BOG finalizes the charge.
+      let status;
+      let confirmedPaymentId;
 
-      const verifyRes = await paymentAPI.verifyRidePayment(orderId);
-      const status = verifyRes.data?.data?.status;
-      const confirmedPaymentId = verifyRes.data?.data?.paymentId || paymentId;
+      for (let i = 0; i < 8; i++) {
+        await new Promise(r => setTimeout(r, 2000));
+        const pollRes = await paymentAPI.verifyRidePayment(orderId);
+        const pollStatus = pollRes.data?.data?.status;
+        if (pollStatus === 'completed' || pollStatus === 'blocked' || pollStatus === 'rejected') {
+          status = pollStatus;
+          confirmedPaymentId = pollRes.data?.data?.paymentId || paymentId;
+          break;
+        }
+      }
 
       if (status === 'completed') {
         onSelect('card', card._id, confirmedPaymentId, last4);
@@ -225,7 +233,7 @@ export default function PaymentMethodModal({ visible, onClose, onSelect, amount,
   };
 
   const renderCard = ({ item }) => (
-    <TouchableOpacity
+    <Pressable
       style={styles.paymentOption}
       onPress={() => handleSelectCard(item)}
       disabled={processing}
@@ -242,14 +250,14 @@ export default function PaymentMethodModal({ visible, onClose, onSelect, amount,
           {item.isDefault ? ` · ${t('payment.default')}` : ''}
         </Text>
       </View>
-      <TouchableOpacity
+      <Pressable
         onPress={() => handleDeleteCard(item)}
         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         disabled={processing}
       >
         <Ionicons name="trash-outline" size={18} color={colors.mutedForeground} />
-      </TouchableOpacity>
-    </TouchableOpacity>
+      </Pressable>
+    </Pressable>
   );
 
   const mobilePayLabel = Platform.OS === 'ios' ? t('taxi.applePay') : t('taxi.googlePay');
@@ -258,9 +266,10 @@ export default function PaymentMethodModal({ visible, onClose, onSelect, amount,
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={processing ? undefined : onClose}>
+      <View style={styles.overlay}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={processing ? undefined : onClose} />
         <View style={styles.modalContainer}>
-          <TouchableOpacity activeOpacity={1} style={styles.modalContent}>
+          <View style={styles.modalContent}>
             {/* Header */}
             <View style={styles.header}>
               <Text style={styles.title}>{t('taxi.selectPaymentMethod')}</Text>
@@ -315,15 +324,12 @@ export default function PaymentMethodModal({ visible, onClose, onSelect, amount,
                   <ActivityIndicator size="small" color={colors.primary} style={{ padding: 20 }} />
                 ) : (
                   <>
-                    {cards.length > 0 && (
-                      <FlatList
-                        data={cards}
-                        keyExtractor={(item) => item._id}
-                        renderItem={renderCard}
-                        scrollEnabled={false}
-                        ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
-                      />
-                    )}
+                    {cards.map((card, index) => (
+                      <React.Fragment key={card._id}>
+                        {index > 0 && <View style={{ height: 8 }} />}
+                        {renderCard({ item: card })}
+                      </React.Fragment>
+                    ))}
 
                     {/* Add New Card Button */}
                     <TouchableOpacity
@@ -342,9 +348,9 @@ export default function PaymentMethodModal({ visible, onClose, onSelect, amount,
                 )}
               </View>
             </ScrollView>
-          </TouchableOpacity>
+          </View>
         </View>
-      </TouchableOpacity>
+      </View>
     </Modal>
   );
 }

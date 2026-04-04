@@ -1890,22 +1890,39 @@ export default function TaxiScreen({ navigation }) {
         throw new Error('No order ID returned');
       }
 
-      // Redirect to BOG payment page if needed (saved card or Apple/Google Pay)
-      if (preauthResult.redirectUrl) {
-        await WebBrowser.openAuthSessionAsync(preauthResult.redirectUrl, 'lulini://');
-      }
+      let status;
+      let confirmedPaymentId;
+      let lastVerifyRes;
 
-      // Verify the preauth status
-      const verifyRes = await paymentAPI.verifyRidePayment(preauthResult.orderId);
-      const status = verifyRes.data?.data?.status;
-      const confirmedPaymentId = verifyRes.data?.data?.paymentId || preauthResult.paymentId;
+      if (paymentMethod === 'saved_card') {
+        // Saved card: BOG processes recurrent charges server-to-server (no browser needed).
+        // Poll until BOG finalizes the hold (typically 3-8 seconds).
+        for (let i = 0; i < 8; i++) {
+          await new Promise(r => setTimeout(r, 2000));
+          const pollRes = await paymentAPI.verifyRidePayment(preauthResult.orderId);
+          const pollStatus = pollRes.data?.data?.status;
+          lastVerifyRes = pollRes;
+          if (pollStatus === 'blocked' || pollStatus === 'completed' || pollStatus === 'rejected') {
+            status = pollStatus;
+            confirmedPaymentId = pollRes.data?.data?.paymentId || preauthResult.paymentId;
+            break;
+          }
+        }
+      } else if (preauthResult.redirectUrl) {
+        // Apple Pay / Google Pay: user must confirm on BOG payment page
+        await WebBrowser.openAuthSessionAsync(preauthResult.redirectUrl, 'lulini://');
+        const verifyRes = await paymentAPI.verifyRidePayment(preauthResult.orderId);
+        status = verifyRes.data?.data?.status;
+        confirmedPaymentId = verifyRes.data?.data?.paymentId || preauthResult.paymentId;
+        lastVerifyRes = verifyRes;
+      }
 
       if (status === 'blocked' || status === 'completed') {
         // Funds held successfully — now submit the ride
         setIsRequesting(false);
         submitRideRequest(paymentMethod, confirmedPaymentId);
       } else if (status === 'rejected') {
-        const errorKey = verifyRes.data?.data?.errorKey;
+        const errorKey = lastVerifyRes?.data?.data?.errorKey;
         Alert.alert(t('errors.error'), t(errorKey || 'payment.cardPaymentFailed'));
         setIsRequesting(false);
       } else {
@@ -1932,13 +1949,6 @@ export default function TaxiScreen({ navigation }) {
       setSelectedCardLast4(null);
     }
     setSelectedPaymentId(paymentId || null);
-  };
-
-  const handleSelectCash = () => {
-    setPaymentMethod('cash');
-    setSelectedCardId(null);
-    setSelectedCardLast4(null);
-    setSelectedPaymentId(null);
   };
 
   const submitRideRequest = async (method, paymentId) => {
@@ -2394,8 +2404,7 @@ export default function TaxiScreen({ navigation }) {
           estimatedPrice={estimatedPrice}
           estimatedDuration={estimatedDuration}
           onVehicleChange={handleVehicleSelect}
-          onSelectCash={handleSelectCash}
-          onSelectCard={() => {
+          onPaymentPress={() => {
             setPaymentModalMode('select');
             setShowPaymentMethodModal(true);
           }}
@@ -2431,7 +2440,7 @@ export default function TaxiScreen({ navigation }) {
     bookingStep, currentRide, estimatedPrice, estimatedDuration, totalDistance,
     driverETA, driverDistance, waitingTimeLeft, waitingFee,
     unreadChatCount,
-    selectedVehicle, isRequesting, pricingConfig,
+    selectedVehicle, paymentMethod, selectedCardLast4, isRequesting, pricingConfig,
     locationAddress, destination, isLoadingLocation, isLoadingDirections,
     stops, lastDestination,
   ]);

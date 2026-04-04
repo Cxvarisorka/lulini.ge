@@ -14,8 +14,7 @@ export default function RideOptionsSheet({
   estimatedPrice,
   estimatedDuration,
   onVehicleChange,
-  onSelectCash,
-  onSelectCard,
+  onPaymentPress,
   selectedCardLast4,
   onRequestRide,
   onBack,
@@ -53,8 +52,7 @@ export default function RideOptionsSheet({
       <Text style={styles.sectionLabel}>{t('taxi.paymentMethod')}</Text>
       <PaymentMethodSelector
         selected={paymentMethod}
-        onSelectCash={onSelectCash}
-        onSelectCard={onSelectCard}
+        onPress={onPaymentPress}
         selectedCardLast4={selectedCardLast4}
       />
 
