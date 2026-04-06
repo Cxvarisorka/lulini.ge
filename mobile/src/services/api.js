@@ -272,6 +272,9 @@ export const paymentAPI = {
 
   getPaymentHistory: (page = 1, limit = 20) =>
     api.get('/payments/history', { params: { page, limit } }),
+
+  getPendingPayments: () =>
+    api.get('/payments/pending'),
 };
 
 // Trip share API

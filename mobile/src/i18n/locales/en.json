@@ -513,7 +513,9 @@
     "savedCardsSection": "Saved Cards",
     "securePayments": "Secure Payments",
     "securePaymentsDesc": "Your card details are encrypted and processed securely. We never store your full card number.",
-    "tapToSetDefault": "Tap a card to set it as default"
+    "tapToSetDefault": "Tap a card to set it as default",
+    "comingSoonMessage": "Card payments will be available soon.",
+    "cardComingSoon": "Card and mobile payments coming soon"
   },
   "support": {
     "contactUs": "Contact Us",

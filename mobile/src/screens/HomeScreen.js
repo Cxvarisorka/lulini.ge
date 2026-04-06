@@ -9,6 +9,7 @@ import {
   Animated,
   Easing,
   Linking,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -152,7 +153,7 @@ export default function HomeScreen({ navigation }) {
       icon: 'card',
       color: colors.primary,
       label: t('payment.payment'),
-      screen: 'PaymentSettings',
+      onPress: () => Alert.alert(t('common.comingSoon'), t('payment.comingSoonMessage')),
     },
   ];
 
@@ -261,7 +262,7 @@ export default function HomeScreen({ navigation }) {
                 key={action.id}
                 style={styles.quickActionCard}
                 delay={200 + index * 50}
-                onPress={() => navigation.navigate(action.screen)}
+                onPress={() => action.onPress ? action.onPress() : navigation.navigate(action.screen)}
                 accessibilityLabel={action.label}
               >
                 <View style={styles.quickActionInner}>

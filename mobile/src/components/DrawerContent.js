@@ -7,6 +7,7 @@ import {
   Image,
   ScrollView,
   Share,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -41,7 +42,7 @@ export default function DrawerContent({ navigation }) {
         {
           icon: 'card',
           label: t('drawer.paymentSettings'),
-          onPress: () => navigation.navigate('PaymentSettings'),
+          onPress: () => Alert.alert(t('common.comingSoon'), t('payment.comingSoonMessage')),
         },
       ],
     },

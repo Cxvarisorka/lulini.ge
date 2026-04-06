@@ -156,7 +156,7 @@ export default function PaymentMethodModal({ visible, onClose, onSelect, amount,
       return;
     }
 
-    // Pre-charge the card for the ride amount
+    // Charge the saved card for the ride amount
     setProcessing(true);
     try {
       const lang = i18n.language === 'ka' ? 'ka' : 'en';
@@ -167,19 +167,24 @@ export default function PaymentMethodModal({ visible, onClose, onSelect, amount,
         throw new Error('No order ID returned');
       }
 
-      // Saved card: BOG processes recurrent charges server-to-server (no browser needed).
-      // Poll until BOG finalizes the charge.
+      // Recurrent charges require user confirmation on BOG's page (card pre-filled).
+      // Open browser immediately — no preliminary polling.
       let status;
       let confirmedPaymentId;
 
-      for (let i = 0; i < 8; i++) {
-        await new Promise(r => setTimeout(r, 2000));
-        const pollRes = await paymentAPI.verifyRidePayment(orderId);
-        const pollStatus = pollRes.data?.data?.status;
-        if (pollStatus === 'completed' || pollStatus === 'blocked' || pollStatus === 'rejected') {
-          status = pollStatus;
-          confirmedPaymentId = pollRes.data?.data?.paymentId || paymentId;
-          break;
+      if (redirectUrl) {
+        await WebBrowser.openAuthSessionAsync(redirectUrl, 'lulini://');
+
+        // Browser closed — poll for final status (callback may need a moment)
+        for (let i = 0; i < 8; i++) {
+          await new Promise(r => setTimeout(r, 1500));
+          const pollRes = await paymentAPI.verifyRidePayment(orderId);
+          const pollStatus = pollRes.data?.data?.status;
+          if (pollStatus === 'completed' || pollStatus === 'blocked' || pollStatus === 'rejected') {
+            status = pollStatus;
+            confirmedPaymentId = pollRes.data?.data?.paymentId || paymentId;
+            break;
+          }
         }
       }
 
@@ -297,7 +302,7 @@ export default function PaymentMethodModal({ visible, onClose, onSelect, amount,
             {/* Content */}
             <ScrollView style={styles.scrollArea} showsVerticalScrollIndicator={false}>
               <View style={styles.optionsContainer}>
-                {/* Cash option */}
+                {/* Cash option — only available method for now */}
                 <TouchableOpacity style={styles.paymentOption} onPress={handleCashSelect} disabled={processing}>
                   <View style={styles.iconContainer}>
                     <Ionicons name="cash-outline" size={28} color={colors.success} />
@@ -308,44 +313,16 @@ export default function PaymentMethodModal({ visible, onClose, onSelect, amount,
                   </View>
                 </TouchableOpacity>
 
-                {/* Apple Pay / Google Pay */}
-                <TouchableOpacity style={styles.paymentOption} onPress={handleMobilePaySelect} disabled={processing}>
+                {/* Card payments coming soon notice */}
+                <View style={[styles.paymentOption, { opacity: 0.5 }]}>
                   <View style={styles.iconContainer}>
-                    <Ionicons name={mobilePayIcon} size={28} color={colors.foreground} />
+                    <Ionicons name="card-outline" size={28} color={colors.mutedForeground} />
                   </View>
                   <View style={styles.optionContent}>
-                    <Text style={styles.optionTitle}>{mobilePayLabel}</Text>
-                    <Text style={styles.optionDescription}>{mobilePayDesc}</Text>
+                    <Text style={styles.optionTitle}>{t('common.comingSoon')}</Text>
+                    <Text style={styles.optionDescription}>{t('payment.cardComingSoon')}</Text>
                   </View>
-                </TouchableOpacity>
-
-                {/* Saved cards */}
-                {loading ? (
-                  <ActivityIndicator size="small" color={colors.primary} style={{ padding: 20 }} />
-                ) : (
-                  <>
-                    {cards.map((card, index) => (
-                      <React.Fragment key={card._id}>
-                        {index > 0 && <View style={{ height: 8 }} />}
-                        {renderCard({ item: card })}
-                      </React.Fragment>
-                    ))}
-
-                    {/* Add New Card Button */}
-                    <TouchableOpacity
-                      style={styles.addCardButton}
-                      onPress={handleAddCard}
-                      disabled={processing}
-                    >
-                      {processing ? (
-                        <ActivityIndicator size="small" color={colors.primary} />
-                      ) : (
-                        <Ionicons name="add-circle-outline" size={24} color={colors.primary} />
-                      )}
-                      <Text style={styles.addCardText}>{t('payment.addNewCard')}</Text>
-                    </TouchableOpacity>
-                  </>
-                )}
+                </View>
               </View>
             </ScrollView>
           </View>
