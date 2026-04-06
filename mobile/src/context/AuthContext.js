@@ -1,8 +1,5 @@
 import React, { createContext, useState, useContext, useEffect, useCallback, useMemo } from 'react';
 import * as SecureStore from 'expo-secure-store';
-import * as Google from 'expo-auth-session/providers/google';
-import * as WebBrowser from 'expo-web-browser';
-import { makeRedirectUri } from 'expo-auth-session';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
@@ -13,8 +10,18 @@ import { registerForPushNotifications, unregisterPushToken } from '../services/p
 import { clearAllCaches } from '../services/googleMaps';
 import i18n from '../i18n';
 
-// Complete any pending auth session
-WebBrowser.maybeCompleteAuthSession();
+// Conditionally load Google Sign-In (not available in Expo Go)
+let GoogleSignin = null;
+try {
+  GoogleSignin = require('@react-native-google-signin/google-signin').GoogleSignin;
+  GoogleSignin.configure({
+    webClientId: GOOGLE_CONFIG.webClientId,
+    iosClientId: GOOGLE_CONFIG.iosClientId,
+    offlineAccess: false,
+  });
+} catch (_) {
+  // Native module not available (Expo Go) — Google Sign-In disabled
+}
 
 const AuthContext = createContext({});
 
@@ -28,38 +35,16 @@ export const AuthProvider = ({ children }) => {
   const [requiresName, setRequiresName] = useState(false);
   const [pendingPhoneVerification, setPendingPhoneVerification] = useState(null);
 
-  // Google Auth configuration using expo-auth-session
-  const [request, response, promptAsync] = Google.useIdTokenAuthRequest({
-    clientId: GOOGLE_CONFIG.webClientId,
-    androidClientId: GOOGLE_CONFIG.androidClientId,
-    iosClientId: GOOGLE_CONFIG.iosClientId,
-    redirectUri: makeRedirectUri({ scheme: 'com.lulini.mobile', path: 'redirect' }),
-  });
-
-  // Handle Google auth response
-  useEffect(() => {
-    if (response?.type === 'success') {
-      const { id_token } = response.params;
-      handleGoogleToken(id_token);
-    } else if (response?.type === 'error') {
-      setError('Google login failed');
-      setLoading(false);
-    }
-  }, [response]);
-
   const handleGoogleToken = useCallback(async (idToken) => {
     try {
       setLoading(true);
-      // Send the ID token to backend for verification
       const apiResponse = await authAPI.googleAuth(idToken);
 
       if (apiResponse.data.success) {
         const token = apiResponse.data.token;
-
         if (token) {
           await SecureStore.setItemAsync('token', token);
         }
-
         setUser(apiResponse.data.data.user);
         setRequiresName(apiResponse.data.requiresName || false);
       } else {
@@ -185,31 +170,35 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const loginWithGoogle = useCallback(async () => {
+    if (!GoogleSignin) {
+      return { success: false, error: 'Google Sign-In is not available in this build' };
+    }
     try {
       setError(null);
       setLoading(true);
 
-      if (!request) {
-        setError('Google Sign-In is not ready');
+      await GoogleSignin.hasPlayServices();
+      const response = await GoogleSignin.signIn();
+      const idToken = response?.data?.idToken;
+
+      if (!idToken) {
         setLoading(false);
-        return { success: false, error: 'Google Sign-In is not ready' };
+        return { success: false, error: 'Google login failed — no ID token' };
       }
 
-      const result = await promptAsync();
-
-      if (result.type === 'cancel' || result.type === 'dismiss') {
+      await handleGoogleToken(idToken);
+      return { success: true };
+    } catch (err) {
+      if (err.code === 'SIGN_IN_CANCELLED') {
         setLoading(false);
         return { success: false, error: 'Google login was cancelled' };
       }
-
-      return { success: true };
-    } catch (err) {
       const message = err.message || 'Google login failed';
       setError(message);
       setLoading(false);
       return { success: false, error: message };
     }
-  }, [request, promptAsync]);
+  }, [handleGoogleToken]);
 
   // Apple Sign-In
   const loginWithApple = useCallback(async () => {
@@ -406,6 +395,7 @@ export const AuthProvider = ({ children }) => {
     register,
     loginWithGoogle,
     loginWithApple,
+    isGoogleSignInAvailable: !!GoogleSignin,
     sendPhoneOtp,
     verifyPhoneOtp,
     updateProfile,
@@ -413,8 +403,7 @@ export const AuthProvider = ({ children }) => {
     logout,
     refreshUser,
     isAuthenticated: !!user,
-    googleAuthReady: !!request,
-  }), [user, loading, error, isNewUser, requiresName, pendingPhoneVerification, request,
+  }), [user, loading, error, isNewUser, requiresName, pendingPhoneVerification,
     login, register, loginWithGoogle, loginWithApple, sendPhoneOtp,
     verifyPhoneOtp, updateProfile, completeOnboarding, logout, refreshUser]);
 

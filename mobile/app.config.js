@@ -69,7 +69,6 @@ export default {
       ],
       "expo-web-browser",
       "expo-apple-authentication",
-      "@react-native-google-signin/google-signin",
       [
         "expo-notifications",
         {

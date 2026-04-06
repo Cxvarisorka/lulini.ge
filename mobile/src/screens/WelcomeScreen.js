@@ -28,7 +28,7 @@ const typography = useTypography();
     const { t } = useTranslation();
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [isAppleLoading, setIsAppleLoading] = useState(false);
-  const { loginWithGoogle, loginWithApple, googleAuthReady } = useAuth();
+  const { loginWithGoogle, loginWithApple, isGoogleSignInAvailable } = useAuth();
 
   const handleGoogleLogin = async () => {
     setIsGoogleLoading(true);
@@ -78,24 +78,26 @@ const typography = useTypography();
         </View>
 
         <View style={styles.buttonsContainer}>
-          {/* Google Sign-In */}
-          <TouchableOpacity
-            style={[styles.socialButton, isLoading && styles.buttonDisabled]}
-            onPress={handleGoogleLogin}
-            disabled={isLoading || !googleAuthReady}
-            accessibilityRole="button"
-            accessibilityLabel={t('auth.continueWithGoogle')}
-            accessibilityState={{ disabled: isLoading || !googleAuthReady, busy: isGoogleLoading }}
-          >
-            {isGoogleLoading ? (
-              <ActivityIndicator color={colors.foreground} />
-            ) : (
-              <>
-                <Ionicons name="logo-google" size={22} color="#DB4437" />
-                <Text style={styles.socialButtonText}>{t('auth.continueWithGoogle')}</Text>
-              </>
-            )}
-          </TouchableOpacity>
+          {/* Google Sign-In (hidden in Expo Go) */}
+          {isGoogleSignInAvailable && (
+            <TouchableOpacity
+              style={[styles.socialButton, isLoading && styles.buttonDisabled]}
+              onPress={handleGoogleLogin}
+              disabled={isLoading}
+              accessibilityRole="button"
+              accessibilityLabel={t('auth.continueWithGoogle')}
+              accessibilityState={{ disabled: isLoading, busy: isGoogleLoading }}
+            >
+              {isGoogleLoading ? (
+                <ActivityIndicator color={colors.foreground} />
+              ) : (
+                <>
+                  <Ionicons name="logo-google" size={22} color="#DB4437" />
+                  <Text style={styles.socialButtonText}>{t('auth.continueWithGoogle')}</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          )}
 
           {/* Apple Sign-In (iOS only) */}
           {Platform.OS === 'ios' && (

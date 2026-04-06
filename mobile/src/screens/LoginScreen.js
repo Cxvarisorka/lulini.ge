@@ -29,7 +29,7 @@ export default function LoginScreen({ navigation }) {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
-  const { login, loginWithGoogle } = useAuth();
+  const { login, loginWithGoogle, isGoogleSignInAvailable } = useAuth();
 
   const handleLogin = async () => {
     const trimmedEmail = email.trim().toLowerCase();
@@ -162,23 +162,25 @@ export default function LoginScreen({ navigation }) {
             <View style={styles.divider} />
           </View>
 
-          <TouchableOpacity
-            style={[styles.googleButton, isGoogleLoading && styles.buttonDisabled]}
-            onPress={handleGoogleLogin}
-            disabled={isLoading || isGoogleLoading}
-            accessibilityRole="button"
-            accessibilityLabel={t('auth.continueWithGoogle')}
-            accessibilityState={{ disabled: isLoading || isGoogleLoading, busy: isGoogleLoading }}
-          >
-            {isGoogleLoading ? (
-              <ActivityIndicator color={colors.foreground} />
-            ) : (
-              <>
-                <Ionicons name="logo-google" size={20} color="#DB4437" />
-                <Text style={styles.googleButtonText}>{t('auth.continueWithGoogle')}</Text>
-              </>
-            )}
-          </TouchableOpacity>
+          {isGoogleSignInAvailable && (
+            <TouchableOpacity
+              style={[styles.googleButton, isGoogleLoading && styles.buttonDisabled]}
+              onPress={handleGoogleLogin}
+              disabled={isLoading || isGoogleLoading}
+              accessibilityRole="button"
+              accessibilityLabel={t('auth.continueWithGoogle')}
+              accessibilityState={{ disabled: isLoading || isGoogleLoading, busy: isGoogleLoading }}
+            >
+              {isGoogleLoading ? (
+                <ActivityIndicator color={colors.foreground} />
+              ) : (
+                <>
+                  <Ionicons name="logo-google" size={20} color="#DB4437" />
+                  <Text style={styles.googleButtonText}>{t('auth.continueWithGoogle')}</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          )}
 
           <View style={styles.footer}>
             <Text style={styles.footerText}>{t('auth.noAccount')} </Text>
