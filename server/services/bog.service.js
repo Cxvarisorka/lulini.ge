@@ -1,6 +1,10 @@
-const crypto = require('crypto');
+'use strict';
 
-// Lazy getters — env vars are read at call time (after dotenv has loaded)
+const crypto = require('crypto');
+const logger = require('../utils/logger');
+
+const LOG_TAG = 'bog';
+
 function getAuthUrl() {
     return process.env.BOG_AUTH_URL || 'https://oauth2.bog.ge/auth/realms/bog/protocol/openid-connect/token';
 }
@@ -19,16 +23,16 @@ tcBuHV4f7qsynQT+f2UYbESX/TLHwT5qFWZDHZ0YUOUIvb8n7JujVSGZO9/+ll/g
 PwIDAQAB
 -----END PUBLIC KEY-----`;
 
-// Token cache
+// ──────────────────────────────────────────────────────
+// Token Management
+// ──────────────────────────────────────────────────────
+
 let cachedToken = null;
 let tokenExpiresAt = 0;
 
-/**
- * Get BOG OAuth2 access token (cached until expiry).
- * Uses client_credentials grant with Basic auth.
- */
 async function getAccessToken() {
-    if (cachedToken && Date.now() < tokenExpiresAt - 30000) {
+    // Return cached token if still valid (30s buffer for clock skew / network latency)
+    if (cachedToken && Date.now() < tokenExpiresAt - 30_000) {
         return cachedToken;
     }
 
@@ -52,13 +56,14 @@ async function getAccessToken() {
 
     if (!response.ok) {
         const errorText = await response.text();
+        logger.error(`Auth failed (${response.status}): ${errorText}`, LOG_TAG);
         throw new Error(`BOG auth failed (${response.status}): ${errorText}`);
     }
 
     const data = await response.json();
     cachedToken = data.access_token;
 
-    // BOG expires_in can be epoch-ms or seconds — handle both
+    // BOG expires_in can be epoch-ms or relative seconds — handle both
     if (data.expires_in > 1e12) {
         tokenExpiresAt = data.expires_in;
     } else {
@@ -74,20 +79,7 @@ async function getAccessToken() {
 
 /**
  * Create a BOG payment order.
- * @param {Object} options
- * @param {number} options.amount - Total amount
- * @param {string} [options.currency] - Currency code (GEL, USD, EUR). Default: GEL
- * @param {string} options.externalOrderId - Our internal order ID
- * @param {string} options.callbackUrl - Callback URL for payment notifications
- * @param {string} [options.redirectSuccess] - Success redirect URL
- * @param {string} [options.redirectFail] - Fail redirect URL
- * @param {string} [options.description] - Product description
- * @param {string} [options.lang] - Language (ka/en)
- * @param {number} [options.ttl] - Order lifetime in minutes (2-1440, default: 15)
- * @param {string} [options.capture] - 'automatic' (default) or 'manual' (preauth)
- * @param {string} [options.idempotencyKey] - UUID v4 for deduplication
- * @param {string[]} [options.paymentMethods] - Allowed methods: card, apple_pay, google_pay, etc. Default: ['card']
- * @returns {Object} { id, redirectUrl, detailsUrl }
+ * @returns {{ id: string, redirectUrl: string, detailsUrl: string }}
  */
 async function createOrder(options) {
     const token = await getAccessToken();
@@ -110,10 +102,9 @@ async function createOrder(options) {
         payment_method: paymentMethods,
         capture: options.capture || 'automatic',
         ttl: options.ttl || 15,
-        application_type: options.applicationType || 'mobile'
+        application_type: 'mobile'
     };
 
-    // Apple Pay / Google Pay: BOG handles on their payment page (external: false)
     if (paymentMethods.includes('apple_pay') || paymentMethods.includes('google_pay')) {
         body.config = {};
         if (paymentMethods.includes('apple_pay')) {
@@ -148,6 +139,7 @@ async function createOrder(options) {
 
     if (!response.ok) {
         const errorText = await response.text();
+        logger.error(`Create order failed (${response.status}): ${errorText}`, LOG_TAG);
         throw new Error(`BOG create order failed (${response.status}): ${errorText}`);
     }
 
@@ -164,13 +156,8 @@ async function createOrder(options) {
 // ──────────────────────────────────────────────────────
 
 /**
- * Save card for recurrent payments (user sees BOG page on future charges, no card re-entry).
- * Call AFTER createOrder, BEFORE redirecting user to payment page.
- * Endpoint: PUT /orders/:order_id/cards
- *
- * Use this when you need to charge variable amounts (e.g., ride fares).
- * @param {string} orderId - BOG order ID
- * @param {string} [idempotencyKey] - UUID v4
+ * Save card for recurrent payments (variable amounts, user confirms on BOG page).
+ * Must be called AFTER createOrder, BEFORE redirecting user.
  */
 async function saveCardForRecurrent(orderId, idempotencyKey) {
     const token = await getAccessToken();
@@ -178,36 +165,23 @@ async function saveCardForRecurrent(orderId, idempotencyKey) {
     const headers = { 'Authorization': `Bearer ${token}` };
     if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
 
-    const url = `${getApiUrl()}/orders/${orderId}/cards`;
-
-    // PUT is the correct method per BOG docs.
-    // BOG sandbox CDN (Akamai) may block PUT — in that case, skip card saving
-    // in sandbox and proceed (card will still be saved if user completes payment
-    // on BOG's payment page, just won't be flagged for recurrent reuse).
-    const response = await fetch(url, { method: 'PUT', headers });
+    const response = await fetch(`${getApiUrl()}/orders/${orderId}/cards`, {
+        method: 'PUT',
+        headers
+    });
 
     if (response.ok || response.status === 202) {
         return true;
     }
 
-    // CDN blocking PUT — sandbox-only issue, not a real API error
-    if (response.status === 501) {
-        console.warn(`BOG saveCardForRecurrent: sandbox CDN blocked PUT (501) — skipping card save flag. Card saving may still work via payment page.`);
-        return true;
-    }
-
     const errorText = await response.text();
+    logger.error(`Save card (recurrent) failed (${response.status}): ${errorText}`, LOG_TAG);
     throw new Error(`BOG save card (recurrent) failed (${response.status}): ${errorText}`);
 }
 
 /**
- * Save card for offline/subscription payments (fully automatic, no user interaction on charge).
- * Call AFTER createOrder, BEFORE redirecting user to payment page.
- * Endpoint: PUT /orders/:order_id/subscriptions
- *
- * WARNING: Offline charges reuse the original order's amount. Only use if amount is fixed.
- * @param {string} orderId - BOG order ID
- * @param {string} [idempotencyKey] - UUID v4
+ * Save card for subscription/offline payments (fixed amount, fully automatic).
+ * Must be called AFTER createOrder, BEFORE redirecting user.
  */
 async function saveCardForSubscription(orderId, idempotencyKey) {
     const token = await getAccessToken();
@@ -218,20 +192,17 @@ async function saveCardForSubscription(orderId, idempotencyKey) {
     };
     if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
 
-    const url = `${getApiUrl()}/orders/${orderId}/subscriptions`;
-
-    const response = await fetch(url, { method: 'PUT', headers });
+    const response = await fetch(`${getApiUrl()}/orders/${orderId}/subscriptions`, {
+        method: 'PUT',
+        headers
+    });
 
     if (response.ok || response.status === 202) {
         return true;
     }
 
-    if (response.status === 501) {
-        console.warn(`BOG saveCardForSubscription: sandbox CDN blocked PUT (501) — skipping.`);
-        return true;
-    }
-
     const errorText = await response.text();
+    logger.error(`Save card (subscription) failed (${response.status}): ${errorText}`, LOG_TAG);
     throw new Error(`BOG save card (subscription) failed (${response.status}): ${errorText}`);
 }
 
@@ -240,22 +211,12 @@ async function saveCardForSubscription(orderId, idempotencyKey) {
 // ──────────────────────────────────────────────────────
 
 /**
- * Recurrent payment: charge a saved card with a NEW amount.
- * User sees BOG payment page (pre-filled card, no re-entry needed).
- * Returns a redirect URL — user must visit it to confirm.
+ * Recurrent payment: charge a saved card with a new amount.
+ * User may need to confirm on BOG page (card pre-filled, no re-entry).
+ * Returns a redirect URL for user confirmation.
  *
- * Endpoint: POST /ecommerce/orders/:parent_order_id
- *
- * @param {string} parentOrderId - Order ID where card was saved via saveCardForRecurrent
- * @param {Object} options
- * @param {number} options.amount - Amount to charge
- * @param {string} options.callbackUrl - Callback URL
- * @param {string} [options.externalOrderId] - Our internal order ID
- * @param {string} [options.description] - Description
- * @param {string} [options.lang] - Language
- * @param {string} [options.capture] - 'automatic' (default) or 'manual' (preauth)
- * @param {string} [options.idempotencyKey] - UUID v4
- * @returns {Object} { id, redirectUrl, detailsUrl }
+ * @param {string} parentOrderId - Order ID where card was saved
+ * @returns {{ id: string, redirectUrl: string|null, detailsUrl: string|null }}
  */
 async function chargeRecurrent(parentOrderId, options) {
     const token = await getAccessToken();
@@ -273,13 +234,8 @@ async function chargeRecurrent(parentOrderId, options) {
         }
     };
 
-    if (options.capture) {
-        body.capture = options.capture;
-    }
-
-    if (options.externalOrderId) {
-        body.external_order_id = options.externalOrderId;
-    }
+    if (options.capture) body.capture = options.capture;
+    if (options.externalOrderId) body.external_order_id = options.externalOrderId;
 
     if (options.redirectSuccess || options.redirectFail) {
         body.redirect_urls = {};
@@ -305,6 +261,7 @@ async function chargeRecurrent(parentOrderId, options) {
 
     if (!response.ok) {
         const errorText = await response.text();
+        logger.error(`Recurrent charge failed (${response.status}): ${errorText}`, LOG_TAG);
         throw new Error(`BOG recurrent charge failed (${response.status}): ${errorText}`);
     }
 
@@ -317,17 +274,8 @@ async function chargeRecurrent(parentOrderId, options) {
 }
 
 /**
- * Subscription/offline payment: auto-charge a saved card WITHOUT user interaction.
- * Charges the SAME amount as the original order. No redirect URL returned.
- *
- * Endpoint: POST /ecommerce/orders/:parent_order_id/subscribe
- *
- * @param {string} parentOrderId - Order ID where card was saved via saveCardForSubscription
- * @param {Object} [options]
- * @param {string} [options.callbackUrl] - Callback URL
- * @param {string} [options.externalOrderId] - Our internal order ID
- * @param {string} [options.idempotencyKey] - UUID v4
- * @returns {Object} { id, detailsUrl }
+ * Subscription/offline payment: auto-charge without user interaction.
+ * Charges the SAME amount as the original parent order.
  */
 async function chargeSubscription(parentOrderId, options = {}) {
     const token = await getAccessToken();
@@ -353,6 +301,7 @@ async function chargeSubscription(parentOrderId, options = {}) {
 
     if (!response.ok) {
         const errorText = await response.text();
+        logger.error(`Subscription charge failed (${response.status}): ${errorText}`, LOG_TAG);
         throw new Error(`BOG subscription charge failed (${response.status}): ${errorText}`);
     }
 
@@ -369,7 +318,6 @@ async function chargeSubscription(parentOrderId, options = {}) {
 
 /**
  * Get order/payment details from BOG.
- * Endpoint: GET /receipt/:order_id
  * @param {string} orderId - BOG order ID
  * @returns {Object} Full order details including order_status, payment_detail, etc.
  */
@@ -391,8 +339,7 @@ async function getOrderDetails(orderId) {
 
 /**
  * Delete a saved card from BOG.
- * Endpoint: DELETE /charges/card/:order_id
- * @param {string} orderId - The order ID where card was saved
+ * @param {string} orderId - The parent order ID where card was saved
  */
 async function deleteSavedCard(orderId) {
     const token = await getAccessToken();
@@ -407,6 +354,7 @@ async function deleteSavedCard(orderId) {
 
     if (!response.ok && response.status !== 202) {
         const errorText = await response.text();
+        logger.error(`Delete card failed (${response.status}): ${errorText}`, LOG_TAG);
         throw new Error(`BOG delete card failed (${response.status}): ${errorText}`);
     }
 
@@ -418,15 +366,11 @@ async function deleteSavedCard(orderId) {
 // ──────────────────────────────────────────────────────
 
 /**
- * Approve (capture) a preauthorized payment.
- * Endpoint: POST /payment/authorization/approve/:order_id
+ * Approve (capture) preauthorized funds. Full or partial capture.
+ * BOG processes this asynchronously — response is only acknowledgement.
+ * Final confirmation arrives via callback.
  *
- * @param {string} orderId - BOG order ID of the preauthorized order
- * @param {Object} [options]
- * @param {number} [options.amount] - Amount to capture (omit for full amount, or partial)
- * @param {string} [options.description] - Reason for confirmation
- * @param {string} [options.idempotencyKey] - UUID v4
- * @returns {Object} { key, message, actionId }
+ * @returns {{ key: string, message: string, actionId: string }}
  */
 async function approvePreauth(orderId, options = {}) {
     const token = await getAccessToken();
@@ -452,6 +396,7 @@ async function approvePreauth(orderId, options = {}) {
 
     if (!response.ok) {
         const errorText = await response.text();
+        logger.error(`Preauth approve failed (${response.status}): ${errorText}`, LOG_TAG);
         throw new Error(`BOG preauth approve failed (${response.status}): ${errorText}`);
     }
 
@@ -465,13 +410,9 @@ async function approvePreauth(orderId, options = {}) {
 
 /**
  * Reject (cancel) a preauthorized payment, releasing held funds.
- * Endpoint: POST /payment/authorization/cancel/:order_id
+ * BOG processes this asynchronously.
  *
- * @param {string} orderId - BOG order ID of the preauthorized order
- * @param {Object} [options]
- * @param {string} [options.description] - Reason for rejection
- * @param {string} [options.idempotencyKey] - UUID v4
- * @returns {Object} { key, message, actionId }
+ * @returns {{ key: string, message: string, actionId: string }}
  */
 async function rejectPreauth(orderId, options = {}) {
     const token = await getAccessToken();
@@ -496,6 +437,7 @@ async function rejectPreauth(orderId, options = {}) {
 
     if (!response.ok) {
         const errorText = await response.text();
+        logger.error(`Preauth reject failed (${response.status}): ${errorText}`, LOG_TAG);
         throw new Error(`BOG preauth reject failed (${response.status}): ${errorText}`);
     }
 
@@ -509,21 +451,14 @@ async function rejectPreauth(orderId, options = {}) {
 
 // ──────────────────────────────────────────────────────
 // Refund
-// ──────────────────────────────────────────────────────
+// ─────────���────────────────────────────────────────────
 
 /**
  * Refund a completed payment (full or partial).
- * Endpoint: POST /payment/refund/:order_id
+ * BOG processes this asynchronously — response is only acknowledgement.
+ * Final confirmation arrives via callback.
  *
- * Full refund: omit amount. Partial refund: pass amount < total.
- * Supported for card, Apple Pay, Google Pay payments.
- * BOG authorization (bog_p2p) supports full refund only.
- *
- * @param {string} orderId - BOG order ID
- * @param {Object} [options]
- * @param {number} [options.amount] - Partial refund amount (omit for full refund)
- * @param {string} [options.idempotencyKey] - UUID v4
- * @returns {Object} { key, message, actionId }
+ * @returns {{ key: string, message: string, actionId: string }}
  */
 async function refundPayment(orderId, options = {}) {
     const token = await getAccessToken();
@@ -548,6 +483,7 @@ async function refundPayment(orderId, options = {}) {
 
     if (!response.ok) {
         const errorText = await response.text();
+        logger.error(`Refund failed (${response.status}): ${errorText}`, LOG_TAG);
         throw new Error(`BOG refund failed (${response.status}): ${errorText}`);
     }
 
@@ -564,11 +500,8 @@ async function refundPayment(orderId, options = {}) {
 // ──────────────────────────────────────────────────────
 
 /**
- * Verify BOG callback signature (RSA SHA256 with BOG's public key).
- * MUST be verified before processing any callback data.
- * @param {string} rawBody - Raw request body as string
- * @param {string} signature - Callback-Signature header value (base64)
- * @returns {boolean}
+ * Verify BOG callback signature (RSA SHA256).
+ * MUST be called before processing any callback data.
  */
 function verifyCallbackSignature(rawBody, signature) {
     if (!signature || !rawBody) return false;
@@ -579,7 +512,7 @@ function verifyCallbackSignature(rawBody, signature) {
         verify.end();
         return verify.verify(BOG_PUBLIC_KEY, signature, 'base64');
     } catch (err) {
-        console.error('BOG callback signature verification error:', err.message);
+        logger.error(`Callback signature verification error: ${err.message}`, LOG_TAG);
         return false;
     }
 }

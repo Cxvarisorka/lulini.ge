@@ -1,3 +1,5 @@
+'use strict';
+
 const express = require('express');
 const router = express.Router();
 const {
@@ -9,7 +11,6 @@ const {
     preauthRide,
     chargeRide,
     payRide,
-    getPaymentHistory,
     approveRidePayment,
     rejectRidePayment,
     verifyRidePayment,
@@ -17,6 +18,8 @@ const {
     refundPayment,
     handleCallback,
     getPaymentStatus,
+    getPaymentHistory,
+    getPendingPayments,
     handleRedirectSuccess,
     handleRedirectFail
 } = require('../controllers/payment.controller');
@@ -42,13 +45,14 @@ router.patch('/:paymentId/link-ride', protect, linkPaymentToRide);
 router.post('/:paymentId/refund', protect, refundPayment);
 
 // Payment status & history (authenticated)
+router.get('/pending', protect, getPendingPayments);
 router.get('/history', protect, getPaymentHistory);
 router.get('/:paymentId/status', protect, getPaymentStatus);
 
-// BOG callback (public - called by BOG server)
+// BOG callback (public — signature-verified in handler)
 router.post('/callback', handleCallback);
 
-// Redirect handlers (public - user returns from BOG)
+// BOG redirect handlers (public — user returns from payment page)
 router.get('/redirect/success', handleRedirectSuccess);
 router.get('/redirect/fail', handleRedirectFail);
 

@@ -1,3 +1,5 @@
+'use strict';
+
 const crypto = require('crypto');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/AppError');
@@ -6,10 +8,14 @@ const SavedCard = require('../models/savedCard.model');
 const Ride = require('../models/ride.model');
 const bogService = require('../services/bog.service');
 const { emitCritical } = require('../utils/socketHelpers');
+const logger = require('../utils/logger');
 
+const LOG_TAG = 'payment';
 const CALLBACK_BASE_URL = process.env.BOG_CALLBACK_URL || 'https://api.lulini.ge';
+const MAX_SAVED_CARDS_PER_USER = 5;
+const DUPLICATE_WINDOW_MS = 2 * 60 * 1000; // 2 minutes
 
-// BOG payment response codes → user-friendly error keys (for i18n on client)
+// BOG response codes -> i18n keys
 const BOG_RESPONSE_CODES = {
     100: 'payment.success',
     101: 'payment.errors.cardRestricted',
@@ -29,35 +35,136 @@ const BOG_RESPONSE_CODES = {
 };
 
 // ──────────────────────────────────────────────────────
+// Helpers
+// ──────────────────────────────────────────────────────
+
+function getUserId(req) {
+    return req.user._id || req.user.id;
+}
+
+function buildCallbackUrl() {
+    return `${CALLBACK_BASE_URL}/api/payments/callback`;
+}
+
+function buildRedirectUrls() {
+    return {
+        success: `${CALLBACK_BASE_URL}/api/payments/redirect/success`,
+        fail: `${CALLBACK_BASE_URL}/api/payments/redirect/fail`
+    };
+}
+
+function extractPaymentDetail(pd) {
+    return {
+        transferMethod: pd.transfer_method?.key,
+        transactionId: pd.transaction_id,
+        payerIdentifier: pd.payer_identifier,
+        cardType: pd.card_type,
+        cardExpiryDate: pd.card_expiry_date,
+        paymentOption: pd.payment_option,
+        code: pd.code,
+        codeDescription: pd.code_description,
+        authCode: pd.auth_code
+    };
+}
+
+function isCardExpired(expiryDate) {
+    if (!expiryDate || expiryDate === 'N/A') return false;
+    const parts = expiryDate.split('/');
+    if (parts.length !== 2) return false;
+    const [mm, yy] = parts.map(Number);
+    if (!mm || !yy) return false;
+    const expiryEnd = new Date(2000 + yy, mm, 0, 23, 59, 59);
+    return Date.now() > expiryEnd.getTime();
+}
+
+function bogCodeToErrorKey(code) {
+    const bogCode = code ? parseInt(code) : null;
+    return bogCode ? (BOG_RESPONSE_CODES[bogCode] || 'payment.errors.generalError') : null;
+}
+
+/**
+ * Upsert a saved card record after successful card-saving payment.
+ */
+async function upsertSavedCard(userId, bogOrderId, paymentDetail, saveType) {
+    let card = await SavedCard.findOne({ bogOrderId, isActive: true });
+    if (card) return card;
+
+    if (!paymentDetail.payer_identifier) return null;
+
+    const cardCount = await SavedCard.countDocuments({ user: userId, isActive: true });
+    if (cardCount >= MAX_SAVED_CARDS_PER_USER) {
+        logger.warn(`User ${userId} at max saved cards (${MAX_SAVED_CARDS_PER_USER}), skipping save`, LOG_TAG);
+        return null;
+    }
+
+    card = await SavedCard.create({
+        user: userId,
+        bogOrderId,
+        maskedPan: paymentDetail.payer_identifier,
+        cardType: paymentDetail.card_type || 'visa',
+        expiryDate: paymentDetail.card_expiry_date || 'N/A',
+        saveType,
+        isDefault: cardCount === 0
+    });
+
+    return card;
+}
+
+/**
+ * Find user's saved card by ID or default.
+ */
+async function findUserCard(userId, cardId) {
+    if (cardId) {
+        return SavedCard.findOne({ _id: cardId, user: userId, isActive: true });
+    }
+    return SavedCard.findOne({ user: userId, isActive: true, isDefault: true })
+        || SavedCard.findOne({ user: userId, isActive: true });
+}
+
+/**
+ * Guard against duplicate payment creation within a short window.
+ * Returns the existing pending payment if one exists.
+ */
+async function findRecentPendingPayment(userId, types) {
+    return Payment.findOne({
+        user: userId,
+        status: { $in: ['created', 'processing'] },
+        type: { $in: types },
+        createdAt: { $gt: new Date(Date.now() - DUPLICATE_WINDOW_MS) }
+    });
+}
+
+// ──────────────────────────────────────────────────────
 // Card Management
 // ──────────────────────────────────────────────────────
 
-// @desc    Initiate card registration (add new card)
-// @route   POST /api/payments/cards/register
-// @access  Private
+// POST /api/payments/cards/register
 const registerCard = catchAsync(async (req, res) => {
+    const userId = getUserId(req);
     const { lang } = req.body;
-    const userId = req.user._id || req.user.id;
+
+    const cardCount = await SavedCard.countDocuments({ user: userId, isActive: true });
+    if (cardCount >= MAX_SAVED_CARDS_PER_USER) {
+        return res.status(400).json({ success: false, error: 'Maximum saved cards reached' });
+    }
 
     const externalOrderId = `card_reg_${userId}_${Date.now()}`;
     const idempotencyKey = crypto.randomUUID();
+    const redirects = buildRedirectUrls();
 
-    // Step 1: Create a small order for card verification
     const order = await bogService.createOrder({
         amount: 0.01,
         currency: 'GEL',
         externalOrderId,
-        callbackUrl: `${CALLBACK_BASE_URL}/api/payments/callback`,
-        redirectSuccess: `${CALLBACK_BASE_URL}/api/payments/redirect/success`,
-        redirectFail: `${CALLBACK_BASE_URL}/api/payments/redirect/fail`,
+        callbackUrl: buildCallbackUrl(),
+        redirectSuccess: redirects.success,
+        redirectFail: redirects.fail,
         description: 'Card Registration - Lulini',
         lang: lang || 'ka',
         ttl: 15,
         idempotencyKey
     });
 
-    // Step 2: Mark for recurrent card saving (variable amounts for ride fares)
-    // Must be called BEFORE user is redirected to payment page
     await bogService.saveCardForRecurrent(order.id);
 
     await Payment.create({
@@ -72,18 +179,13 @@ const registerCard = catchAsync(async (req, res) => {
 
     res.status(201).json({
         success: true,
-        data: {
-            orderId: order.id,
-            redirectUrl: order.redirectUrl
-        }
+        data: { orderId: order.id, redirectUrl: order.redirectUrl }
     });
 });
 
-// @desc    Verify card registration after user returns from BOG payment page
-// @route   POST /api/payments/cards/verify/:orderId
-// @access  Private
+// POST /api/payments/cards/verify/:orderId
 const verifyCardRegistration = catchAsync(async (req, res, next) => {
-    const userId = req.user._id || req.user.id;
+    const userId = getUserId(req);
 
     const payment = await Payment.findOne({
         bogOrderId: req.params.orderId,
@@ -95,16 +197,24 @@ const verifyCardRegistration = catchAsync(async (req, res, next) => {
         return next(new AppError('Payment not found', 404));
     }
 
-    if (payment.status === 'completed') {
-        const card = await SavedCard.findOne({ bogOrderId: payment.bogOrderId, isActive: true });
-        return res.json({ success: true, data: { status: 'completed', card } });
+    // If callback already confirmed, trust it
+    if (payment.callbackReceived) {
+        const card = payment.status === 'completed'
+            ? await SavedCard.findOne({ bogOrderId: payment.bogOrderId, isActive: true })
+            : null;
+        return res.json({ success: true, data: { status: payment.status, card } });
     }
 
-    if (payment.status === 'rejected') {
-        return res.json({ success: true, data: { status: 'rejected' } });
+    // Terminal state already set (by previous poll)
+    if (['completed', 'rejected'].includes(payment.status) && !payment.callbackReceived) {
+        // Already polled before — return what we have, wait for callback to finalize
+        const card = payment.status === 'completed'
+            ? await SavedCard.findOne({ bogOrderId: payment.bogOrderId, isActive: true })
+            : null;
+        return res.json({ success: true, data: { status: payment.status, card } });
     }
 
-    // Poll BOG for the actual order status
+    // Fallback: poll BOG
     try {
         const details = await bogService.getOrderDetails(payment.bogOrderId);
         const orderStatus = details.order_status?.key;
@@ -128,16 +238,14 @@ const verifyCardRegistration = catchAsync(async (req, res, next) => {
 
         return res.json({ success: true, data: { status: orderStatus || payment.status } });
     } catch (err) {
-        console.error('BOG verify card error:', err.message);
+        logger.error(`Verify card poll error: ${err.message}`, LOG_TAG);
         return res.json({ success: true, data: { status: payment.status } });
     }
 });
 
-// @desc    Get user's saved cards
-// @route   GET /api/payments/cards
-// @access  Private
+// GET /api/payments/cards
 const getSavedCards = catchAsync(async (req, res) => {
-    const userId = req.user._id || req.user.id;
+    const userId = getUserId(req);
 
     const cards = await SavedCard.find({ user: userId, isActive: true })
         .select('maskedPan cardType expiryDate isDefault createdAt')
@@ -146,11 +254,9 @@ const getSavedCards = catchAsync(async (req, res) => {
     res.json({ success: true, data: { cards } });
 });
 
-// @desc    Delete a saved card
-// @route   DELETE /api/payments/cards/:cardId
-// @access  Private
+// DELETE /api/payments/cards/:cardId
 const deleteCard = catchAsync(async (req, res, next) => {
-    const userId = req.user._id || req.user.id;
+    const userId = getUserId(req);
 
     const card = await SavedCard.findOne({
         _id: req.params.cardId,
@@ -162,24 +268,23 @@ const deleteCard = catchAsync(async (req, res, next) => {
         return next(new AppError('Card not found', 404));
     }
 
-    // Delete from BOG (best-effort — deactivate locally regardless)
-    try {
-        await bogService.deleteSavedCard(card.bogOrderId);
-    } catch (err) {
-        console.error('BOG delete card error:', err.message);
-    }
-
+    // Deactivate locally first (ensures user can't charge it anymore)
     card.isActive = false;
     await card.save();
 
-    res.json({ success: true, message: 'Card removed successfully' });
+    // Best-effort delete from BOG
+    try {
+        await bogService.deleteSavedCard(card.bogOrderId);
+    } catch (err) {
+        logger.error(`BOG delete card error for ${card.bogOrderId}: ${err.message}`, LOG_TAG);
+    }
+
+    res.json({ success: true, message: 'Card removed' });
 });
 
-// @desc    Set default card
-// @route   PATCH /api/payments/cards/:cardId/default
-// @access  Private
+// PATCH /api/payments/cards/:cardId/default
 const setDefaultCard = catchAsync(async (req, res, next) => {
-    const userId = req.user._id || req.user.id;
+    const userId = getUserId(req);
 
     const card = await SavedCard.findOne({
         _id: req.params.cardId,
@@ -191,11 +296,7 @@ const setDefaultCard = catchAsync(async (req, res, next) => {
         return next(new AppError('Card not found', 404));
     }
 
-    await SavedCard.updateMany(
-        { user: userId, isActive: true },
-        { isDefault: false }
-    );
-
+    await SavedCard.updateMany({ user: userId, isActive: true }, { isDefault: false });
     card.isDefault = true;
     await card.save();
 
@@ -203,67 +304,46 @@ const setDefaultCard = catchAsync(async (req, res, next) => {
 });
 
 // ──────────────────────────────────────────────────────
-// Helpers — Card Validation
+// Ride Payments
 // ──────────────────────────────────────────────────────
 
-function isCardExpired(expiryDate) {
-    if (!expiryDate || expiryDate === 'N/A') return false; // can't determine — let BOG reject
-    const parts = expiryDate.split('/');
-    if (parts.length !== 2) return false;
-    const [mm, yy] = parts.map(Number);
-    if (!mm || !yy) return false;
-    // Card is valid through the last day of the expiry month
-    const expiryEnd = new Date(2000 + yy, mm, 0, 23, 59, 59);
-    return Date.now() > expiryEnd.getTime();
-}
-
-// ──────────────────────────────────────────────────────
-// Ride Payment with Preauthorization
-// ──────────────────────────────────────────────────────
-// Flow:
-//   1. Before ride: preauthorize estimated fare (hold funds on card)
-//   2. User requests ride, driver accepts, ride happens
-//   3. After ride: approve preauth with actual fare (or reject if ride cancelled)
-
-// @desc    Preauthorize a ride payment (hold funds on saved card)
-// @route   POST /api/payments/ride/preauth
-// @access  Private
+// POST /api/payments/ride/preauth — Hold funds on saved card before ride
 const preauthRide = catchAsync(async (req, res, next) => {
-    const userId = req.user._id || req.user.id;
+    const userId = getUserId(req);
     const { cardId, amount, lang } = req.body;
 
     if (!amount || amount <= 0) {
         return next(new AppError('Invalid payment amount', 400));
     }
 
-    // Find the saved card
-    let card;
-    if (cardId) {
-        card = await SavedCard.findOne({ _id: cardId, user: userId, isActive: true });
-    } else {
-        card = await SavedCard.findOne({ user: userId, isActive: true, isDefault: true })
-            || await SavedCard.findOne({ user: userId, isActive: true });
+    // Duplicate-submit guard
+    const existing = await findRecentPendingPayment(userId, ['ride_preauth']);
+    if (existing) {
+        return res.status(409).json({
+            success: false,
+            error: 'A preauthorization is already in progress',
+            data: { paymentId: existing._id, orderId: existing.bogOrderId }
+        });
     }
 
+    const card = await findUserCard(userId, cardId);
     if (!card) {
         return next(new AppError('No saved card found. Please add a card first.', 400));
     }
-
     if (isCardExpired(card.expiryDate)) {
         return next(new AppError('Card has expired. Please add a new card.', 400));
     }
 
     const externalOrderId = `preauth_${userId}_${Date.now()}`;
+    const redirects = buildRedirectUrls();
 
-    // Create a recurrent order with manual capture (preauthorization)
-    // capture: 'manual' tells BOG to hold funds instead of capturing immediately
     const order = await bogService.chargeRecurrent(card.bogOrderId, {
         amount,
         capture: 'manual',
         externalOrderId,
-        callbackUrl: `${CALLBACK_BASE_URL}/api/payments/callback`,
-        redirectSuccess: `${CALLBACK_BASE_URL}/api/payments/redirect/success`,
-        redirectFail: `${CALLBACK_BASE_URL}/api/payments/redirect/fail`,
+        callbackUrl: buildCallbackUrl(),
+        redirectSuccess: redirects.success,
+        redirectFail: redirects.fail,
         description: 'Lulini Ride - Hold',
         lang: lang || 'ka',
         idempotencyKey: crypto.randomUUID()
@@ -292,42 +372,42 @@ const preauthRide = catchAsync(async (req, res, next) => {
     });
 });
 
-// @desc    Charge a saved card for a ride (standard recurrent, no preauth)
-// @route   POST /api/payments/ride/charge
-// @access  Private
+// POST /api/payments/ride/charge — Charge saved card directly (automatic capture)
 const chargeRide = catchAsync(async (req, res, next) => {
-    const userId = req.user._id || req.user.id;
+    const userId = getUserId(req);
     const { cardId, amount, rideId, lang } = req.body;
 
     if (!amount || amount <= 0) {
         return next(new AppError('Invalid payment amount', 400));
     }
 
-    // Find the saved card
-    let card;
-    if (cardId) {
-        card = await SavedCard.findOne({ _id: cardId, user: userId, isActive: true });
-    } else {
-        card = await SavedCard.findOne({ user: userId, isActive: true, isDefault: true })
-            || await SavedCard.findOne({ user: userId, isActive: true });
+    // Duplicate-submit guard
+    const existing = await findRecentPendingPayment(userId, ['ride_payment']);
+    if (existing) {
+        return res.status(409).json({
+            success: false,
+            error: 'A payment is already in progress',
+            data: { paymentId: existing._id, orderId: existing.bogOrderId }
+        });
     }
 
+    const card = await findUserCard(userId, cardId);
     if (!card) {
         return next(new AppError('No saved card found. Please add a card first.', 400));
     }
-
     if (isCardExpired(card.expiryDate)) {
         return next(new AppError('Card has expired. Please add a new card.', 400));
     }
 
     const externalOrderId = `ride_${rideId || userId}_${Date.now()}`;
+    const redirects = buildRedirectUrls();
 
     const order = await bogService.chargeRecurrent(card.bogOrderId, {
         amount,
         externalOrderId,
-        callbackUrl: `${CALLBACK_BASE_URL}/api/payments/callback`,
-        redirectSuccess: `${CALLBACK_BASE_URL}/api/payments/redirect/success`,
-        redirectFail: `${CALLBACK_BASE_URL}/api/payments/redirect/fail`,
+        callbackUrl: buildCallbackUrl(),
+        redirectSuccess: redirects.success,
+        redirectFail: redirects.fail,
         description: 'Lulini Ride Payment',
         lang: lang || 'ka',
         idempotencyKey: crypto.randomUUID()
@@ -345,6 +425,7 @@ const chargeRide = catchAsync(async (req, res, next) => {
         ride: rideId || null
     });
 
+    // Return redirectUrl so mobile can open browser if polling times out (3DS required)
     res.status(201).json({
         success: true,
         data: {
@@ -356,34 +437,40 @@ const chargeRide = catchAsync(async (req, res, next) => {
     });
 });
 
-// @desc    One-time payment (card / Apple Pay / Google Pay) — no saved card needed
-// @route   POST /api/payments/ride/pay
-// @access  Private
+// POST /api/payments/ride/pay — One-time payment (no saved card)
 const payRide = catchAsync(async (req, res, next) => {
-    const userId = req.user._id || req.user.id;
+    const userId = getUserId(req);
     const { amount, rideId, paymentMethods, lang, capture } = req.body;
 
     if (!amount || amount <= 0) {
         return next(new AppError('Invalid payment amount', 400));
     }
 
-    // Determine which BOG payment methods to offer
-    // paymentMethods can be: ['card'], ['apple_pay'], ['google_pay'], or a combination
+    // Duplicate-submit guard
+    const existing = await findRecentPendingPayment(userId, ['ride_payment', 'ride_preauth']);
+    if (existing) {
+        return res.status(409).json({
+            success: false,
+            error: 'A payment is already in progress',
+            data: { paymentId: existing._id, orderId: existing.bogOrderId }
+        });
+    }
+
     const methods = Array.isArray(paymentMethods) && paymentMethods.length > 0
         ? paymentMethods
         : ['card'];
-
     const captureMode = capture || 'automatic';
     const isPreauth = captureMode === 'manual';
     const externalOrderId = `${isPreauth ? 'preauth' : 'pay'}_${rideId || userId}_${Date.now()}`;
+    const redirects = buildRedirectUrls();
 
     const order = await bogService.createOrder({
         amount,
         currency: 'GEL',
         externalOrderId,
-        callbackUrl: `${CALLBACK_BASE_URL}/api/payments/callback`,
-        redirectSuccess: `${CALLBACK_BASE_URL}/api/payments/redirect/success`,
-        redirectFail: `${CALLBACK_BASE_URL}/api/payments/redirect/fail`,
+        callbackUrl: buildCallbackUrl(),
+        redirectSuccess: redirects.success,
+        redirectFail: redirects.fail,
         description: isPreauth ? 'Lulini Ride - Hold' : 'Lulini Ride Payment',
         lang: lang || 'ka',
         ttl: 30,
@@ -415,24 +502,32 @@ const payRide = catchAsync(async (req, res, next) => {
     });
 });
 
-// @desc    Approve (capture) a preauthorized ride payment after ride completion
-// @route   POST /api/payments/ride/approve/:paymentId
-// @access  Private (or internal server call)
+// ──────────────────────────────────────────────────────
+// Preauthorization Approve / Reject
+// ──────────────────────────────────────────────────────
+
+// POST /api/payments/ride/approve/:paymentId — Capture held funds
 const approveRidePayment = catchAsync(async (req, res, next) => {
+    const userId = getUserId(req);
     const { amount, rideId } = req.body;
 
     const payment = await Payment.findOne({
         _id: req.params.paymentId,
+        user: userId,
         type: 'ride_preauth',
         captureMode: 'manual',
-        status: { $in: ['blocked', 'completed'] }
+        status: 'blocked'
     });
 
     if (!payment) {
-        return next(new AppError('Preauthorized payment not found', 404));
+        return next(new AppError('Preauthorized payment not found or not in held state', 404));
     }
 
     const captureAmount = amount || payment.amount;
+
+    if (captureAmount > payment.amount) {
+        return next(new AppError('Capture amount exceeds held amount', 400));
+    }
 
     const result = await bogService.approvePreauth(payment.bogOrderId, {
         amount: captureAmount,
@@ -440,41 +535,35 @@ const approveRidePayment = catchAsync(async (req, res, next) => {
         idempotencyKey: crypto.randomUUID()
     });
 
+    // Set intermediate status — callback will confirm with 'completed'
     payment.capturedAmount = captureAmount;
-    payment.status = 'captured';
+    payment.status = 'capture_requested';
     if (rideId) payment.ride = rideId;
     await payment.save();
 
-    if (rideId) {
-        await Ride.updateOne({ _id: rideId }, { paymentStatus: 'completed' });
-    }
+    logger.info(`Preauth approve requested: ${payment.bogOrderId} amount=${captureAmount} actionId=${result.actionId}`, LOG_TAG);
 
-    const io = req.app.get('io');
-    emitCritical(io, `user:${payment.user}`, 'payment:captured', {
-        paymentId: payment._id,
-        orderId: payment.bogOrderId,
-        rideId: payment.ride,
-        amount: captureAmount
+    res.json({
+        success: true,
+        data: { actionId: result.actionId, capturedAmount: captureAmount, status: 'capture_requested' }
     });
-
-    res.json({ success: true, data: { actionId: result.actionId, capturedAmount: captureAmount } });
 });
 
-// @desc    Reject (cancel) a preauthorized ride payment
-// @route   POST /api/payments/ride/reject/:paymentId
-// @access  Private
+// POST /api/payments/ride/reject/:paymentId — Release held funds
 const rejectRidePayment = catchAsync(async (req, res, next) => {
+    const userId = getUserId(req);
     const { reason } = req.body;
 
     const payment = await Payment.findOne({
         _id: req.params.paymentId,
+        user: userId,
         type: 'ride_preauth',
         captureMode: 'manual',
-        status: { $in: ['blocked', 'completed'] }
+        status: 'blocked'
     });
 
     if (!payment) {
-        return next(new AppError('Preauthorized payment not found', 404));
+        return next(new AppError('Preauthorized payment not found or not in held state', 404));
     }
 
     const result = await bogService.rejectPreauth(payment.bogOrderId, {
@@ -482,8 +571,16 @@ const rejectRidePayment = catchAsync(async (req, res, next) => {
         idempotencyKey: crypto.randomUUID()
     });
 
+    // BOG docs don't guarantee a callback for cancellations, so set terminal status directly.
+    // If a callback does come, the handler will see 'cancelled' (terminal) and skip.
     payment.status = 'cancelled';
     await payment.save();
+
+    if (payment.ride) {
+        await Ride.updateOne({ _id: payment.ride }, { paymentStatus: 'failed' });
+    }
+
+    logger.info(`Preauth reject: ${payment.bogOrderId} actionId=${result.actionId}`, LOG_TAG);
 
     const io = req.app.get('io');
     emitCritical(io, `user:${payment.user}`, 'payment:cancelled', {
@@ -492,14 +589,16 @@ const rejectRidePayment = catchAsync(async (req, res, next) => {
         rideId: payment.ride
     });
 
-    res.json({ success: true, data: { actionId: result.actionId } });
+    res.json({ success: true, data: { actionId: result.actionId, status: 'cancelled' } });
 });
 
-// @desc    Verify ride payment status (poll BOG)
-// @route   POST /api/payments/ride/verify/:orderId
-// @access  Private
+// ──────────────────────────────────────────────────────
+// Payment Verification (polling fallback)
+// ──────────────────────────────────────────────────────
+
+// POST /api/payments/ride/verify/:orderId
 const verifyRidePayment = catchAsync(async (req, res, next) => {
-    const userId = req.user._id || req.user.id;
+    const userId = getUserId(req);
 
     const payment = await Payment.findOne({
         bogOrderId: req.params.orderId,
@@ -511,10 +610,23 @@ const verifyRidePayment = catchAsync(async (req, res, next) => {
         return next(new AppError('Payment not found', 404));
     }
 
-    if (['completed', 'captured', 'rejected', 'cancelled'].includes(payment.status)) {
-        return res.json({ success: true, data: { status: payment.status, paymentId: payment._id } });
+    // If callback already arrived, trust it — callback is source of truth
+    if (payment.callbackReceived) {
+        return res.json({
+            success: true,
+            data: { status: payment.status, paymentId: payment._id }
+        });
     }
 
+    // Already in a resolved state from a prior poll
+    if (['completed', 'rejected', 'cancelled', 'blocked', 'capture_requested'].includes(payment.status)) {
+        return res.json({
+            success: true,
+            data: { status: payment.status, paymentId: payment._id }
+        });
+    }
+
+    // Still pending — poll BOG as fallback
     try {
         const details = await bogService.getOrderDetails(payment.bogOrderId);
         const orderStatus = details.order_status?.key;
@@ -539,23 +651,20 @@ const verifyRidePayment = catchAsync(async (req, res, next) => {
             payment.rejectReason = details.reject_reason;
             await payment.save();
 
-            const bogCode = paymentDetail.code ? parseInt(paymentDetail.code) : null;
-            const errorKey = bogCode ? BOG_RESPONSE_CODES[bogCode] || 'payment.errors.generalError' : null;
-            return res.json({ success: true, data: { status: 'rejected', errorKey, bogCode } });
+            const errorKey = bogCodeToErrorKey(paymentDetail.code);
+            return res.json({ success: true, data: { status: 'rejected', errorKey } });
         }
 
         return res.json({ success: true, data: { status: orderStatus || payment.status } });
     } catch (err) {
-        console.error('BOG verify ride payment error:', err.message);
+        logger.error(`Verify ride poll error: ${err.message}`, LOG_TAG);
         return res.json({ success: true, data: { status: payment.status } });
     }
 });
 
-// @desc    Link a confirmed payment to a ride
-// @route   PATCH /api/payments/:paymentId/link-ride
-// @access  Private
+// PATCH /api/payments/:paymentId/link-ride
 const linkPaymentToRide = catchAsync(async (req, res, next) => {
-    const userId = req.user._id || req.user.id;
+    const userId = getUserId(req);
     const { rideId } = req.body;
 
     if (!rideId) {
@@ -566,7 +675,7 @@ const linkPaymentToRide = catchAsync(async (req, res, next) => {
         _id: req.params.paymentId,
         user: userId,
         type: { $in: ['ride_payment', 'ride_preauth'] },
-        status: { $in: ['completed', 'blocked', 'captured'] }
+        status: { $in: ['completed', 'blocked', 'capture_requested'] }
     });
 
     if (!payment) {
@@ -585,8 +694,10 @@ const linkPaymentToRide = catchAsync(async (req, res, next) => {
     payment.ride = rideId;
     await payment.save();
 
-    if (payment.status === 'completed' || payment.status === 'captured') {
+    if (payment.status === 'completed') {
         await Ride.updateOne({ _id: rideId }, { paymentStatus: 'completed' });
+    } else if (payment.status === 'blocked') {
+        await Ride.updateOne({ _id: rideId }, { paymentStatus: 'held' });
     }
 
     res.json({ success: true, message: 'Payment linked to ride' });
@@ -596,79 +707,72 @@ const linkPaymentToRide = catchAsync(async (req, res, next) => {
 // Refund
 // ──────────────────────────────────────────────────────
 
-// @desc    Refund a completed payment (full or partial)
-// @route   POST /api/payments/:paymentId/refund
-// @access  Private
+// POST /api/payments/:paymentId/refund
 const refundPayment = catchAsync(async (req, res, next) => {
-    const userId = req.user._id || req.user.id;
+    const userId = getUserId(req);
     const { amount, reason } = req.body;
 
     const payment = await Payment.findOne({
         _id: req.params.paymentId,
         user: userId,
-        status: { $in: ['completed', 'captured'] }
+        status: { $in: ['completed', 'refunded_partially'] }
     });
 
     if (!payment) {
         return next(new AppError('Payment not found or not in refundable state', 404));
     }
 
-    const refundAmount = amount || payment.capturedAmount || payment.amount;
+    const effectiveTotal = payment.capturedAmount || payment.amount;
+    const alreadyRefunded = payment.refundedTotal || 0;
+    const refundableRemaining = effectiveTotal - alreadyRefunded;
 
-    if (amount && amount > (payment.capturedAmount || payment.amount)) {
-        return next(new AppError('Refund amount exceeds payment amount', 400));
+    const refundAmount = amount || refundableRemaining;
+
+    if (refundAmount <= 0 || refundAmount > refundableRemaining) {
+        return next(new AppError(`Refund amount must be between 0.01 and ${refundableRemaining}`, 400));
     }
 
     const result = await bogService.refundPayment(payment.bogOrderId, {
-        amount: amount || undefined,
+        amount: amount || undefined, // undefined = full refund
         idempotencyKey: crypto.randomUUID()
     });
 
-    const isPartial = amount && amount < (payment.capturedAmount || payment.amount);
-    payment.status = isPartial ? 'refunded_partially' : 'refunded';
-    payment.refundAmount = refundAmount;
+    // Set intermediate status — callback will confirm the actual refund
+    payment.status = 'refund_requested';
     payment.refundReason = reason || null;
+    payment.refundHistory.push({
+        amount: refundAmount,
+        reason: reason || null,
+        actionId: result.actionId,
+        requestedAt: new Date()
+    });
     await payment.save();
 
-    if (payment.ride) {
-        await Ride.updateOne({ _id: payment.ride }, { paymentStatus: 'refunded' });
-    }
-
-    const io = req.app.get('io');
-    emitCritical(io, `user:${payment.user}`, 'payment:refunded', {
-        paymentId: payment._id,
-        orderId: payment.bogOrderId,
-        rideId: payment.ride,
-        refundAmount,
-        isPartial
-    });
+    logger.info(`Refund requested: ${payment.bogOrderId} amount=${refundAmount} actionId=${result.actionId}`, LOG_TAG);
 
     res.json({
         success: true,
-        data: { actionId: result.actionId, refundAmount, isPartial }
+        data: { actionId: result.actionId, refundAmount, status: 'refund_requested' }
     });
 });
 
 // ──────────────────────────────────────────────────────
-// BOG Callback & Status
+// BOG Callback (Webhook)
 // ──────────────────────────────────────────────────────
 
-// @desc    BOG payment callback (webhook)
-// @route   POST /api/payments/callback
-// @access  Public (BOG server-to-server)
+// POST /api/payments/callback — Public, signature-verified
 const handleCallback = catchAsync(async (req, res) => {
     const signature = req.headers['callback-signature'];
     const rawBody = req.rawBody;
 
-    // ALWAYS verify signature — reject unsigned or invalid callbacks
     if (!rawBody || !signature) {
-        console.error('BOG callback: missing signature or body');
+        logger.error('Callback: missing signature or body', LOG_TAG);
         return res.status(400).json({ error: 'Missing signature' });
     }
 
     const isValid = bogService.verifyCallbackSignature(rawBody, signature);
     if (!isValid) {
-        console.error('BOG callback: invalid signature');
+        logger.error('Callback: invalid signature', LOG_TAG);
         return res.status(400).json({ error: 'Invalid signature' });
     }
 
@@ -681,101 +785,175 @@ const handleCallback = catchAsync(async (req, res) => {
     const bogOrderId = body.order_id;
     const orderStatus = body.order_status?.key;
     const paymentDetail = body.payment_detail || {};
+    const transferAmount = parseFloat(body.purchase_units?.transfer_amount);
 
     const payment = await Payment.findOne({ bogOrderId });
     if (!payment) {
-        console.error(`BOG callback: payment not found for order ${bogOrderId}`);
+        logger.error(`Callback: payment not found for order ${bogOrderId}`, LOG_TAG);
         return res.status(200).json({ received: true });
     }
 
-    // Idempotency: don't re-process if already in a terminal state
-    if (['completed', 'captured', 'rejected', 'refunded', 'cancelled'].includes(payment.status)
-        && payment.callbackReceived) {
+    // Amount validation (log mismatch, don't reject — BOG is authoritative)
+    if (transferAmount && payment.type !== 'card_registration') {
+        if (Math.abs(transferAmount - payment.amount) > 0.01) {
+            logger.warn(
+                `Callback amount mismatch for ${bogOrderId}: expected=${payment.amount} received=${transferAmount}`,
+                LOG_TAG
+            );
+        }
+    }
+
+    // State transition validation: determine if this callback should be processed.
+    // Callbacks can arrive for: payment completion, preauth block, rejection, refund.
+    const previousStatus = payment.status;
+
+    // Already processed and in a true terminal state with callback received
+    if (Payment.isTerminal(previousStatus) && payment.callbackReceived) {
         return res.status(200).json({ received: true });
     }
 
-    // Update payment record with callback data
+    // Update callback tracking
     payment.callbackReceived = true;
     payment.callbackData = body;
     payment.paymentDetail = extractPaymentDetail(paymentDetail);
 
     const io = req.app.get('io');
 
-    if (orderStatus === 'completed') {
-        payment.status = 'completed';
+    switch (orderStatus) {
+        case 'completed': {
+            // Could be: initial payment completion, OR preauth capture confirmation
+            payment.status = 'completed';
 
-        // Card registration: save the card
-        if (payment.type === 'card_registration') {
-            await upsertSavedCard(payment.user, payment.bogOrderId, paymentDetail, 'recurrent');
+            if (payment.type === 'card_registration') {
+                await upsertSavedCard(payment.user, payment.bogOrderId, paymentDetail, 'recurrent');
+                // NOTE: Do NOT auto-refund the 0.01 GEL registration charge.
+                // The bogOrderId serves as parent_order_id for future recurrent charges.
+                // Refunding it may invalidate the saved card reference at BOG.
+            }
+
+            if (payment.type === 'ride_payment' || (payment.type === 'ride_preauth' && previousStatus === 'capture_requested')) {
+                if (payment.ride) {
+                    await Ride.updateOne({ _id: payment.ride }, { paymentStatus: 'completed' });
+                }
+                emitCritical(io, `user:${payment.user}`, 'payment:completed', {
+                    paymentId: payment._id,
+                    orderId: payment.bogOrderId,
+                    rideId: payment.ride,
+                    amount: payment.capturedAmount || payment.amount
+                });
+            }
+            break;
         }
 
-        // Ride payment: update ride and notify user (critical — payment confirmation)
-        if (payment.type === 'ride_payment') {
-            if (payment.ride) {
-                await Ride.updateOne({ _id: payment.ride }, { paymentStatus: 'completed' });
-            }
-            emitCritical(io, `user:${payment.user}`, 'payment:completed', {
+        case 'blocked': {
+            // Preauth: funds held successfully
+            payment.status = 'blocked';
+
+            emitCritical(io, `user:${payment.user}`, 'payment:held', {
+                paymentId: payment._id,
+                orderId: payment.bogOrderId,
+                amount: payment.amount
+            });
+            break;
+        }
+
+        case 'rejected': {
+            payment.status = 'rejected';
+            payment.rejectReason = body.reject_reason;
+
+            const errorKey = bogCodeToErrorKey(paymentDetail.code);
+
+            emitCritical(io, `user:${payment.user}`, 'payment:failed', {
                 paymentId: payment._id,
                 orderId: payment.bogOrderId,
                 rideId: payment.ride,
-                amount: payment.amount
+                reason: body.reject_reason,
+                errorKey
             });
+            break;
         }
-    } else if (orderStatus === 'blocked') {
-        // Preauth: funds held successfully
-        payment.status = 'blocked';
 
-        emitCritical(io, `user:${payment.user}`, 'payment:held', {
-            paymentId: payment._id,
-            orderId: payment.bogOrderId,
-            amount: payment.amount
-        });
-    } else if (orderStatus === 'rejected') {
-        payment.status = 'rejected';
-        payment.rejectReason = body.reject_reason;
+        case 'refunded': {
+            payment.status = 'refunded';
+            const refundAmt = parseFloat(body.purchase_units?.refund_amount) || 0;
+            payment.refundedTotal = refundAmt;
 
-        const bogCode = paymentDetail.code ? parseInt(paymentDetail.code) : null;
-        const errorKey = bogCode ? BOG_RESPONSE_CODES[bogCode] || 'payment.errors.generalError' : null;
+            // Confirm the pending refund in history
+            const pendingRefund = payment.refundHistory.find(r => !r.confirmedAt);
+            if (pendingRefund) pendingRefund.confirmedAt = new Date();
 
-        emitCritical(io, `user:${payment.user}`, 'payment:failed', {
-            paymentId: payment._id,
-            orderId: payment.bogOrderId,
-            rideId: payment.ride,
-            reason: body.reject_reason,
-            errorKey,
-            bogCode
-        });
-    } else {
-        const statusMap = {
-            'processing': 'processing',
-            'refunded': 'refunded',
-            'refunded_partially': 'refunded_partially',
-            'partial_completed': 'completed'
-        };
-        payment.status = statusMap[orderStatus] || payment.status;
+            if (payment.ride) {
+                await Ride.updateOne({ _id: payment.ride }, { paymentStatus: 'refunded' });
+            }
+
+            emitCritical(io, `user:${payment.user}`, 'payment:refunded', {
+                paymentId: payment._id,
+                orderId: payment.bogOrderId,
+                rideId: payment.ride,
+                refundAmount: refundAmt,
+                isPartial: false
+            });
+            break;
+        }
+
+        case 'refunded_partially': {
+            payment.status = 'refunded_partially';
+            const partialRefundAmt = parseFloat(body.purchase_units?.refund_amount) || 0;
+            payment.refundedTotal = partialRefundAmt;
+
+            const pendingPartialRefund = payment.refundHistory.find(r => !r.confirmedAt);
+            if (pendingPartialRefund) pendingPartialRefund.confirmedAt = new Date();
+
+            emitCritical(io, `user:${payment.user}`, 'payment:refunded', {
+                paymentId: payment._id,
+                orderId: payment.bogOrderId,
+                rideId: payment.ride,
+                refundAmount: partialRefundAmt,
+                isPartial: true
+            });
+            break;
+        }
+
+        default: {
+            // Map remaining BOG statuses
+            const statusMap = {
+                'processing': 'processing',
+                'created': 'created',
+                'partial_completed': 'completed'
+            };
+            if (statusMap[orderStatus]) {
+                payment.status = statusMap[orderStatus];
+            }
+            break;
+        }
     }
 
     await payment.save();
+
+    logger.info(`Callback processed: ${bogOrderId} ${previousStatus}->${payment.status}`, LOG_TAG);
+
     res.status(200).json({ received: true });
 });
 
-// @desc    Check payment status
-// @route   GET /api/payments/:paymentId/status
-// @access  Private
+// ──────────────────────────────────────────────────────
+// Payment Status & History
+// ──────────────────────────────────────────────────────
+
+// GET /api/payments/:paymentId/status
 const getPaymentStatus = catchAsync(async (req, res, next) => {
-    const userId = req.user._id || req.user.id;
+    const userId = getUserId(req);
 
     const payment = await Payment.findOne({
         _id: req.params.paymentId,
         user: userId
-    }).select('status amount capturedAmount currency type bogOrderId captureMode createdAt');
+    }).select('status amount capturedAmount currency type bogOrderId captureMode callbackReceived createdAt');
 
     if (!payment) {
         return next(new AppError('Payment not found', 404));
     }
 
-    // If still pending, poll BOG as fallback
-    if (['created', 'processing'].includes(payment.status)) {
+    // If still pending and callback hasn't arrived, poll BOG
+    if (['created', 'processing'].includes(payment.status) && !payment.callbackReceived) {
         try {
             const details = await bogService.getOrderDetails(payment.bogOrderId);
             const newStatus = details.order_status?.key;
@@ -791,36 +969,33 @@ const getPaymentStatus = catchAsync(async (req, res, next) => {
                 await payment.save();
             }
         } catch (err) {
-            console.error('BOG status check error:', err.message);
+            logger.error(`Status poll error: ${err.message}`, LOG_TAG);
         }
     }
 
     res.json({ success: true, data: { payment } });
 });
 
-// @desc    Get payment history for user
-// @route   GET /api/payments/history
-// @access  Private
+// GET /api/payments/history
 const getPaymentHistory = catchAsync(async (req, res) => {
-    const userId = req.user._id || req.user.id;
+    const userId = getUserId(req);
     const page = parseInt(req.query.page) || 1;
     const limit = Math.min(parseInt(req.query.limit) || 20, 50);
     const skip = (page - 1) * limit;
 
+    const filter = {
+        user: userId,
+        type: { $in: ['ride_payment', 'ride_preauth'] }
+    };
+
     const [payments, total] = await Promise.all([
-        Payment.find({
-            user: userId,
-            type: { $in: ['ride_payment', 'ride_preauth'] }
-        })
+        Payment.find(filter)
             .select('amount currency status type bogOrderId ride createdAt paymentDetail.transferMethod paymentDetail.cardType')
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(limit)
             .populate('ride', 'pickup.address dropoff.address'),
-        Payment.countDocuments({
-            user: userId,
-            type: { $in: ['ride_payment', 'ride_preauth'] }
-        })
+        Payment.countDocuments(filter)
     ]);
 
     res.json({
@@ -832,13 +1007,27 @@ const getPaymentHistory = catchAsync(async (req, res) => {
     });
 });
 
-// @desc    Redirect handlers (user returns from BOG payment page)
-// @route   GET /api/payments/redirect/success
-// @route   GET /api/payments/redirect/fail
-// @access  Public
+// GET /api/payments/pending — For app restart recovery
+const getPendingPayments = catchAsync(async (req, res) => {
+    const userId = getUserId(req);
+
+    const payments = await Payment.find({
+        user: userId,
+        status: { $in: ['created', 'processing', 'blocked', 'capture_requested', 'refund_requested'] },
+        type: { $in: ['ride_payment', 'ride_preauth'] }
+    })
+        .select('amount currency status type bogOrderId ride captureMode createdAt')
+        .sort({ createdAt: -1 })
+        .limit(5);
+
+    res.json({ success: true, data: { payments } });
+});
+
+// ──────────────────────────────────────────────────────
+// Redirect Handlers
+// ──────────────────────────────────────────────────────
+
 const handleRedirectSuccess = (req, res) => {
-    // 302 redirect to custom scheme — openAuthSessionAsync intercepts this
-    // and auto-closes the browser before Safari tries to open the URL
     res.redirect('lulini://payment/success');
 };
 
@@ -847,39 +1036,8 @@ const handleRedirectFail = (req, res) => {
 };
 
 // ──────────────────────────────────────────────────────
-// Helpers
+// Exports
 // ──────────────────────────────────────────────────────
-
-function extractPaymentDetail(paymentDetail) {
-    return {
-        transferMethod: paymentDetail.transfer_method?.key,
-        transactionId: paymentDetail.transaction_id,
-        payerIdentifier: paymentDetail.payer_identifier,
-        cardType: paymentDetail.card_type,
-        cardExpiryDate: paymentDetail.card_expiry_date,
-        paymentOption: paymentDetail.payment_option,
-        code: paymentDetail.code,
-        codeDescription: paymentDetail.code_description,
-        authCode: paymentDetail.auth_code
-    };
-}
-
-async function upsertSavedCard(userId, bogOrderId, paymentDetail, saveType) {
-    let card = await SavedCard.findOne({ bogOrderId, isActive: true });
-    if (!card && paymentDetail.payer_identifier) {
-        const cardCount = await SavedCard.countDocuments({ user: userId, isActive: true });
-        card = await SavedCard.create({
-            user: userId,
-            bogOrderId,
-            maskedPan: paymentDetail.payer_identifier,
-            cardType: paymentDetail.card_type || 'visa',
-            expiryDate: paymentDetail.card_expiry_date || 'N/A',
-            saveType,
-            isDefault: cardCount === 0
-        });
-    }
-    return card;
-}
 
 module.exports = {
     registerCard,
@@ -890,7 +1048,6 @@ module.exports = {
     preauthRide,
     chargeRide,
     payRide,
-    getPaymentHistory,
     approveRidePayment,
     rejectRidePayment,
     verifyRidePayment,
@@ -898,6 +1055,8 @@ module.exports = {
     refundPayment,
     handleCallback,
     getPaymentStatus,
+    getPaymentHistory,
+    getPendingPayments,
     handleRedirectSuccess,
     handleRedirectFail
 };

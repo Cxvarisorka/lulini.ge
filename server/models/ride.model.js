@@ -93,6 +93,11 @@ const rideSchema = new mongoose.Schema({
         enum: ['pending', 'processing', 'completed', 'failed', 'held', 'refunded'],
         default: 'pending'
     },
+    savedCard: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'SavedCard',
+        default: null
+    },
     fare: {
         type: Number,
         default: 0

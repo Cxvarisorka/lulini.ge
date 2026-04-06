@@ -121,6 +121,7 @@ const createRide = catchAsync(async (req, res, next) => {
         passengerPhone,
         paymentMethod,
         paymentId,
+        cardId,
         notes,
         scheduledFor
     } = req.body;
@@ -215,6 +216,7 @@ const createRide = catchAsync(async (req, res, next) => {
         passengerName,
         passengerPhone,
         paymentMethod: paymentMethod || 'cash',
+        savedCard: (paymentMethod === 'saved_card' && cardId) ? cardId : null,
         notes,
         status: 'pending',
         expiresAt,
@@ -965,10 +967,15 @@ const completeRide = catchAsync(async (req, res, next) => {
         session.endSession();
     }
 
-    // Auto-capture preauthorized payment if one is linked to this ride
+    // Post-ride payment processing
     if (ride.paymentMethod !== 'cash') {
         const Payment = require('../models/payment.model');
         const bogService = require('../services/bog.service');
+        const SavedCard = require('../models/savedCard.model');
+        const crypto = require('crypto');
+        const logger = require('../utils/logger');
+
+        // Case 1: Preauthorized payment exists — capture it
         const preauthPayment = await Payment.findOne({
             ride: ride._id,
             type: 'ride_preauth',
@@ -980,15 +987,68 @@ const completeRide = catchAsync(async (req, res, next) => {
                 await bogService.approvePreauth(preauthPayment.bogOrderId, {
                     amount: finalFare,
                     description: `Ride fare for ride ${ride._id}`,
-                    idempotencyKey: require('crypto').randomUUID()
+                    idempotencyKey: crypto.randomUUID()
                 });
                 preauthPayment.capturedAmount = finalFare;
-                preauthPayment.status = 'captured';
+                preauthPayment.status = 'capture_requested';
                 await preauthPayment.save();
-                ride.paymentStatus = 'completed';
-                await ride.save();
             } catch (err) {
-                console.error(`[completeRide] Auto-capture preauth failed for ride ${ride._id}:`, err.message);
+                logger.error(`[completeRide] Preauth capture failed for ride ${ride._id}: ${err.message}`, 'payment');
+            }
+        }
+
+        // Case 2: Saved card with no preauth — create post-ride charge
+        // BOG recurrent charges require user confirmation on the payment page.
+        // Create the order now; the user will be prompted to confirm via push notification.
+        if (!preauthPayment && ride.paymentMethod === 'saved_card' && ride.savedCard) {
+            try {
+                const card = await SavedCard.findOne({ _id: ride.savedCard, isActive: true });
+                if (card) {
+                    const CALLBACK_BASE_URL = process.env.BOG_CALLBACK_URL || 'https://api.lulini.ge';
+                    const externalOrderId = `ride_${ride._id}_${Date.now()}`;
+
+                    const order = await bogService.chargeRecurrent(card.bogOrderId, {
+                        amount: finalFare,
+                        externalOrderId,
+                        callbackUrl: `${CALLBACK_BASE_URL}/api/payments/callback`,
+                        redirectSuccess: `${CALLBACK_BASE_URL}/api/payments/redirect/success`,
+                        redirectFail: `${CALLBACK_BASE_URL}/api/payments/redirect/fail`,
+                        description: `Lulini Ride #${ride._id}`,
+                        lang: 'ka',
+                        idempotencyKey: crypto.randomUUID()
+                    });
+
+                    await Payment.create({
+                        user: ride.user,
+                        ride: ride._id,
+                        bogOrderId: order.id,
+                        externalOrderId,
+                        type: 'ride_payment',
+                        amount: finalFare,
+                        currency: 'GEL',
+                        status: 'created',
+                        savedCard: card._id
+                    });
+
+                    // Update ride to processing — user will confirm payment via browser
+                    await Ride.updateOne({ _id: ride._id }, { paymentStatus: 'processing' });
+
+                    // Notify user to complete payment (they need to open the BOG page)
+                    const { emitCritical } = require('../utils/socketHelpers');
+                    const io = req.app.get('io');
+                    emitCritical(io, `user:${ride.user}`, 'payment:action_required', {
+                        rideId: ride._id,
+                        orderId: order.id,
+                        redirectUrl: order.redirectUrl,
+                        amount: finalFare
+                    });
+
+                    logger.info(`[completeRide] Post-ride charge created for ride ${ride._id}: order=${order.id}`, 'payment');
+                }
+            } catch (err) {
+                logger.error(`[completeRide] Post-ride charge failed for ride ${ride._id}: ${err.message}`, 'payment');
+                // Ride is completed but payment failed — needs manual resolution
+                await Ride.updateOne({ _id: ride._id }, { paymentStatus: 'failed' });
             }
         }
     }

@@ -266,6 +266,7 @@ const PORT = process.env.PORT || 3000;
 const { expireOldRides, expireWaitingRides, broadcastScheduledRides } = require('./controllers/ride.controller');
 const { startWatchdog } = require('./services/rideWatchdog.service');
 const { runHardDeleteJob } = require('./jobs/hardDelete');
+const { runReconciliation } = require('./jobs/paymentReconciliation');
 
 // Schedule ride expiration check every minute
 const EXPIRATION_CHECK_INTERVAL = 60 * 1000; // 1 minute
@@ -279,6 +280,7 @@ let expirationIntervalId = null;
 let waitingIntervalId = null;
 let scheduledRideIntervalId = null;
 let hardDeleteIntervalId = null;
+let paymentReconciliationIntervalId = null;
 
 
 // In PM2 cluster mode, only run background jobs on instance 0 to avoid duplicate work.
@@ -358,6 +360,14 @@ async function startServer() {
                     }
                 }).catch(err => logger.error('Daily run failed', 'hardDelete', err));
             }, HARD_DELETE_INTERVAL);
+
+            // Payment reconciliation — resolve stuck payments every 5 minutes
+            const PAYMENT_RECONCILIATION_INTERVAL = 5 * 60 * 1000; // 5 minutes
+            paymentReconciliationIntervalId = setInterval(() => {
+                runReconciliation().catch(err =>
+                    logger.error('Reconciliation run failed', 'reconciliation', err)
+                );
+            }, PAYMENT_RECONCILIATION_INTERVAL);
         }
     });
 }
@@ -385,6 +395,7 @@ function gracefulShutdown(signal) {
     if (waitingIntervalId) clearInterval(waitingIntervalId);
     if (scheduledRideIntervalId) clearInterval(scheduledRideIntervalId);
     if (hardDeleteIntervalId) clearInterval(hardDeleteIntervalId);
+    if (paymentReconciliationIntervalId) clearInterval(paymentReconciliationIntervalId);
 
     // Disconnect all sockets gracefully
     io.emit('server:shutdown', { message: 'Server is restarting' });
