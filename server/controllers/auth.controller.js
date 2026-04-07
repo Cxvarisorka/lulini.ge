@@ -59,6 +59,52 @@ const sendTokenResponse = (user, statusCode, res, message, isNewUser = false) =>
     });
 };
 
+// @desc    Login user (admin dashboard — email/password)
+// @route   POST /api/auth/login
+const login = catchAsync(async (req, res, next) => {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+        return next(new AppError('Please provide email and password', 400));
+    }
+
+    const user = await User.findOne({ email });
+    if (!user) {
+        return next(new AppError('Invalid credentials', 401));
+    }
+
+    // Account lockout check (30 min lockout after 5 failed attempts)
+    if (user.lockUntil && user.lockUntil > new Date()) {
+        const minutesLeft = Math.ceil((user.lockUntil - new Date()) / 60000);
+        return next(new AppError(`Account locked due to too many failed attempts. Try again in ${minutesLeft} minutes`, 423));
+    }
+
+    if (user.provider !== 'local') {
+        return next(new AppError(`Please login with ${user.provider}`, 400));
+    }
+
+    const isMatch = await user.comparePassword(password);
+    if (!isMatch) {
+        user.failedLoginAttempts = (user.failedLoginAttempts || 0) + 1;
+        if (user.failedLoginAttempts >= 5) {
+            user.lockUntil = new Date(Date.now() + 30 * 60 * 1000);
+        }
+        await user.save({ validateBeforeSave: false });
+        return next(new AppError('Invalid credentials', 401));
+    }
+
+    // Reset lockout counters on successful login
+    if (user.failedLoginAttempts > 0 || user.lockUntil) {
+        user.failedLoginAttempts = 0;
+        user.lockUntil = null;
+        await user.save({ validateBeforeSave: false });
+    }
+
+    analytics.trackEvent(user._id, analytics.EVENTS.ACCOUNT_LOGGED_IN, { provider: 'local' });
+
+    sendTokenResponse(user, 200, res, 'Login successful');
+});
+
 // @desc    Logout user
 // @route   POST /api/auth/logout
 const logout = async (req, res) => {
@@ -761,6 +807,7 @@ const cancelAccountDeletion = catchAsync(async (req, res, next) => {
 });
 
 module.exports = {
+    login,
     logout,
     getMe,
     sendPhoneOtp,

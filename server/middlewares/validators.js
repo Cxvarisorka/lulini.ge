@@ -11,6 +11,13 @@ const validate = (req, res, next) => {
     next();
 };
 
+const validateLogin = [
+    body('email').trim().isEmail().withMessage('Valid email is required').normalizeEmail(),
+    body('password').notEmpty().withMessage('Password is required')
+        .isLength({ max: 128 }).withMessage('Password too long'),
+    validate
+];
+
 const validateSendPhoneOtp = [
     body('phone').trim().notEmpty().withMessage('Phone number is required')
         .matches(/^\+?[\d\s()-]{7,20}$/).withMessage('Invalid phone number format'),
@@ -46,6 +53,7 @@ const validateUpdateDriverLocation = [
 ];
 
 module.exports = {
+    validateLogin,
     validateSendPhoneOtp,
     validateCreateRide,
     validateUpdateDriverLocation

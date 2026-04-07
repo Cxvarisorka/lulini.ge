@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 
 const {
+    login,
     logout,
     getMe,
     sendPhoneOtp,
@@ -17,7 +18,7 @@ const {
 } = require('../controllers/auth.controller');
 const { protect } = require('../middlewares/auth.middleware');
 const { authLimiter, otpSendLimiter, otpVerifyLimiter } = require('../middlewares/rateLimiter');
-const { validateSendPhoneOtp } = require('../middlewares/validators');
+const { validateLogin, validateSendPhoneOtp } = require('../middlewares/validators');
 
 // Health check / test route
 router.get('/test', (req, res) => {
@@ -25,6 +26,7 @@ router.get('/test', (req, res) => {
 });
 
 // Core auth routes
+router.post('/login', authLimiter, validateLogin, login);
 router.post('/logout', logout);
 router.get('/me', protect, getMe);
 
