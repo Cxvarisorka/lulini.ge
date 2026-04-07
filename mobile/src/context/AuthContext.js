@@ -1,27 +1,11 @@
 import React, { createContext, useState, useContext, useEffect, useCallback, useMemo } from 'react';
 import * as SecureStore from 'expo-secure-store';
-import * as AppleAuthentication from 'expo-apple-authentication';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform } from 'react-native';
 import { authAPI, setOnUnauthorized } from '../services/api';
-import { GOOGLE_CONFIG } from '../config/google.config';
 import { setUserInfo as setCrispUser, resetCrispSession } from '../services/crisp';
 import { registerForPushNotifications, unregisterPushToken } from '../services/pushNotifications';
 import { clearAllCaches } from '../services/googleMaps';
 import i18n from '../i18n';
-
-// Conditionally load Google Sign-In (not available in Expo Go)
-let GoogleSignin = null;
-try {
-  GoogleSignin = require('@react-native-google-signin/google-signin').GoogleSignin;
-  GoogleSignin.configure({
-    webClientId: GOOGLE_CONFIG.webClientId,
-    iosClientId: GOOGLE_CONFIG.iosClientId,
-    offlineAccess: false,
-  });
-} catch (_) {
-  // Native module not available (Expo Go) — Google Sign-In disabled
-}
 
 const AuthContext = createContext({});
 
@@ -32,31 +16,7 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [isNewUser, setIsNewUser] = useState(false);
-  const [requiresName, setRequiresName] = useState(false);
   const [pendingPhoneVerification, setPendingPhoneVerification] = useState(null);
-
-  const handleGoogleToken = useCallback(async (idToken) => {
-    try {
-      setLoading(true);
-      const apiResponse = await authAPI.googleAuth(idToken);
-
-      if (apiResponse.data.success) {
-        const token = apiResponse.data.token;
-        if (token) {
-          await SecureStore.setItemAsync('token', token);
-        }
-        setUser(apiResponse.data.data.user);
-        setRequiresName(apiResponse.data.requiresName || false);
-      } else {
-        setError('Google login failed');
-      }
-    } catch (err) {
-      const message = err.response?.data?.message || err.message || 'Google login failed';
-      setError(message);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
 
   // Check for existing token on app load (M3: cancellation flag)
   useEffect(() => {
@@ -67,18 +27,16 @@ export const AuthProvider = ({ children }) => {
         const token = await SecureStore.getItemAsync('token');
         if (token) {
           // [M4 FIX] Check JWT expiry before making a network call.
-          // Prevents unnecessary API hit and avoids delay on expired tokens.
           try {
             const parts = token.split('.');
             if (parts.length === 3) {
               const payload = JSON.parse(atob(parts[1]));
               if (payload.exp && payload.exp * 1000 < Date.now()) {
                 await SecureStore.deleteItemAsync('token');
-                return; // expired — skip getMe, fall through to setLoading(false)
+                return;
               }
             }
           } catch (_) {
-            // Malformed token — clear it
             await SecureStore.deleteItemAsync('token');
             return;
           }
@@ -86,11 +44,9 @@ export const AuthProvider = ({ children }) => {
           const response = await authAPI.getMe();
           if (response.data.success && !isCancelled) {
             setUser(response.data.data.user);
-            setRequiresName(response.data.requiresName || false);
           }
         }
       } catch (err) {
-        // Only delete token on explicit 401 — network errors should keep the token
         if (err.response?.status === 401) {
           await SecureStore.deleteItemAsync('token');
         }
@@ -107,7 +63,6 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     if (user) {
       registerForPushNotifications(i18n.language).catch(() => {});
-      // Sync user info to Crisp live chat (no-op in Expo Go)
       setCrispUser({
         id: user._id || user.id,
         name: [user.firstName, user.lastName].filter(Boolean).join(' '),
@@ -116,151 +71,6 @@ export const AuthProvider = ({ children }) => {
       });
     }
   }, [user]);
-
-  const login = useCallback(async (email, password) => {
-    try {
-      setError(null);
-      setLoading(true);
-      const response = await authAPI.login(email, password);
-
-      if (response.data.success) {
-        const token = response.data.token;
-
-        if (token) {
-          await SecureStore.setItemAsync('token', token);
-        }
-
-        setUser(response.data.data.user);
-        return { success: true };
-      }
-      return { success: false, error: 'Login failed' };
-    } catch (err) {
-      const message = err.response?.data?.message || 'Login failed. Please check your credentials.';
-      setError(message);
-      return { success: false, error: message };
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  const register = useCallback(async (userData) => {
-    try {
-      setError(null);
-      setLoading(true);
-      const response = await authAPI.register(userData);
-
-      if (response.data.success) {
-        const token = response.data.token;
-
-        if (token) {
-          await SecureStore.setItemAsync('token', token);
-        }
-
-        setUser(response.data.data.user);
-        return { success: true };
-      }
-      return { success: false, error: 'Registration failed' };
-    } catch (err) {
-      const message = err.response?.data?.message || 'Registration failed. Please try again.';
-      setError(message);
-      return { success: false, error: message };
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  const loginWithGoogle = useCallback(async () => {
-    if (!GoogleSignin) {
-      return { success: false, error: 'Google Sign-In is not available in this build' };
-    }
-    try {
-      setError(null);
-      setLoading(true);
-
-      await GoogleSignin.hasPlayServices();
-      const response = await GoogleSignin.signIn();
-      const idToken = response?.data?.idToken;
-
-      if (!idToken) {
-        setLoading(false);
-        return { success: false, error: 'Google login failed — no ID token' };
-      }
-
-      await handleGoogleToken(idToken);
-      return { success: true };
-    } catch (err) {
-      if (err.code === 'SIGN_IN_CANCELLED') {
-        setLoading(false);
-        return { success: false, error: 'Google login was cancelled' };
-      }
-      const message = err.message || 'Google login failed';
-      setError(message);
-      setLoading(false);
-      return { success: false, error: message };
-    }
-  }, [handleGoogleToken]);
-
-  // Apple Sign-In
-  const loginWithApple = useCallback(async () => {
-    try {
-      setError(null);
-      setLoading(true);
-
-      // Check if Apple Sign-In is available (iOS only)
-      if (Platform.OS !== 'ios') {
-        setLoading(false);
-        return { success: false, error: 'Apple Sign-In is only available on iOS' };
-      }
-
-      const isAvailable = await AppleAuthentication.isAvailableAsync();
-      if (!isAvailable) {
-        setLoading(false);
-        return { success: false, error: 'Apple Sign-In is not available on this device' };
-      }
-
-      const credential = await AppleAuthentication.signInAsync({
-        requestedScopes: [
-          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
-          AppleAuthentication.AppleAuthenticationScope.EMAIL,
-        ],
-      });
-
-      // Get full name from credential (only provided on first sign-in)
-      const fullName = credential.fullName
-        ? `${credential.fullName.givenName || ''} ${credential.fullName.familyName || ''}`.trim()
-        : null;
-
-      // Send identity token to backend
-      const apiResponse = await authAPI.appleAuth(
-        credential.identityToken,
-        fullName,
-        credential.email
-      );
-
-      if (apiResponse.data.success) {
-        const token = apiResponse.data.token;
-        if (token) {
-          await SecureStore.setItemAsync('token', token);
-        }
-        setUser(apiResponse.data.data.user);
-        setIsNewUser(apiResponse.data.isNewUser || false);
-        setRequiresName(apiResponse.data.requiresName || false);
-        return { success: true, isNewUser: apiResponse.data.isNewUser };
-      }
-
-      return { success: false, error: 'Apple login failed' };
-    } catch (err) {
-      if (err.code === 'ERR_REQUEST_CANCELED') {
-        setLoading(false);
-        return { success: false, error: 'Apple login was cancelled' };
-      }
-      const message = err.response?.data?.message || err.message || 'Apple login failed';
-      setError(message);
-      return { success: false, error: message };
-    } finally {
-      setLoading(false);
-    }
-  }, []);
 
   // Phone OTP - Send OTP
   const sendPhoneOtp = useCallback(async (phone) => {
@@ -315,24 +125,6 @@ export const AuthProvider = ({ children }) => {
     }
   }, []);
 
-  // Update profile (firstName, lastName) — used after social sign-in when name is missing
-  const updateProfile = useCallback(async (firstName, lastName) => {
-    try {
-      setError(null);
-      const response = await authAPI.updateProfile(firstName, lastName);
-      if (response.data.success) {
-        setUser(response.data.data.user);
-        setRequiresName(false);
-        return { success: true };
-      }
-      return { success: false, error: 'Profile update failed' };
-    } catch (err) {
-      const message = err.response?.data?.message || 'Profile update failed';
-      setError(message);
-      return { success: false, error: message };
-    }
-  }, []);
-
   // Complete onboarding (L1: use functional update to avoid stale closure)
   const completeOnboarding = useCallback(async () => {
     try {
@@ -357,9 +149,7 @@ export const AuthProvider = ({ children }) => {
     } finally {
       await SecureStore.deleteItemAsync('token');
       await AsyncStorage.removeItem('@rides_cache').catch(() => {});
-      // L12: Clear map caches on logout
       clearAllCaches();
-      // Reset Crisp chat session so next user gets fresh chat (no-op in Expo Go)
       resetCrispSession();
       setUser(null);
     }
@@ -389,23 +179,15 @@ export const AuthProvider = ({ children }) => {
     loading,
     error,
     isNewUser,
-    requiresName,
     pendingPhoneVerification,
-    login,
-    register,
-    loginWithGoogle,
-    loginWithApple,
-    isGoogleSignInAvailable: !!GoogleSignin,
     sendPhoneOtp,
     verifyPhoneOtp,
-    updateProfile,
     completeOnboarding,
     logout,
     refreshUser,
     isAuthenticated: !!user,
-  }), [user, loading, error, isNewUser, requiresName, pendingPhoneVerification,
-    login, register, loginWithGoogle, loginWithApple, sendPhoneOtp,
-    verifyPhoneOtp, updateProfile, completeOnboarding, logout, refreshUser]);
+  }), [user, loading, error, isNewUser, pendingPhoneVerification,
+    sendPhoneOtp, verifyPhoneOtp, completeOnboarding, logout, refreshUser]);
 
   return (
     <AuthContext.Provider value={value}>

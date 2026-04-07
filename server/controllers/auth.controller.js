@@ -6,9 +6,7 @@ const OTP = require('../models/otp.model');
 const { generateToken, verifyToken } = require('../utils/jwt.utils');
 const AppError = require('../utils/AppError');
 const catchAsync = require('../utils/catchAsync');
-const { OAuth2Client } = require('google-auth-library');
 const { sendVerification } = require('../services/sms.service');
-const appleSignin = require('apple-signin-auth');
 const { invalidateUser, invalidateDriver } = require('../utils/authCache');
 const analytics = require('../services/analytics.service');
 const crypto = require('crypto');
@@ -37,17 +35,11 @@ const sendTokenResponse = (user, statusCode, res, message, isNewUser = false) =>
 
     res.cookie('token', token, cookieOptions);
 
-    // Flag when user is missing first/last name (e.g. Apple Sign-In placeholder)
-    const hasName = !!(user.firstName && user.firstName.trim().length >= 2
-        && user.lastName && user.lastName.trim().length >= 2);
-    const requiresName = !hasName;
-
     res.status(statusCode).json({
         success: true,
         message,
         token, // Include token in response body for mobile clients
         isNewUser,
-        requiresName,
         data: {
             user: {
                 id: user._id,
@@ -67,47 +59,7 @@ const sendTokenResponse = (user, statusCode, res, message, isNewUser = false) =>
     });
 };
 
-// @desc    Register user (traditional — requires verified email)
-// @route   POST /api/auth/register
-const register = catchAsync(async (req, res, next) => {
-    const { firstName, lastName, email, password, phone } = req.body;
-
-    const normalizedEmail = email?.toLowerCase().trim();
-
-    const existingUser = await User.findOne({ email: normalizedEmail });
-    if (existingUser) {
-        return next(new AppError('User already exists with this email', 400));
-    }
-
-    // Verify that the email was verified via OTP (optional if phone is provided)
-    const verifiedRecord = await EmailOTP.findOne({
-        email: normalizedEmail,
-        purpose: 'verification',
-        code: 'verified',
-    });
-    if (!verifiedRecord && !phone) {
-        return next(new AppError('Please verify your email address first', 400));
-    }
-    if (verifiedRecord) {
-        await EmailOTP.deleteOne({ _id: verifiedRecord._id });
-    }
-
-    const user = await User.create({
-        firstName,
-        lastName,
-        email: normalizedEmail,
-        password,
-        phone,
-        provider: 'local',
-        isVerified: true,
-    });
-
-    analytics.trackEvent(user._id, analytics.EVENTS.ACCOUNT_REGISTERED, { provider: 'local' });
-
-    sendTokenResponse(user, 201, res, 'User registered successfully');
-});
-
-// @desc    Login user (traditional)
+// @desc    Login user (admin dashboard — email/password)
 // @route   POST /api/auth/login
 const login = catchAsync(async (req, res, next) => {
     const { email, password } = req.body;
@@ -133,7 +85,6 @@ const login = catchAsync(async (req, res, next) => {
 
     const isMatch = await user.comparePassword(password);
     if (!isMatch) {
-        // Increment failed attempts, lock after 5
         user.failedLoginAttempts = (user.failedLoginAttempts || 0) + 1;
         if (user.failedLoginAttempts >= 5) {
             user.lockUntil = new Date(Date.now() + 30 * 60 * 1000);
@@ -213,130 +164,6 @@ const getMe = catchAsync(async (req, res, next) => {
             }
         }
     });
-});
-
-// @desc    Handle OAuth callback success (web)
-const oauthSuccess = (req, res) => {
-    const token = generateToken(req.user._id);
-
-    res.cookie('token', token, cookieOptions);
-    res.redirect(`${process.env.CLIENT_URL || 'http://localhost:5173'}/profile`);
-};
-
-// Allowlist of valid redirect URI patterns for OAuth mobile flow.
-// Each entry is a regex that must match the FULL URI — prevents deep link hijacking
-// where an attacker registers a competing app with the same custom scheme.
-const ALLOWED_REDIRECT_PATTERNS = [
-    /^lulini:\/\/auth(\/callback)?(\?.*)?$/,          // lulini://auth or lulini://auth/callback
-    /^lulinidriver:\/\/auth(\/callback)?(\?.*)?$/,     // lulinidriver://auth or lulinidriver://auth/callback
-    /^exp:\/\/192\.168\.\d{1,3}\.\d{1,3}:\d+(\/.*)?\??.*$/, // Expo dev only (local IP)
-    /^exp:\/\/localhost:\d+(\/.*)?\??.*$/,             // Expo dev only (localhost)
-];
-
-const isAllowedRedirectUri = (uri) => {
-    if (!uri || typeof uri !== 'string') return false;
-    // Strip any query params before matching (we append ?token= ourselves)
-    const baseUri = uri.split('?')[0];
-    return ALLOWED_REDIRECT_PATTERNS.some(pattern => pattern.test(baseUri) || pattern.test(uri));
-};
-
-// @desc    Handle OAuth callback success (mobile)
-const oauthSuccessMobile = (req, res) => {
-    const token = generateToken(req.user._id);
-    const redirectUri = req.query.state || req.session?.redirectUri;
-
-    if (redirectUri && isAllowedRedirectUri(redirectUri)) {
-        // Redirect back to mobile app with token (validated against allowlist)
-        res.redirect(`${redirectUri}?token=${token}`);
-    } else {
-        // Fallback: return JSON response
-        res.json({
-            success: true,
-            token,
-            data: {
-                user: {
-                    id: req.user._id,
-                    firstName: req.user.firstName,
-                    lastName: req.user.lastName,
-                    email: req.user.email,
-                    phone: req.user.phone,
-                    role: req.user.role,
-                    avatar: req.user.avatar,
-                    isVerified: req.user.isVerified,
-                    createdAt: req.user.createdAt
-                }
-            }
-        });
-    }
-};
-
-// @desc    Handle OAuth callback failure
-const oauthFailure = (req, res) => {
-    res.redirect(`${process.env.CLIENT_URL}/login?error=oauth_failed`);
-};
-
-// @desc    Verify Google ID token from mobile app
-// @route   POST /api/auth/google/token
-const googleTokenAuth = catchAsync(async (req, res, next) => {
-    const { idToken } = req.body;
-
-    if (!idToken) {
-        return next(new AppError('ID token is required', 400));
-    }
-
-    const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
-
-    // Accept tokens from web, Android, and iOS Google OAuth clients
-    const validAudiences = [
-        process.env.GOOGLE_CLIENT_ID,
-        process.env.GOOGLE_ANDROID_CLIENT_ID,
-        process.env.GOOGLE_IOS_CLIENT_ID,
-    ].filter(Boolean);
-
-    // Verify the ID token
-    const ticket = await client.verifyIdToken({
-        idToken,
-        audience: validAudiences,
-    });
-
-    const payload = ticket.getPayload();
-    const { sub: googleId, email, given_name, family_name, picture } = payload;
-
-    // Find user by Google provider ID first (exact match)
-    let user = await User.findOne({ providerId: googleId, provider: 'google' });
-
-    if (!user && email) {
-        // Check if email exists under a different provider
-        const existingByEmail = await User.findOne({ email });
-        if (existingByEmail) {
-            // Do NOT silently merge — require the user to log in with their original provider
-            return next(new AppError(
-                `An account with this email already exists. Please log in with ${existingByEmail.provider}`,
-                409
-            ));
-        }
-    }
-
-    if (user) {
-        // Update avatar if changed
-        if (picture && picture !== user.avatar) {
-            user.avatar = picture;
-            await user.save();
-        }
-    } else {
-        // Create new user
-        user = await User.create({
-            firstName: given_name,
-            lastName: family_name,
-            email: email,
-            provider: 'google',
-            providerId: googleId,
-            avatar: picture,
-            isVerified: true
-        });
-    }
-
-    sendTokenResponse(user, 200, res, 'Google login successful');
 });
 
 // @desc    Send OTP to phone number
@@ -495,62 +322,6 @@ const verifyPhoneOtp = catchAsync(async (req, res, next) => {
     }
 
     sendTokenResponse(user, 200, res, 'Phone verification successful', isNewUser);
-});
-
-// @desc    Verify Apple ID token from mobile app
-// @route   POST /api/auth/apple/token
-const appleTokenAuth = catchAsync(async (req, res, next) => {
-    const { identityToken, fullName, email: providedEmail } = req.body;
-
-    if (!identityToken) {
-        return next(new AppError('Identity token is required', 400));
-    }
-
-    // Verify the Apple identity token
-    let appleUser;
-    try {
-        appleUser = await appleSignin.verifyIdToken(identityToken, {
-            audience: process.env.APPLE_CLIENT_ID,
-            ignoreExpiration: false
-        });
-    } catch (error) {
-        return next(new AppError('Invalid Apple identity token', 401));
-    }
-
-    const { sub: appleId, email: tokenEmail } = appleUser;
-    const email = providedEmail || tokenEmail;
-
-    // Find user by Apple provider ID first (exact match)
-    let user = await User.findOne({ providerId: appleId, provider: 'apple' });
-
-    if (!user && email) {
-        // Check if email exists under a different provider
-        const existingByEmail = await User.findOne({ email });
-        if (existingByEmail) {
-            return next(new AppError(
-                `An account with this email already exists. Please log in with ${existingByEmail.provider}`,
-                409
-            ));
-        }
-    }
-
-    let isNewUser = false;
-
-    if (user) {
-        // Existing Apple user — no merge needed
-    } else {
-        // Create new user
-        user = await User.create({
-            fullName: fullName || 'Apple User',
-            email: email || undefined,
-            provider: 'apple',
-            providerId: appleId,
-            isVerified: true
-        });
-        isNewUser = true;
-    }
-
-    sendTokenResponse(user, 200, res, 'Apple login successful', isNewUser);
 });
 
 // @desc    Update user profile (firstName, lastName)
@@ -846,97 +617,6 @@ const verifyEmailCode = catchAsync(async (req, res, next) => {
     });
 });
 
-// @desc    Send email verification code (unauthenticated — for registration)
-// @route   POST /api/auth/email/send-verification
-const sendEmailVerification = catchAsync(async (req, res, next) => {
-    const { email, language } = req.body;
-
-    if (!email) {
-        return next(new AppError('Email is required', 400));
-    }
-
-    const emailRegex = /^\S+@\S+\.\S+$/;
-    if (!emailRegex.test(email)) {
-        return next(new AppError('Please provide a valid email address', 400));
-    }
-
-    const normalizedEmail = email.toLowerCase().trim();
-
-    // Check if email is already registered
-    const existingUser = await User.findOne({ email: normalizedEmail });
-    if (existingUser) {
-        return next(new AppError('This email is already registered', 400));
-    }
-
-    // Delete any existing codes for this email (no userId for registration)
-    await EmailOTP.deleteMany({ email: normalizedEmail, purpose: 'verification' });
-
-    const code = generateEmailCode();
-    await EmailOTP.create({
-        email: normalizedEmail,
-        code,
-        purpose: 'verification',
-        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
-    });
-
-    const lang = (language === 'ka' || language === 'en') ? language : 'en';
-    await emailService.sendVerificationEmail(normalizedEmail, null, code, lang);
-
-    res.status(200).json({
-        success: true,
-        message: 'Verification code sent to your email',
-    });
-});
-
-// @desc    Verify email code for registration (unauthenticated)
-// @route   POST /api/auth/email/verify-registration
-const verifyEmailForRegistration = catchAsync(async (req, res, next) => {
-    const { email, code } = req.body;
-
-    if (!email || !code) {
-        return next(new AppError('Email and verification code are required', 400));
-    }
-
-    const normalizedEmail = email.toLowerCase().trim();
-
-    const record = await EmailOTP.findOne({ email: normalizedEmail, purpose: 'verification' });
-
-    if (!record) {
-        return next(new AppError('Verification code not found. Please request a new one', 400));
-    }
-    if (record.expiresAt < new Date()) {
-        await EmailOTP.deleteOne({ _id: record._id });
-        return next(new AppError('Verification code has expired. Please request a new one', 400));
-    }
-    if (record.attempts >= 5) {
-        await EmailOTP.deleteOne({ _id: record._id });
-        return next(new AppError('Too many failed attempts. Please request a new code', 400));
-    }
-
-    const codeMatches = await record.compareCode(code);
-    if (!codeMatches) {
-        record.attempts += 1;
-        await record.save();
-        return next(new AppError('Invalid verification code', 400));
-    }
-
-    // Mark as verified — keep the record so register can check it
-    record.attempts = 0;
-    record.expiresAt = new Date(Date.now() + 15 * 60 * 1000); // extend 15 min for registration
-    record.purpose = 'verification';
-    // Store a flag on the document so register() can confirm verification
-    record.code = 'verified';
-    await EmailOTP.updateOne({ _id: record._id }, {
-        $set: { code: 'verified', expiresAt: record.expiresAt }
-    });
-
-    res.status(200).json({
-        success: true,
-        message: 'Email verified successfully',
-        emailVerified: true,
-    });
-});
-
 // @desc    Schedule account deletion (30-day grace period)
 // @route   DELETE /api/auth/account
 //
@@ -1127,24 +807,16 @@ const cancelAccountDeletion = catchAsync(async (req, res, next) => {
 });
 
 module.exports = {
-    register,
     login,
     logout,
     getMe,
-    oauthSuccess,
-    oauthSuccessMobile,
-    oauthFailure,
-    googleTokenAuth,
     sendPhoneOtp,
     verifyPhoneOtp,
-    appleTokenAuth,
     completeOnboarding,
     sendPhoneUpdateOtp,
     verifyPhoneUpdateOtp,
     sendEmailCode,
     verifyEmailCode,
-    sendEmailVerification,
-    verifyEmailForRegistration,
     updateProfile,
     deleteAccount,
     cancelAccountDeletion

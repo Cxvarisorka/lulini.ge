@@ -7,12 +7,6 @@ export const authService = {
       body: JSON.stringify({ email, password }),
     }),
 
-  register: (userData) =>
-    apiRequest('/auth/register', {
-      method: 'POST',
-      body: JSON.stringify(userData),
-    }),
-
   logout: () =>
     apiRequest('/auth/logout', { method: 'POST' }),
 

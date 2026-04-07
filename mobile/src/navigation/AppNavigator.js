@@ -22,11 +22,8 @@ import { useTheme } from '../context/ThemeContext';
 
 // Auth Screens
 import WelcomeScreen from '../screens/WelcomeScreen';
-import LoginScreen from '../screens/LoginScreen';
-import PhoneAuthScreen from '../screens/PhoneAuthScreen';
 import OtpVerificationScreen from '../screens/OtpVerificationScreen';
 import PhoneRegistrationScreen from '../screens/PhoneRegistrationScreen';
-import SocialRegistrationScreen from '../screens/SocialRegistrationScreen';
 import PermissionsScreen from '../screens/PermissionsScreen';
 
 // Main Screens
@@ -70,7 +67,7 @@ export const useDrawer = () => useContext(DrawerContext);
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const DRAWER_WIDTH = Math.min(SCREEN_WIDTH * 0.8, 320);
 
-// Auth Stack (Welcome/Phone Auth)
+// Auth Stack (Phone Auth)
 function AuthStack() {
   const { colors } = useTheme();
   return (
@@ -82,8 +79,6 @@ function AuthStack() {
       }}
     >
       <Stack.Screen name="Welcome" component={WelcomeScreen} />
-      <Stack.Screen name="Login" component={LoginScreen} />
-      <Stack.Screen name="PhoneAuth" component={PhoneAuthScreen} />
       <Stack.Screen name="OtpVerification" component={OtpVerificationScreen} />
       <Stack.Screen name="PhoneRegistration" component={PhoneRegistrationScreen} />
     </Stack.Navigator>
@@ -522,17 +517,6 @@ function AuthenticatedApp() {
   );
 }
 
-// Name Collection Stack (for social sign-in users missing first/last name)
-function NameCollectionStack() {
-  return (
-    <NavigationContainer>
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="SocialRegistration" component={SocialRegistrationScreen} />
-      </Stack.Navigator>
-    </NavigationContainer>
-  );
-}
-
 // Onboarding Stack (Permissions)
 function OnboardingStack() {
   return (
@@ -546,17 +530,13 @@ function OnboardingStack() {
 
 // Main App Navigator
 export default function AppNavigator() {
-  const { isAuthenticated, loading, user, isNewUser, requiresName } = useAuth();
+  const { isAuthenticated, loading, user, isNewUser } = useAuth();
 
   if (loading) {
     return <LoadingScreen />;
   }
 
   if (isAuthenticated) {
-    // If user is missing first/last name (e.g. Apple/Google sign-in), collect it first
-    if (requiresName) {
-      return <NameCollectionStack />;
-    }
     // Check if user needs to complete onboarding (new user who hasn't completed it yet)
     if (isNewUser || (user && !user.hasCompletedOnboarding)) {
       return <OnboardingStack />;
