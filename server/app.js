@@ -3,7 +3,6 @@ const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
-const passport = require('passport');
 const compression = require('compression');
 const helmet = require('helmet');
 const morgan = require('morgan');
@@ -30,7 +29,6 @@ if (process.env.SENTRY_DSN) {
 }
 
 const connectDB = require('./configs/db.config');
-require('./configs/passport.config');
 const globalErrorHandler = require('./middlewares/error.middleware');
 const AppError = require('./utils/AppError');
 
@@ -178,8 +176,6 @@ app.use(cookieParser());
 // Mobile clients use Authorization header and are inherently CSRF-safe.
 const { csrfProtection } = require('./middlewares/csrf.middleware');
 app.use(csrfProtection);
-
-app.use(passport.initialize());
 
 // Routes — versioned API (v1)
 // All routes are mounted under /api/v1/ with /api/ as backward-compatible alias.

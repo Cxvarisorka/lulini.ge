@@ -95,24 +95,11 @@ api.interceptors.response.use(
 
 // Auth API
 export const authAPI = {
-  login: async (email, password) => {
-    const response = await api.post('/auth/login', { email, password });
-    return response;
-  },
-
-  register: async (data) => {
-    const response = await api.post('/auth/register', data);
-    return response;
-  },
-
   logout: () =>
     api.post('/auth/logout'),
 
   getMe: () =>
     api.get('/auth/me'),
-
-  googleAuth: (idToken) =>
-    api.post('/auth/google/token', { idToken }),
 
   // Phone OTP authentication
   sendPhoneOtp: (phone) =>
@@ -128,27 +115,12 @@ export const authAPI = {
   verifyPhoneUpdateOtp: (phone, code) =>
     api.post('/auth/phone/update-verify-otp', { phone, code }),
 
-  // Apple Sign-In
-  appleAuth: (identityToken, fullName, email) =>
-    api.post('/auth/apple/token', { identityToken, fullName, email }),
-
   // Email verification (authenticated — add/update email)
   sendEmailCode: (email) =>
     api.post('/auth/email/send-code', { email }),
 
   verifyEmailCode: (email, code) =>
     api.post('/auth/email/verify-code', { email, code }),
-
-  // Email verification (unauthenticated — for registration)
-  sendEmailVerification: (email) =>
-    api.post('/auth/email/send-verification', { email }),
-
-  verifyEmailForRegistration: (email, code) =>
-    api.post('/auth/email/verify-registration', { email, code }),
-
-  // Update profile (firstName, lastName)
-  updateProfile: (firstName, lastName) =>
-    api.patch('/auth/profile', { firstName, lastName }),
 
   // Complete onboarding
   completeOnboarding: () =>

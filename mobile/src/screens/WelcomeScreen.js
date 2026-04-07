@@ -1,68 +1,95 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
+  TextInput,
   TouchableOpacity,
   StyleSheet,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
   ActivityIndicator,
   Alert,
-  Platform,
   Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../context/AuthContext';
 import { radius, useTypography } from '../theme/colors';
 import { useTheme } from '../context/ThemeContext';
-
-const CANCELLED_ERRORS = {
-  google: 'Google login was cancelled',
-  apple: 'Apple login was cancelled',
-};
+import { COUNTRY_CODE } from '../config/phone.config';
 
 export default function WelcomeScreen({ navigation }) {
-const typography = useTypography();
+  const typography = useTypography();
   const { colors } = useTheme();
   const styles = React.useMemo(() => createStyles(typography, colors), [typography, colors]);
-    const { t } = useTranslation();
-  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
-  const [isAppleLoading, setIsAppleLoading] = useState(false);
-  const { loginWithGoogle, loginWithApple, isGoogleSignInAvailable } = useAuth();
+  const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
+  const [localPhone, setLocalPhone] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
+  const [phoneError, setPhoneError] = useState('');
+  const cooldownRef = useRef(null);
+  const { sendPhoneOtp } = useAuth();
 
-  const handleGoogleLogin = async () => {
-    setIsGoogleLoading(true);
-    const result = await loginWithGoogle();
-    setIsGoogleLoading(false);
+  // Countdown timer for OTP cooldown
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    cooldownRef.current = setInterval(() => {
+      setCooldown((prev) => {
+        if (prev <= 1) {
+          clearInterval(cooldownRef.current);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(cooldownRef.current);
+  }, [cooldown > 0]);
 
-    if (!result.success && result.error !== CANCELLED_ERRORS.google) {
+  const handlePhoneChange = (text) => {
+    const cleaned = text.replace(/\D/g, '');
+    setLocalPhone(cleaned.slice(0, 9));
+    if (phoneError) setPhoneError('');
+  };
+
+  const getFullPhone = () => `${COUNTRY_CODE}${localPhone}`;
+
+  const validatePhone = () => {
+    return localPhone.length === 9;
+  };
+
+  const handleSendOtp = async () => {
+    if (!validatePhone()) {
+      setPhoneError(t('auth.invalidPhone'));
+      return;
+    }
+
+    const fullPhone = getFullPhone();
+    setIsLoading(true);
+    const result = await sendPhoneOtp(fullPhone);
+    setIsLoading(false);
+
+    if (result.success) {
+      setCooldown(60);
+      navigation.navigate('OtpVerification', { phone: fullPhone, isRegistered: result.isRegistered });
+    } else {
       Alert.alert(t('errors.error'), result.error);
     }
   };
-
-  const handleAppleLogin = async () => {
-    setIsAppleLoading(true);
-    const result = await loginWithApple();
-    setIsAppleLoading(false);
-
-    if (!result.success && result.error !== CANCELLED_ERRORS.apple) {
-      Alert.alert(t('errors.error'), result.error);
-    }
-  };
-
-  const handleEmailLogin = () => {
-    navigation.navigate('Login');
-  };
-
-  const handlePhoneLogin = () => {
-    navigation.navigate('PhoneAuth');
-  };
-
-  const isLoading = isGoogleLoading || isAppleLoading;
 
   return (
-    <View style={styles.container}>
-      <View style={styles.content}>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
+      <ScrollView
+        contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 24 }]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         {/* Logo / Brand */}
         <View style={styles.brandContainer}>
           <Image
@@ -74,92 +101,60 @@ const typography = useTypography();
 
         <View style={styles.header}>
           <Text style={styles.title}>{t('auth.welcome')}</Text>
-          <Text style={styles.subtitle}>{t('auth.welcomeSubtitle')}</Text>
+          <Text style={styles.subtitle}>{t('auth.phoneDescription')}</Text>
         </View>
 
-        <View style={styles.buttonsContainer}>
-          {/* Google Sign-In (hidden in Expo Go) */}
-          {isGoogleSignInAvailable && (
-            <TouchableOpacity
-              style={[styles.socialButton, isLoading && styles.buttonDisabled]}
-              onPress={handleGoogleLogin}
-              disabled={isLoading}
-              accessibilityRole="button"
-              accessibilityLabel={t('auth.continueWithGoogle')}
-              accessibilityState={{ disabled: isLoading, busy: isGoogleLoading }}
-            >
-              {isGoogleLoading ? (
-                <ActivityIndicator color={colors.foreground} />
-              ) : (
-                <>
-                  <Ionicons name="logo-google" size={22} color="#DB4437" />
-                  <Text style={styles.socialButtonText}>{t('auth.continueWithGoogle')}</Text>
-                </>
-              )}
-            </TouchableOpacity>
-          )}
-
-          {/* Apple Sign-In (iOS only) */}
-          {Platform.OS === 'ios' && (
-            <TouchableOpacity
-              style={[styles.socialButton, styles.appleButton, isLoading && styles.buttonDisabled]}
-              onPress={handleAppleLogin}
-              disabled={isLoading}
-              accessibilityRole="button"
-              accessibilityLabel={t('auth.continueWithApple')}
-              accessibilityState={{ disabled: isLoading, busy: isAppleLoading }}
-            >
-              {isAppleLoading ? (
-                <ActivityIndicator color={colors.background} />
-              ) : (
-                <>
-                  <Ionicons name="logo-apple" size={22} color={colors.background} />
-                  <Text style={[styles.socialButtonText, styles.appleButtonText]}>
-                    {t('auth.continueWithApple')}
-                  </Text>
-                </>
-              )}
-            </TouchableOpacity>
-          )}
-
-          <View style={styles.dividerContainer}>
-            <View style={styles.divider} />
-            <Text style={styles.dividerText}>{t('auth.or')}</Text>
-            <View style={styles.divider} />
+        <View style={styles.form}>
+          <View style={styles.inputContainer}>
+            <Text style={styles.label}>{t('auth.phoneNumber')}</Text>
+            <View style={[styles.inputWrapper, phoneError ? styles.inputWrapperError : null]}>
+              <View style={styles.countryCode}>
+                <Text style={styles.countryFlag}>🇬🇪</Text>
+                <Text style={styles.countryCodeText}>{COUNTRY_CODE}</Text>
+              </View>
+              <View style={styles.divider} />
+              <TextInput
+                style={styles.input}
+                placeholder="5XX XXX XXX"
+                placeholderTextColor={colors.mutedForeground}
+                value={localPhone}
+                onChangeText={handlePhoneChange}
+                keyboardType="phone-pad"
+                autoFocus
+                maxLength={9}
+                accessibilityLabel={t('auth.phoneNumber')}
+                accessibilityRole="none"
+                accessibilityHint={t('auth.phoneDescription')}
+              />
+            </View>
+            {phoneError ? (
+              <Text style={styles.errorText}>{phoneError}</Text>
+            ) : null}
           </View>
 
-          {/* Email Sign-In */}
           <TouchableOpacity
-            style={[styles.phoneButton, isLoading && styles.buttonDisabled]}
-            onPress={handleEmailLogin}
-            disabled={isLoading}
+            style={[styles.button, (!validatePhone() || isLoading || cooldown > 0) && styles.buttonDisabled]}
+            onPress={handleSendOtp}
+            disabled={!validatePhone() || isLoading || cooldown > 0}
             accessibilityRole="button"
-            accessibilityLabel={t('auth.continueWithEmail')}
-            accessibilityState={{ disabled: isLoading }}
+            accessibilityLabel={cooldown > 0 ? t('auth.resendIn', { seconds: cooldown }) : t('auth.sendCode')}
+            accessibilityState={{ disabled: !validatePhone() || isLoading || cooldown > 0, busy: isLoading }}
           >
-            <Ionicons name="mail-outline" size={22} color={colors.primaryForeground} />
-            <Text style={styles.phoneButtonText}>{t('auth.continueWithEmail')}</Text>
-          </TouchableOpacity>
-
-          {/* Phone Sign-In */}
-          <TouchableOpacity
-            style={[styles.secondaryButton, isLoading && styles.buttonDisabled]}
-            onPress={handlePhoneLogin}
-            disabled={isLoading}
-            accessibilityRole="button"
-            accessibilityLabel={t('auth.continueWithPhone')}
-            accessibilityState={{ disabled: isLoading }}
-          >
-            <Ionicons name="call-outline" size={22} color={colors.foreground} />
-            <Text style={styles.secondaryButtonText}>{t('auth.continueWithPhone')}</Text>
+            {isLoading ? (
+              <ActivityIndicator color={colors.primaryForeground} />
+            ) : cooldown > 0 ? (
+              <Text style={styles.buttonText}>{t('auth.resendIn', { seconds: cooldown })}</Text>
+            ) : (
+              <Text style={styles.buttonText}>{t('auth.sendCode')}</Text>
+            )}
           </TouchableOpacity>
         </View>
 
         <Text style={styles.termsText}>
           {t('auth.termsAgreement')}
         </Text>
-      </View>
-    </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -168,10 +163,9 @@ const createStyles = (typography, colors) => StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
-  content: {
-    flex: 1,
-    justifyContent: 'center',
-    padding: 24,
+  scrollContent: {
+    flexGrow: 1,
+    paddingHorizontal: 24,
     paddingBottom: 48,
   },
   brandContainer: {
@@ -198,79 +192,77 @@ const createStyles = (typography, colors) => StyleSheet.create({
     fontWeight: '400',
     color: colors.mutedForeground,
     textAlign: 'center',
+    lineHeight: 22,
   },
-  buttonsContainer: {
+  form: {
     width: '100%',
   },
-  socialButton: {
+  inputContainer: {
+    marginBottom: 24,
+  },
+  label: {
+    ...typography.body,
+    fontWeight: '600',
+    color: colors.foreground,
+    marginBottom: 8,
+  },
+  inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
     backgroundColor: colors.background,
     borderRadius: radius.lg,
-    padding: 16,
+    paddingHorizontal: 16,
     borderWidth: 1,
     borderColor: colors.border,
-    marginBottom: 12,
   },
-  appleButton: {
-    backgroundColor: colors.foreground,
-    borderColor: colors.foreground,
+  inputWrapperError: {
+    borderColor: colors.destructive,
   },
-  socialButtonText: {
+  countryCode: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 16,
+  },
+  countryFlag: {
+    fontSize: 20,
+  },
+  countryCodeText: {
     ...typography.h2,
     color: colors.foreground,
-    marginLeft: 12,
-  },
-  appleButtonText: {
-    color: colors.background,
-  },
-  buttonDisabled: {
-    opacity: 0.7,
-  },
-  dividerContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: 20,
+    fontWeight: '600',
   },
   divider: {
-    flex: 1,
-    height: 1,
+    width: 1,
+    height: 24,
     backgroundColor: colors.border,
+    marginHorizontal: 12,
   },
-  dividerText: {
-    ...typography.body,
-    marginHorizontal: 16,
-    color: colors.mutedForeground,
+  input: {
+    flex: 1,
+    paddingVertical: 16,
+    ...typography.h1,
+    color: colors.foreground,
+    letterSpacing: 1,
   },
-  phoneButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+  errorText: {
+    ...typography.caption,
+    color: colors.destructive,
+    marginTop: 6,
+  },
+  button: {
     backgroundColor: colors.primary,
     borderRadius: radius.lg,
     padding: 16,
-  },
-  phoneButtonText: {
-    ...typography.h2,
-    color: colors.primaryForeground,
-    marginLeft: 12,
-  },
-  secondaryButton: {
-    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.background,
-    borderRadius: radius.lg,
-    padding: 16,
-    marginTop: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
   },
-  secondaryButtonText: {
-    ...typography.h2,
-    color: colors.foreground,
-    marginLeft: 12,
+  buttonDisabled: {
+    opacity: 0.5,
+  },
+  buttonText: {
+    color: colors.primaryForeground,
+    ...typography.button,
+    fontWeight: '600',
   },
   termsText: {
     ...typography.caption,
