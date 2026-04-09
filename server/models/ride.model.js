@@ -12,7 +12,31 @@ const locationSchema = new mongoose.Schema({
     address: {
         type: String,
         required: true
-    }
+    },
+    // ── Precision layers (Phase 4 — all optional, backward-compatible) ──
+    // Original coordinates from geocoder before user moved the pin
+    originalCoords: {
+        lat: Number,
+        lng: Number,
+        _id: false,
+    },
+    // Coordinates after user adjusted the pin on the map
+    adjustedCoords: {
+        lat: Number,
+        lng: Number,
+        _id: false,
+    },
+    // Server-side road-snapped coordinates (populated async after ride creation)
+    snappedRoadCoords: {
+        lat: Number,
+        lng: Number,
+        _id: false,
+    },
+    // Reference to canonical Location document (Phase 1.4)
+    locationRef: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Location',
+    },
 }, { _id: false });
 
 const quoteSchema = new mongoose.Schema({
@@ -85,18 +109,8 @@ const rideSchema = new mongoose.Schema({
     },
     paymentMethod: {
         type: String,
-        enum: ['cash', 'card', 'apple_pay', 'google_pay', 'saved_card'],
+        enum: ['cash'],
         default: 'cash'
-    },
-    paymentStatus: {
-        type: String,
-        enum: ['pending', 'processing', 'completed', 'failed', 'held', 'refunded'],
-        default: 'pending'
-    },
-    savedCard: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'SavedCard',
-        default: null
     },
     fare: {
         type: Number,
@@ -127,6 +141,11 @@ const rideSchema = new mongoose.Schema({
         default: null
     },
     waitingExpiresAt: {
+        type: Date,
+        default: null
+    },
+    // Auto-cancel accepted rides if driver doesn't arrive within this deadline
+    acceptedExpiresAt: {
         type: Date,
         default: null
     },
@@ -268,9 +287,23 @@ rideSchema.index({ status: 1 });
 rideSchema.index({ createdAt: -1 });
 rideSchema.index({ status: 1, expiresAt: 1 }); // For querying non-expired pending rides
 rideSchema.index({ status: 1, waitingExpiresAt: 1 }); // For querying waiting timeout rides
+rideSchema.index({ status: 1, acceptedExpiresAt: 1 }); // For expiring stale accepted rides
 rideSchema.index({ status: 1, vehicleType: 1, expiresAt: 1 }); // getAvailableRides filtered by vehicle type
 rideSchema.index({ driver: 1, status: 1, endTime: -1 }); // Driver ride history sorted by completion
 rideSchema.index({ user: 1, isScheduled: 1, scheduledFor: 1 }); // Scheduled ride queries per user
+
+// Prevent race condition: only one active ride per user at database level
+// This catches the case where two createRide requests arrive simultaneously
+rideSchema.index(
+    { user: 1 },
+    {
+        unique: true,
+        partialFilterExpression: {
+            status: { $in: ['pending', 'accepted', 'driver_arrived', 'in_progress'] }
+        },
+        name: 'unique_active_ride_per_user'
+    }
+);
 
 const Ride = mongoose.model('Ride', rideSchema);
 

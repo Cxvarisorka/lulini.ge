@@ -40,12 +40,12 @@ const mapsRouter = require('./routers/maps.router');
 const notificationRouter = require('./routers/notification.router');
 const settingsRouter = require('./routers/settings.router');
 const waitlistRouter = require('./routers/waitlist.router');
-const paymentRouter = require('./routers/payment.router');
 const supportRouter = require('./routers/support.router');
 const safetyRouter = require('./routers/safety.router');
 const chatRouter = require('./routers/chat.router');
 const favoritesRouter = require('./routers/favorites.router');
 const receiptRouter = require('./routers/receipt.router');
+const locationsRouter = require('./routers/locations.router');
 
 const app = express();
 const server = http.createServer(app);
@@ -89,7 +89,7 @@ const io = new Server(server, {
 const initSocket = require('./socket');
 
 async function setupRedisAdapter() {
-    if (process.env.REDIS_URL && process.env.NODE_ENV === 'production') {
+    if (process.env.REDIS_URL) {
         const { createAdapter } = require('@socket.io/redis-adapter');
         const { getRedisClient } = require('./configs/redis.config');
 
@@ -137,12 +137,6 @@ app.use(cors({
 // Global rate limiter: 200 req / 15 min per IP
 app.use(globalLimiter);
 
-// Capture raw body for BOG callback signature verification
-app.use('/api/payments/callback', express.json({
-    limit: '16kb',
-    verify: (req, _res, buf) => { req.rawBody = buf.toString(); }
-}));
-
 // Body parsing with size limits (prevents payload bombs)
 app.use(express.json({ limit: '16kb' }));
 app.use(express.urlencoded({ extended: true, limit: '16kb' }));
@@ -188,12 +182,12 @@ v1Router.use('/maps', mapsRouter);
 v1Router.use('/notifications', notificationRouter);
 v1Router.use('/settings', settingsRouter);
 v1Router.use('/waitlist', waitlistRouter);
-v1Router.use('/payments', paymentRouter);
 v1Router.use('/support', supportRouter);
 v1Router.use('/safety', safetyRouter);
 v1Router.use('/chat', chatRouter);
 v1Router.use('/favorites', favoritesRouter);
 v1Router.use('/receipts', receiptRouter);
+v1Router.use('/locations', locationsRouter);
 
 app.use('/api/v1', v1Router);
 app.use('/api', v1Router); // Backward-compatible alias (clients can migrate to /api/v1 gradually)
@@ -236,6 +230,10 @@ app.get('/health', async (req, res) => {
         && (!process.env.REDIS_URL || checks.redis === 'connected');
     const status = isHealthy ? 'ok' : 'degraded';
 
+    // Include feature flags in health check for ops visibility
+    const { getAllFlags } = require('./utils/featureFlags');
+    checks.featureFlags = getAllFlags();
+
     res.status(isHealthy ? 200 : 503).json({
         status,
         uptime: Math.floor(process.uptime()),
@@ -259,10 +257,14 @@ app.use(globalErrorHandler);
 const PORT = process.env.PORT || 3000;
 
 // Import the ride expiration functions
-const { expireOldRides, expireWaitingRides, broadcastScheduledRides } = require('./controllers/ride.controller');
+const { expireOldRides, expireWaitingRides, expireAcceptedRides, broadcastScheduledRides } = require('./controllers/ride.controller');
 const { startWatchdog } = require('./services/rideWatchdog.service');
 const { runHardDeleteJob } = require('./jobs/hardDelete');
-const { runReconciliation } = require('./jobs/paymentReconciliation');
+
+// Location optimization background jobs (Phase 3, 7)
+const { flushToMongo, cleanupStaleDrivers } = require('./services/driverLocation.service');
+const { cleanupRoutePoints } = require('./jobs/locationRetention.job');
+const { isEnabled } = require('./utils/featureFlags');
 
 // Schedule ride expiration check every minute
 const EXPIRATION_CHECK_INTERVAL = 60 * 1000; // 1 minute
@@ -276,7 +278,10 @@ let expirationIntervalId = null;
 let waitingIntervalId = null;
 let scheduledRideIntervalId = null;
 let hardDeleteIntervalId = null;
-let paymentReconciliationIntervalId = null;
+let acceptedExpirationIntervalId = null;
+let driverLocFlushIntervalId = null;
+let staleDriverCleanupIntervalId = null;
+let locationRetentionIntervalId = null;
 
 
 // In PM2 cluster mode, only run background jobs on instance 0 to avoid duplicate work.
@@ -333,6 +338,22 @@ async function startServer() {
                 });
             }, WAITING_CHECK_INTERVAL);
 
+            // Schedule periodic accepted ride expiration checks (10-minute timeout)
+            // Runs every 30s for reasonable detection latency
+            const ACCEPTED_CHECK_INTERVAL = 30 * 1000;
+            expireAcceptedRides(io).then(result => {
+                if (result.cancelled > 0) {
+                    logger.info(`Cancelled ${result.cancelled} rides due to accepted timeout on startup`, 'scheduler');
+                }
+            });
+            acceptedExpirationIntervalId = setInterval(() => {
+                expireAcceptedRides(io).then(result => {
+                    if (result.cancelled > 0) {
+                        logger.info(`Cancelled ${result.cancelled} rides due to accepted timeout`, 'scheduler');
+                    }
+                });
+            }, ACCEPTED_CHECK_INTERVAL);
+
             // Broadcast scheduled rides approaching their start time (every minute)
             broadcastScheduledRides(io).catch(() => {});
             scheduledRideIntervalId = setInterval(() => {
@@ -357,13 +378,44 @@ async function startServer() {
                 }).catch(err => logger.error('Daily run failed', 'hardDelete', err));
             }, HARD_DELETE_INTERVAL);
 
-            // Payment reconciliation — resolve stuck payments every 5 minutes
-            const PAYMENT_RECONCILIATION_INTERVAL = 5 * 60 * 1000; // 5 minutes
-            paymentReconciliationIntervalId = setInterval(() => {
-                runReconciliation().catch(err =>
-                    logger.error('Reconciliation run failed', 'reconciliation', err)
+            // ── Location optimization background jobs (Phase 3, 7) ──
+
+            // Redis → MongoDB driver location sync (every 30s)
+            // Only runs when FF_REDIS_DRIVER_LOCATIONS is enabled
+            if (isEnabled('REDIS_DRIVER_LOCATIONS')) {
+                const DRIVER_LOC_FLUSH_INTERVAL = 30 * 1000;
+                driverLocFlushIntervalId = setInterval(() => {
+                    flushToMongo().catch(err =>
+                        logger.error('Driver location flush failed', 'driverLoc', err)
+                    );
+                }, DRIVER_LOC_FLUSH_INTERVAL);
+
+                // Stale driver cleanup from Redis GEO (every 60s)
+                const STALE_CLEANUP_INTERVAL = 60 * 1000;
+                staleDriverCleanupIntervalId = setInterval(() => {
+                    cleanupStaleDrivers().catch(err =>
+                        logger.error('Stale driver cleanup failed', 'driverLoc', err)
+                    );
+                }, STALE_CLEANUP_INTERVAL);
+
+                logger.info('Redis driver location background jobs enabled', 'driverLoc');
+            }
+
+            // routePoints retention cleanup (daily at startup, then every 24h)
+            // Only runs when FF_LOCATION_RETENTION is enabled
+            if (isEnabled('LOCATION_RETENTION')) {
+                const LOCATION_RETENTION_INTERVAL = 24 * 60 * 60 * 1000;
+                cleanupRoutePoints().catch(err =>
+                    logger.error('Initial routePoints cleanup failed', 'locationRetention', err)
                 );
-            }, PAYMENT_RECONCILIATION_INTERVAL);
+                locationRetentionIntervalId = setInterval(() => {
+                    cleanupRoutePoints().catch(err =>
+                        logger.error('routePoints cleanup failed', 'locationRetention', err)
+                    );
+                }, LOCATION_RETENTION_INTERVAL);
+
+                logger.info('Location retention cleanup job enabled', 'locationRetention');
+            }
         }
     });
 }
@@ -389,9 +441,17 @@ function gracefulShutdown(signal) {
     // Clear scheduled intervals
     if (expirationIntervalId) clearInterval(expirationIntervalId);
     if (waitingIntervalId) clearInterval(waitingIntervalId);
+    if (acceptedExpirationIntervalId) clearInterval(acceptedExpirationIntervalId);
     if (scheduledRideIntervalId) clearInterval(scheduledRideIntervalId);
     if (hardDeleteIntervalId) clearInterval(hardDeleteIntervalId);
-    if (paymentReconciliationIntervalId) clearInterval(paymentReconciliationIntervalId);
+    if (driverLocFlushIntervalId) clearInterval(driverLocFlushIntervalId);
+    if (staleDriverCleanupIntervalId) clearInterval(staleDriverCleanupIntervalId);
+    if (locationRetentionIntervalId) clearInterval(locationRetentionIntervalId);
+
+    // Final flush of driver locations to MongoDB before shutdown
+    if (isEnabled('REDIS_DRIVER_LOCATIONS')) {
+        flushToMongo().catch(() => {});
+    }
 
     // Disconnect all sockets gracefully
     io.emit('server:shutdown', { message: 'Server is restarting' });

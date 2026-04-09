@@ -37,7 +37,7 @@ async function startWorker() {
         console.warn('Worker: REDIS_URL not set — socket events will not propagate to API instances');
     }
 
-    const { expireOldRides, expireWaitingRides } = require('./controllers/ride.controller');
+    const { expireOldRides, expireWaitingRides, expireAcceptedRides } = require('./controllers/ride.controller');
 
     // Run initial checks
     const initialExpire = await expireOldRides(io);
@@ -48,6 +48,11 @@ async function startWorker() {
     const initialWaiting = await expireWaitingRides(io);
     if (initialWaiting.cancelled > 0) {
         console.log(`Worker: Cancelled ${initialWaiting.cancelled} rides due to waiting timeout on startup`);
+    }
+
+    const initialAccepted = await expireAcceptedRides(io);
+    if (initialAccepted.cancelled > 0) {
+        console.log(`Worker: Cancelled ${initialAccepted.cancelled} rides due to accepted timeout on startup`);
     }
 
     // Schedule periodic checks
@@ -64,6 +69,14 @@ async function startWorker() {
             console.log(`Worker: Cancelled ${result.cancelled} rides due to waiting timeout`);
         }
     }, 15 * 1000);
+
+    // Check for stale accepted rides every 30 seconds (10-minute timeout)
+    setInterval(async () => {
+        const result = await expireAcceptedRides(io);
+        if (result.cancelled > 0) {
+            console.log(`Worker: Cancelled ${result.cancelled} rides due to accepted timeout`);
+        }
+    }, 30 * 1000);
 
     console.log('Background worker started');
 }

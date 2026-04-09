@@ -22,8 +22,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import { useNetwork } from '../context/NetworkContext';
-import * as WebBrowser from 'expo-web-browser';
-import { taxiAPI, settingsAPI, paymentAPI } from '../services/api';
+import { taxiAPI, settingsAPI } from '../services/api';
 import { persistRideState, loadRideState, clearRideState, persistLastDestination, loadLastDestination } from '../services/rideStorage';
 import {
   showRideNotification,
@@ -33,7 +32,7 @@ import { getDirections, getDirectionsOSRM, reverseGeocode } from '../services/go
 import { shadows, radius, useTypography } from '../theme/colors';
 import { useTheme } from '../context/ThemeContext';
 import { notificationSuccess, notificationWarning, notificationError, mediumImpact } from '../utils/haptics';
-import { rideAccepted, rideArrived, rideCompleted, rideCancelled } from '../utils/sounds';
+import { rideAccepted, rideArrived, rideCompleted, rideCancelled, stopAllSounds } from '../utils/sounds';
 import { maybePromptReview } from '../utils/reviewPrompt';
 import CancelRideModal from '../components/CancelRideModal';
 import RideReviewModal from '../components/RideReviewModal';
@@ -241,11 +240,6 @@ export default function TaxiScreen({ navigation }) {
   const [completedRide, setCompletedRide] = useState(null);
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
   const [showPaymentMethodModal, setShowPaymentMethodModal] = useState(false);
-  const [paymentModalMode, setPaymentModalMode] = useState('select');
-  const [selectedPaymentId, setSelectedPaymentId] = useState(null);
-  const [selectedCardId, setSelectedCardId] = useState(null);
-  const [selectedCardLast4, setSelectedCardLast4] = useState(null);
-  const pendingPostRidePaymentRef = useRef(null);
   const timeoutTimerRef = useRef(null);
   const progressAnim = useRef(new Animated.Value(0)).current;
   const progress = progressAnim;
@@ -940,17 +934,9 @@ export default function TaxiScreen({ navigation }) {
     const RIDE_EVENTS = [
       'ride:accepted', 'driver:locationUpdate', 'ride:arrived',
       'ride:started', 'ride:completed', 'ride:cancelled',
-      'ride:expired', 'ride:waitingTimeout', 'payment:action_required',
+      'ride:expired', 'ride:waitingTimeout', 'ride:acceptedTimeout',
     ];
     RIDE_EVENTS.forEach(e => socket.removeAllListeners(e));
-
-    // Post-ride saved card payment: server created a charge, user must confirm on BOG page.
-    // Store it — we open the browser AFTER the review modal is dismissed to avoid crash.
-    socket.on('payment:action_required', (data) => {
-      if (data.redirectUrl) {
-        pendingPostRidePaymentRef.current = data;
-      }
-    });
 
     // Use tRef.current inside all handlers to avoid stale translation closure
     socket.on('ride:accepted', (ride) => {
@@ -1298,6 +1284,17 @@ export default function TaxiScreen({ navigation }) {
       );
     });
 
+    socket.on('ride:acceptedTimeout', (data) => {
+      resetBookingState();
+      const tr = tRef.current;
+      showAlertOnce(
+        data.rideId, 'acceptedTimeout',
+        tr('taxi.acceptedTimeout'),
+        tr('taxi.acceptedTimeoutMessage'),
+        [{ text: tr('common.ok') }]
+      );
+    });
+
     // Chat — increment unread count for incoming messages from driver
     socket.on('chat:message', (data) => {
       const msg = data?.message || data;
@@ -1322,6 +1319,7 @@ export default function TaxiScreen({ navigation }) {
       socket.off('ride:cancelled');
       socket.off('ride:expired');
       socket.off('ride:waitingTimeout');
+      socket.off('ride:acceptedTimeout');
       socket.off('chat:message');
     };
   }, [socket]);
@@ -1462,6 +1460,7 @@ export default function TaxiScreen({ navigation }) {
   // ETA countdown — no longer sends notifications, just kept as state for UI display
 
   const resetBookingState = () => {
+    stopAllSounds();
     dismissRideNotification();
     clearCachedRide();
     clearSearchMeta();
@@ -1866,88 +1865,14 @@ export default function TaxiScreen({ navigation }) {
       return;
     }
 
-    // Saved card & cash: submit ride directly. Card on file is the guarantee.
-    // BOG recurrent charges require browser confirmation, so we charge AFTER
-    // the ride completes — not before. This matches Bolt/Uber UX.
-    //
-    // Apple Pay / Google Pay (one-time): preauthorize before ride since the
-    // user is already in a payment context and one-time orders support it.
-    if (paymentMethod === 'cash' || paymentMethod === 'saved_card') {
-      submitRideRequest(paymentMethod, null);
-      return;
-    }
-
-    // Apple Pay / Google Pay: preauthorize (hold funds) before submitting ride
-    const price = estimatedPrice ? parseFloat(estimatedPrice) : 0;
-    if (!price || price <= 0) {
-      Alert.alert(t('errors.error'), t('taxi.enterDestination'));
-      return;
-    }
-
-    setIsRequesting(true);
-    try {
-      const lang = i18n.language === 'ka' ? 'ka' : 'en';
-      const method = paymentMethod === 'apple_pay' ? ['apple_pay'] : ['google_pay'];
-      const res = await paymentAPI.payRide(price, null, method, lang, 'manual');
-      const preauthResult = res.data?.data;
-
-      if (!preauthResult?.orderId) {
-        throw new Error('No order ID returned');
-      }
-
-      let status;
-      let confirmedPaymentId;
-      let lastVerifyRes;
-
-      if (preauthResult.redirectUrl) {
-        await WebBrowser.openAuthSessionAsync(preauthResult.redirectUrl, 'lulini://');
-
-        // Poll for final status after browser closes
-        for (let i = 0; i < 8; i++) {
-          await new Promise(r => setTimeout(r, 1500));
-          const pollRes = await paymentAPI.verifyRidePayment(preauthResult.orderId);
-          const pollStatus = pollRes.data?.data?.status;
-          lastVerifyRes = pollRes;
-          if (pollStatus === 'blocked' || pollStatus === 'completed' || pollStatus === 'rejected') {
-            status = pollStatus;
-            confirmedPaymentId = pollRes.data?.data?.paymentId || preauthResult.paymentId;
-            break;
-          }
-        }
-      }
-
-      if (status === 'blocked' || status === 'completed') {
-        setIsRequesting(false);
-        submitRideRequest(paymentMethod, confirmedPaymentId);
-      } else if (status === 'rejected') {
-        const errorKey = lastVerifyRes?.data?.data?.errorKey;
-        Alert.alert(t('errors.error'), t(errorKey || 'payment.cardPaymentFailed'));
-        setIsRequesting(false);
-      } else {
-        Alert.alert(t('payment.cardPaymentProcessing'), t('payment.paymentPendingMessage'));
-        setIsRequesting(false);
-      }
-    } catch (err) {
-      const msg = err.response?.data?.error || err.response?.data?.message || t('payment.cardPaymentFailed');
-      Alert.alert(t('errors.error'), msg);
-      setIsRequesting(false);
-    }
+    submitRideRequest('cash');
   };
 
-  const handlePaymentMethodSelect = (method, cardId, paymentId, cardLast4) => {
-    if (method === 'card' && cardId) {
-      setPaymentMethod('saved_card');
-      setSelectedCardId(cardId);
-      setSelectedCardLast4(cardLast4 || null);
-    } else {
-      setPaymentMethod(method);
-      setSelectedCardId(null);
-      setSelectedCardLast4(null);
-    }
-    setSelectedPaymentId(paymentId || null);
+  const handlePaymentMethodSelect = (method) => {
+    setPaymentMethod(method);
   };
 
-  const submitRideRequest = async (method, paymentId) => {
+  const submitRideRequest = async (method) => {
     // Duplicate guard: prevent submitting if there's already an active ride
     const existingRide = currentRideRef.current;
     if (existingRide && !['completed', 'cancelled'].includes(existingRide.status)) {
@@ -2002,9 +1927,7 @@ export default function TaxiScreen({ navigation }) {
         },
         passengerName: `${user.firstName} ${user.lastName}`,
         passengerPhone: user.phone || '',
-        paymentMethod: method || paymentMethod,
-        paymentId: paymentId || selectedPaymentId || undefined,
-        cardId: selectedCardId || undefined,
+        paymentMethod: method || 'cash',
         notes: ''
       };
 
@@ -2173,25 +2096,6 @@ export default function TaxiScreen({ navigation }) {
   const handleCloseReviewModal = () => {
     setShowReviewModal(false);
     setCompletedRide(null);
-    openPendingPostRidePayment();
-  };
-
-  const openPendingPostRidePayment = async () => {
-    const pending = pendingPostRidePaymentRef.current;
-    if (!pending) return;
-    pendingPostRidePaymentRef.current = null;
-
-    // Small delay to let the modal fully dismiss before opening browser
-    await new Promise(r => setTimeout(r, 500));
-
-    try {
-      await WebBrowser.openAuthSessionAsync(pending.redirectUrl, 'lulini://');
-      if (pending.orderId) {
-        await paymentAPI.verifyRidePayment(pending.orderId);
-      }
-    } catch (err) {
-      if (__DEV__) console.warn('[TaxiScreen] Post-ride payment error:', err.message);
-    }
   };
 
   const handleBackToSearch = useCallback(() => {
@@ -2415,15 +2319,10 @@ export default function TaxiScreen({ navigation }) {
       return (
         <RideOptionsSheet
           selectedVehicle={selectedVehicle}
-          paymentMethod={paymentMethod}
           estimatedPrice={estimatedPrice}
           estimatedDuration={estimatedDuration}
           onVehicleChange={handleVehicleSelect}
-          onPaymentPress={() => {
-            setPaymentModalMode('select');
-            setShowPaymentMethodModal(true);
-          }}
-          selectedCardLast4={selectedCardLast4}
+          onPaymentPress={() => setShowPaymentMethodModal(true)}
           onRequestRide={handleRequestRide}
           onBack={handleBackToSearch}
           isRequesting={isRequesting}
@@ -2455,7 +2354,7 @@ export default function TaxiScreen({ navigation }) {
     bookingStep, currentRide, estimatedPrice, estimatedDuration, totalDistance,
     driverETA, driverDistance, waitingTimeLeft, waitingFee,
     unreadChatCount,
-    selectedVehicle, paymentMethod, selectedCardLast4, isRequesting, pricingConfig,
+    selectedVehicle, isRequesting, pricingConfig,
     locationAddress, destination, isLoadingLocation, isLoadingDirections,
     stops, lastDestination,
   ]);
@@ -2568,8 +2467,6 @@ export default function TaxiScreen({ navigation }) {
         visible={showPaymentMethodModal}
         onClose={closePaymentModal}
         onSelect={handlePaymentMethodSelect}
-        amount={estimatedPrice ? parseFloat(estimatedPrice) : 0}
-        mode={paymentModalMode}
       />
 
       {/* Full Screen Map */}

@@ -159,6 +159,8 @@
     "rideExpiredMessage": "Your ride request has expired. Please try again.",
     "waitingTimeout": "Ride Cancelled",
     "waitingTimeoutMessage": "The ride was cancelled because you didn't arrive at the pickup point within 3 minutes.",
+    "acceptedTimeout": "Ride Cancelled",
+    "acceptedTimeoutMessage": "Your ride was cancelled because the driver did not arrive in time. Please try again.",
     "waitingForYou": "Driver is waiting for you",
     "timeRemaining": "Time remaining",
     "freeWaiting": "Free waiting period",
