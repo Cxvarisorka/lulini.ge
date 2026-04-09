@@ -5,36 +5,16 @@ import { useTranslation } from 'react-i18next';
 import { radius, useTypography } from '../../theme/colors';
 import { useTheme } from '../../context/ThemeContext';
 
-const PAYMENT_ICONS = {
-  cash: 'cash-outline',
-  card: 'card-outline',
-  saved_card: 'card',
-  apple_pay: 'logo-apple',
-  google_pay: 'logo-google',
-};
-
-export default function PaymentMethodSelector({ selected, onPress, selectedCardLast4 }) {
+export default function PaymentMethodSelector({ onPress }) {
   const typography = useTypography();
   const { colors } = useTheme();
   const styles = React.useMemo(() => createStyles(typography, colors), [typography, colors]);
   const { t } = useTranslation();
 
-  const getLabel = () => {
-    switch (selected) {
-      case 'apple_pay': return t('taxi.applePay');
-      case 'google_pay': return t('taxi.googlePay');
-      case 'saved_card': return selectedCardLast4 ? `•••• ${selectedCardLast4}` : t('taxi.card');
-      case 'card': return t('taxi.card');
-      default: return t('taxi.cash');
-    }
-  };
-
-  const icon = PAYMENT_ICONS[selected] || PAYMENT_ICONS.cash;
-
   return (
     <TouchableOpacity style={styles.container} onPress={onPress} activeOpacity={0.7}>
-      <Ionicons name={icon} size={20} color={colors.primary} />
-      <Text style={styles.label} numberOfLines={1}>{getLabel()}</Text>
+      <Ionicons name="cash-outline" size={20} color={colors.primary} />
+      <Text style={styles.label} numberOfLines={1}>{t('taxi.cash')}</Text>
       <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
     </TouchableOpacity>
   );

@@ -10,12 +10,10 @@ import { useTheme } from '../../context/ThemeContext';
 
 export default function RideOptionsSheet({
   selectedVehicle,
-  paymentMethod,
   estimatedPrice,
   estimatedDuration,
   onVehicleChange,
   onPaymentPress,
-  selectedCardLast4,
   onRequestRide,
   onBack,
   isRequesting,
@@ -50,11 +48,7 @@ export default function RideOptionsSheet({
 
       {/* Payment method */}
       <Text style={styles.sectionLabel}>{t('taxi.paymentMethod')}</Text>
-      <PaymentMethodSelector
-        selected={paymentMethod}
-        onPress={onPaymentPress}
-        selectedCardLast4={selectedCardLast4}
-      />
+      <PaymentMethodSelector onPress={onPaymentPress} />
 
       {/* Schedule for later */}
       {onScheduleRide && (
