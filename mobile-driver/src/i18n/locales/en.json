@@ -240,7 +240,9 @@
       "rideUnavailableTitle": "Ride Unavailable",
       "rideUnavailableBody": "The ride request is no longer available.",
       "waitingTimeoutTitle": "Ride Cancelled",
-      "waitingTimeoutBody": "Passenger did not show up within 3 minutes"
+      "waitingTimeoutBody": "Passenger did not show up within 3 minutes",
+      "acceptedTimeoutTitle": "Ride Cancelled",
+      "acceptedTimeoutBody": "The ride was cancelled because you did not arrive within the time limit."
     }
   },
   "nav": {
@@ -387,6 +389,25 @@
     "wrongPassword": "Incorrect password. Please try again.",
     "accessDeleteButton": "Permanently delete your driver account",
     "accessPasswordField": "Enter your password to confirm deletion"
+  },
+  "forgotPassword": {
+    "title": "Forgot Password",
+    "link": "Forgot password?",
+    "phoneTitle": "Enter Your Phone Number",
+    "phoneSubtitle": "We'll send a verification code to the phone number linked to your account.",
+    "sendCode": "Send Verification Code",
+    "invalidPhone": "Please enter a valid phone number",
+    "otpTitle": "Enter Verification Code",
+    "otpSubtitle": "We sent a code to {{phone}}",
+    "otpPlaceholder": "Enter code",
+    "otpResent": "Verification code has been resent",
+    "invalidOtp": "Please enter the verification code",
+    "newPasswordTitle": "Set New Password",
+    "newPasswordSubtitle": "Create a strong password for your account.",
+    "newPassword": "New Password",
+    "resetButton": "Reset Password",
+    "resetSuccess": "Your password has been reset successfully. Please sign in with your new password.",
+    "backToLogin": "Back to Login"
   },
   "register": {
     "title": "Create Account",

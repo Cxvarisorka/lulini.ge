@@ -15,23 +15,99 @@ const { maskPhone } = require('../utils/phoneMask');
 const RideShare = require('../models/rideShare.model');
 const emailService = require('../services/email.service');
 const { publishRideEvent } = require('../queues/rideEvents');
+const { isEnabled } = require('../utils/featureFlags');
+const { findDriversByETA } = require('../services/etaDispatch.service');
+const { snapRidePickup } = require('../services/roadSnap.service');
+const { recordRecentLocation } = require('../services/recentLocations.service');
+const logger = require('../utils/logger');
+const { createOffer, sendOfferToDriver, OFFER_TIMEOUT_MS, getEligibleDriverTypes } = require('../services/driverDispatch.service');
+
+// ── Redis pub/sub for ETA dispatch (replaces DB polling) ──
+// When a ride is accepted or cancelled, we publish to a Redis channel so the
+// dispatch loop is notified instantly instead of polling the DB every 2 seconds.
+const RIDE_DISPATCH_CHANNEL = 'ride:dispatch:response';
+
+/**
+ * Notify the ETA dispatch loop that a ride's status changed.
+ * Called from acceptRide and cancelRide.
+ */
+async function notifyRideResponse(rideId, action) {
+    try {
+        const redis = process.env.REDIS_URL ? await getRedis() : null;
+        if (redis) {
+            await redis.publish(RIDE_DISPATCH_CHANNEL, JSON.stringify({ rideId, action }));
+        }
+    } catch { /* best-effort */ }
+}
+
+/**
+ * Wait for a ride response (accepted/cancelled) via Redis pub/sub with timeout fallback.
+ * Falls back to a single DB check on timeout if Redis is unavailable.
+ */
+async function waitForRideResponse(rideId, timeoutMs) {
+    let redis;
+    try {
+        redis = process.env.REDIS_URL ? await getRedis() : null;
+    } catch { redis = null; }
+
+    if (redis) {
+        // Use Redis pub/sub — zero DB queries during the wait
+        const subClient = redis.duplicate();
+        try {
+            await subClient.connect();
+        } catch {
+            // If subscribe fails, fall back to timeout-only approach
+            return new Promise(resolve => setTimeout(() => resolve('timeout'), timeoutMs));
+        }
+
+        return new Promise((resolve) => {
+            let settled = false;
+            const cleanup = () => {
+                if (!settled) {
+                    settled = true;
+                    subClient.unsubscribe(RIDE_DISPATCH_CHANNEL).catch(() => {});
+                    subClient.disconnect().catch(() => {});
+                }
+            };
+
+            const timeout = setTimeout(() => {
+                cleanup();
+                resolve('timeout');
+            }, timeoutMs);
+
+            subClient.subscribe(RIDE_DISPATCH_CHANNEL, (message) => {
+                try {
+                    const data = JSON.parse(message);
+                    if (data.rideId === rideId) {
+                        clearTimeout(timeout);
+                        cleanup();
+                        resolve(data.action); // 'accepted' or 'cancelled'
+                    }
+                } catch { /* ignore malformed messages */ }
+            }).catch(() => {
+                clearTimeout(timeout);
+                cleanup();
+                // Fallback: just wait the full timeout
+                setTimeout(() => resolve('timeout'), timeoutMs);
+            });
+        });
+    }
+
+    // No Redis: fall back to simple timeout + single DB check
+    return new Promise((resolve) => {
+        setTimeout(async () => {
+            try {
+                const check = await Ride.findById(rideId).select('status driver').lean();
+                if (!check || check.status === 'cancelled') resolve('cancelled');
+                else if (check.driver) resolve('accepted');
+                else resolve('timeout');
+            } catch { resolve('timeout'); }
+        }, timeoutMs);
+    });
+}
 
 // Proximity threshold: driver must be within this distance to confirm arrival/completion
 const ARRIVAL_PROXIMITY_KM = 0.5; // 500 meters
-
-// ── Vehicle type hierarchy ──
-// Higher-tier drivers can serve lower-tier ride requests:
-//   economy → economy, comfort, business drivers
-//   comfort → comfort, business drivers
-//   business → business drivers only
-function getEligibleDriverTypes(rideVehicleType) {
-    switch (rideVehicleType) {
-        case 'economy': return ['economy', 'comfort', 'business'];
-        case 'comfort': return ['comfort', 'business'];
-        case 'business': return ['business'];
-        default: return [rideVehicleType];
-    }
-}
 
 // Inverse: which ride types can a driver of a given type accept?
 function getEligibleRideTypes(driverVehicleType) {
@@ -119,9 +195,6 @@ const createRide = catchAsync(async (req, res, next) => {
         quote,
         passengerName,
         passengerPhone,
-        paymentMethod,
-        paymentId,
-        cardId,
         notes,
         scheduledFor
     } = req.body;
@@ -206,65 +279,145 @@ const createRide = catchAsync(async (req, res, next) => {
     }
 
     // Create the ride
-    const ride = await Ride.create({
-        user: req.user.id,
-        pickup,
-        dropoff,
-        stops: validStops,
-        vehicleType,
-        quote,
-        passengerName,
-        passengerPhone,
-        paymentMethod: paymentMethod || 'cash',
-        savedCard: (paymentMethod === 'saved_card' && cardId) ? cardId : null,
-        notes,
-        status: 'pending',
-        expiresAt,
-        scheduledFor: scheduledForDate,
-        isScheduled: isScheduledRide
-    });
-
-    // Link payment to this ride (preauth hold or completed payment)
-    if (paymentId && paymentMethod !== 'cash') {
-        const Payment = require('../models/payment.model');
-        const linked = await Payment.findOneAndUpdate(
-            {
-                _id: paymentId,
-                user: req.user.id,
-                type: { $in: ['ride_payment', 'ride_preauth'] },
-                status: { $in: ['completed', 'blocked'] },
-                ride: null
-            },
-            { ride: ride._id },
-            { new: true }
-        );
-        if (linked) {
-            ride.paymentStatus = linked.status === 'completed' ? 'completed' : 'held';
-            await ride.save();
+    // The unique_active_ride_per_user partial index prevents duplicate active rides
+    // at the database level (catches race conditions the app-level check misses).
+    let ride;
+    try {
+        ride = await Ride.create({
+            user: req.user.id,
+            pickup,
+            dropoff,
+            stops: validStops,
+            vehicleType,
+            quote,
+            passengerName,
+            passengerPhone,
+            paymentMethod: 'cash',
+            notes,
+            status: 'pending',
+            expiresAt,
+            scheduledFor: scheduledForDate,
+            isScheduled: isScheduledRide
+        });
+    } catch (err) {
+        if (err.code === 11000 && err.message?.includes('unique_active_ride_per_user')) {
+            return next(new AppError('You already have an active ride', 409));
         }
+        throw err;
     }
 
     // Populate user in-place (avoids re-fetching the ride from DB)
     await ride.populate('user', 'firstName lastName email phone');
 
+    // ── Phase 4: Snap pickup to nearest road (async, non-blocking) ──
+    if (isEnabled('PICKUP_ROAD_SNAP')) {
+        snapRidePickup(ride._id).catch(err =>
+            logger.error('Pickup snap error: ' + err.message, 'ride')
+        );
+    }
+
+    // ── Phase 5: Record dropoff as recent location for user ──
+    recordRecentLocation(req.user.id, dropoff).catch(() => {});
+
+    // Build enriched ride data with commission info for driver display
+    const rideData = ride.toObject();
+    const commissionPercent = pricingConfig.commissionPercent || 15;
+    const totalPrice = rideData.quote?.totalPrice || 0;
+    const commissionAmount = Math.round(totalPrice * (commissionPercent / 100) * 100) / 100;
+    rideData.commissionPercent = commissionPercent;
+    rideData.commissionAmount = commissionAmount;
+    rideData.driverEarnings = Math.round((totalPrice - commissionAmount) * 100) / 100;
+
     // Scheduled rides are NOT broadcast to drivers immediately —
     // the scheduler will broadcast them when scheduledFor is within 10 minutes.
     const io = req.app.get('io');
     if (io && !isScheduledRide) {
-        const eligibleTypes = getEligibleDriverTypes(vehicleType);
-        let broadcast = io.to('admin');
-        for (const type of eligibleTypes) {
-            broadcast = broadcast.to(`drivers:${type}`);
+        // ── Phase 8: ETA-first dispatch (feature-flagged) ──
+        if (isEnabled('ETA_DISPATCH')) {
+            // ETA dispatch runs in the background after responding to the user.
+            // It finds drivers by real ETA, offers sequentially, and uses Redis pub/sub
+            // to detect acceptance/cancellation instead of DB polling.
+            setImmediate(async () => {
+                // Track drivers who were already offered this ride (by user ID)
+                // so we can exclude them from the fallback broadcast
+                const offeredDriverUserIds = [];
+
+                try {
+                    const ranked = await findDriversByETA(pickup, vehicleType, [], 5);
+                    let dispatched = false;
+                    let cancelled = false;
+
+                    for (const candidate of ranked) {
+                        // Check if ride was cancelled before offering to next driver
+                        const rideCheck = await Ride.findById(ride._id).select('status').lean();
+                        if (!rideCheck || rideCheck.status === 'cancelled') {
+                            cancelled = true;
+                            break;
+                        }
+
+                        await createOffer(ride._id, candidate.driverId);
+                        const driver = await Driver.findById(candidate.driverId).select('user').lean();
+                        if (!driver) continue;
+
+                        // Track this driver's user ID for broadcast exclusion
+                        offeredDriverUserIds.push(driver.user.toString());
+
+                        const enrichedData = {
+                            ...rideData,
+                            etaSeconds: candidate.etaSeconds,
+                            etaSource: candidate.etaSource,
+                            offerTimeoutMs: OFFER_TIMEOUT_MS,
+                        };
+
+                        await sendOfferToDriver(io, driver, enrichedData);
+
+                        // Wait for response using Redis pub/sub (no DB polling)
+                        const result = await waitForRideResponse(ride._id.toString(), OFFER_TIMEOUT_MS);
+
+                        if (result === 'accepted') { dispatched = true; break; }
+                        if (result === 'cancelled') { cancelled = true; break; }
+
+                        // Mark offer as timed out
+                        await RideOffer.updateOne(
+                            { ride: ride._id, driver: candidate.driverId, status: 'pending' },
+                            { status: 'timeout', respondedAt: new Date() }
+                        );
+                    }
+
+                    // Fallback: if no driver accepted and ride not cancelled, broadcast
+                    // to remaining eligible drivers (excluding those already offered)
+                    if (!dispatched && !cancelled) {
+                        const eligibleTypes = getEligibleDriverTypes(vehicleType);
+                        let broadcast = io.to('admin');
+                        for (const type of eligibleTypes) {
+                            broadcast = broadcast.to(`drivers:${type}`);
+                        }
+                        // Exclude drivers who already saw and timed out on this ride
+                        for (const userId of offeredDriverUserIds) {
+                            broadcast = broadcast.except(`driver:${userId}`);
+                        }
+                        broadcast.emit('ride:request', rideData);
+                    }
+                } catch (err) {
+                    logger.error('ETA dispatch failed, falling back to broadcast: ' + err.message, 'dispatch');
+                    // Fallback: broadcast to all drivers
+                    const eligibleTypes = getEligibleDriverTypes(vehicleType);
+                    let broadcast = io.to('admin');
+                    for (const type of eligibleTypes) {
+                        broadcast = broadcast.to(`drivers:${type}`);
+                    }
+                    broadcast.emit('ride:request', rideData);
+                }
+            });
+        } else {
+            // ── Existing broadcast behavior (default) ──
+            const eligibleTypes = getEligibleDriverTypes(vehicleType);
+            let broadcast = io.to('admin');
+            for (const type of eligibleTypes) {
+                broadcast = broadcast.to(`drivers:${type}`);
+            }
+            broadcast.emit('ride:request', rideData);
         }
-        // Attach commission info so drivers see their earnings breakdown
-        const rideData = ride.toObject();
-        const commissionPercent = pricingConfig.commissionPercent || 15;
-        const totalPrice = rideData.quote?.totalPrice || 0;
-        const commissionAmount = Math.round(totalPrice * (commissionPercent / 100) * 100) / 100;
-        rideData.commissionPercent = commissionPercent;
-        rideData.commissionAmount = commissionAmount;
-        rideData.driverEarnings = Math.round((totalPrice - commissionAmount) * 100) / 100;
-        broadcast.emit('ride:request', rideData);
     }
 
     const responseBody = {
@@ -276,10 +429,10 @@ const createRide = catchAsync(async (req, res, next) => {
     // Cache response for idempotency replay (Redis or in-memory)
     if (idempotencyKey) {
         setIdempotentResponse(idempotencyKey, 201, responseBody)
-            .catch(err => console.error('Idempotency cache error:', err.message));
+            .catch(err => logger.error('Idempotency cache error: ' + err.message, 'ride'));
     }
 
-    // Return response immediately — don't wait for push notifications
+    // Return response immediately — don't wait for push notifications or ETA dispatch
     res.status(201).json(responseBody);
 
     // Analytics
@@ -328,7 +481,7 @@ const createRide = catchAsync(async (req, res, next) => {
                         );
                     }
                 } catch (err) {
-                    console.error('Push error (createRide):', err.message);
+                    logger.error('Push error (createRide):', err.message);
                 }
             });
         }
@@ -461,7 +614,7 @@ const adminCreateRide = catchAsync(async (req, res, next) => {
                 );
             }
         } catch (err) {
-            console.error('Push error (adminCreateRide):', err.message);
+            logger.error('Push error (adminCreateRide):', err.message);
         }
     });
 });
@@ -499,6 +652,8 @@ const acceptRide = catchAsync(async (req, res, next) => {
 
         // Atomic update: only transitions pending → accepted AND assigns this driver
         // This is the most race-critical transition (multiple drivers competing)
+        // acceptedExpiresAt: auto-cancel if driver doesn't arrive within 10 minutes
+        const ACCEPTED_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
         ride = await Ride.findOneAndUpdate(
             {
                 _id: req.params.id,
@@ -512,6 +667,7 @@ const acceptRide = catchAsync(async (req, res, next) => {
                 $set: {
                     status: 'accepted',
                     driver: driver._id,
+                    acceptedExpiresAt: new Date(Date.now() + ACCEPTED_TIMEOUT_MS),
                 },
             },
             { new: true, session }
@@ -541,6 +697,9 @@ const acceptRide = catchAsync(async (req, res, next) => {
     } finally {
         session.endSession();
     }
+
+    // Notify ETA dispatch loop that this ride was accepted (Redis pub/sub)
+    notifyRideResponse(ride._id.toString(), 'accepted').catch(() => {});
 
     const populatedRide = await Ride.findById(ride._id)
         .populate('user', 'firstName lastName email phone')
@@ -671,6 +830,7 @@ const notifyArrival = catchAsync(async (req, res, next) => {
                 status: 'driver_arrived',
                 arrivalTime: now,
                 waitingExpiresAt: new Date(now.getTime() + TOTAL_WAITING_MINUTES * 60 * 1000),
+                acceptedExpiresAt: null, // Clear — waiting timeout takes over
             },
         },
         { new: true }
@@ -771,7 +931,7 @@ const startRide = catchAsync(async (req, res, next) => {
         const body = { success: true, message: 'Ride already in progress', data: { ride: populatedRide } };
         if (idempotencyKey) {
             setIdempotentResponse(`start:${idempotencyKey}`, 200, body)
-                .catch(err => console.error('Idempotency cache error:', err.message));
+                .catch(err => logger.error('Idempotency cache error: ' + err.message, 'ride'));
         }
         return res.status(200).json(body);
     }
@@ -849,7 +1009,7 @@ const startRide = catchAsync(async (req, res, next) => {
     // Cache response for idempotency replay
     if (idempotencyKey) {
         setIdempotentResponse(`start:${idempotencyKey}`, 200, responseBody)
-            .catch(err => console.error('Idempotency cache error:', err.message));
+            .catch(err => logger.error('Idempotency cache error: ' + err.message, 'ride'));
     }
 
     res.json(responseBody);
@@ -938,7 +1098,6 @@ const completeRide = catchAsync(async (req, res, next) => {
                     fare: finalFare,
                     commission,
                     commissionPercent,
-                    paymentStatus: 'completed',
                 },
             },
             { new: true, session }
@@ -967,99 +1126,13 @@ const completeRide = catchAsync(async (req, res, next) => {
         session.endSession();
     }
 
-    // Post-ride payment processing
-    if (ride.paymentMethod !== 'cash') {
-        const Payment = require('../models/payment.model');
-        const bogService = require('../services/bog.service');
-        const SavedCard = require('../models/savedCard.model');
-        const crypto = require('crypto');
-        const logger = require('../utils/logger');
-
-        // Case 1: Preauthorized payment exists — capture it
-        const preauthPayment = await Payment.findOne({
-            ride: ride._id,
-            type: 'ride_preauth',
-            captureMode: 'manual',
-            status: 'blocked'
-        });
-        if (preauthPayment) {
-            try {
-                await bogService.approvePreauth(preauthPayment.bogOrderId, {
-                    amount: finalFare,
-                    description: `Ride fare for ride ${ride._id}`,
-                    idempotencyKey: crypto.randomUUID()
-                });
-                preauthPayment.capturedAmount = finalFare;
-                preauthPayment.status = 'capture_requested';
-                await preauthPayment.save();
-            } catch (err) {
-                logger.error(`[completeRide] Preauth capture failed for ride ${ride._id}: ${err.message}`, 'payment');
-            }
-        }
-
-        // Case 2: Saved card with no preauth — create post-ride charge
-        // BOG recurrent charges require user confirmation on the payment page.
-        // Create the order now; the user will be prompted to confirm via push notification.
-        if (!preauthPayment && ride.paymentMethod === 'saved_card' && ride.savedCard) {
-            try {
-                const card = await SavedCard.findOne({ _id: ride.savedCard, isActive: true });
-                if (card) {
-                    const CALLBACK_BASE_URL = process.env.BOG_CALLBACK_URL || 'https://api.lulini.ge';
-                    const externalOrderId = `ride_${ride._id}_${Date.now()}`;
-
-                    const order = await bogService.chargeRecurrent(card.bogOrderId, {
-                        amount: finalFare,
-                        externalOrderId,
-                        callbackUrl: `${CALLBACK_BASE_URL}/api/payments/callback`,
-                        redirectSuccess: `${CALLBACK_BASE_URL}/api/payments/redirect/success`,
-                        redirectFail: `${CALLBACK_BASE_URL}/api/payments/redirect/fail`,
-                        description: `Lulini Ride #${ride._id}`,
-                        lang: 'ka',
-                        idempotencyKey: crypto.randomUUID()
-                    });
-
-                    await Payment.create({
-                        user: ride.user,
-                        ride: ride._id,
-                        bogOrderId: order.id,
-                        externalOrderId,
-                        type: 'ride_payment',
-                        amount: finalFare,
-                        currency: 'GEL',
-                        status: 'created',
-                        savedCard: card._id
-                    });
-
-                    // Update ride to processing — user will confirm payment via browser
-                    await Ride.updateOne({ _id: ride._id }, { paymentStatus: 'processing' });
-
-                    // Notify user to complete payment (they need to open the BOG page)
-                    const { emitCritical } = require('../utils/socketHelpers');
-                    const io = req.app.get('io');
-                    emitCritical(io, `user:${ride.user}`, 'payment:action_required', {
-                        rideId: ride._id,
-                        orderId: order.id,
-                        redirectUrl: order.redirectUrl,
-                        amount: finalFare
-                    });
-
-                    logger.info(`[completeRide] Post-ride charge created for ride ${ride._id}: order=${order.id}`, 'payment');
-                }
-            } catch (err) {
-                logger.error(`[completeRide] Post-ride charge failed for ride ${ride._id}: ${err.message}`, 'payment');
-                // Ride is completed but payment failed — needs manual resolution
-                await Ride.updateOne({ _id: ride._id }, { paymentStatus: 'failed' });
-            }
-        }
-    }
-
     // Expire any live ride-share documents for this ride — set TTL to endTime + 1 hour
     // so the MongoDB TTL index cleans them up automatically.
     const rideShareExpiry = new Date(ride.endTime.getTime() + 60 * 60 * 1000);
     RideShare.updateMany(
         { ride: ride._id },
         { $set: { expiresAt: rideShareExpiry } }
-    ).catch(err => console.error('[completeRide] RideShare expiry update failed:', err.message));
+    ).catch(err => logger.error('[completeRide] RideShare expiry update failed: ' + err.message, 'ride'));
 
     const populatedRide = await Ride.findById(ride._id)
         .populate('user', 'firstName lastName email phone preferredLanguage')
@@ -1118,7 +1191,7 @@ const completeRide = catchAsync(async (req, res, next) => {
         'ride_completed_driver_body',
         { rideId: ride._id.toString() },
         { fare: String(finalFare) }
-    ).catch(err => console.error('Push error (completeRide/driver):', err.message));
+    ).catch(err => logger.error('Push error (completeRide/driver):', err.message));
 
     analytics.trackEvent(req.user.id, analytics.EVENTS.RIDE_COMPLETED, {
         rideId: ride._id.toString(),
@@ -1187,7 +1260,7 @@ const completeRide = catchAsync(async (req, res, next) => {
 
         const receiptLang = populatedRide.user.preferredLanguage || 'en';
         emailService.sendReceiptEmail(populatedRide.user.email, receiptData, receiptLang)
-            .catch(err => console.error('[completeRide] Receipt email failed:', err.message));
+            .catch(err => logger.error('[completeRide] Receipt email failed: ' + err.message, 'ride'));
     }
 
     res.json({
@@ -1319,35 +1392,14 @@ const cancelRide = catchAsync(async (req, res, next) => {
         }
 
         await session.commitTransaction();
+
+        // Notify ETA dispatch loop that this ride was cancelled (Redis pub/sub)
+        notifyRideResponse(cancelledRide._id.toString(), 'cancelled').catch(() => {});
     } catch (err) {
         await session.abortTransaction();
         throw err;
     } finally {
         session.endSession();
-    }
-
-    // Auto-release preauthorized payment if one is linked to this ride
-    if (cancelledRide.paymentMethod !== 'cash') {
-        const Payment = require('../models/payment.model');
-        const bogService = require('../services/bog.service');
-        const preauthPayment = await Payment.findOne({
-            ride: cancelledRide._id,
-            type: 'ride_preauth',
-            captureMode: 'manual',
-            status: 'blocked'
-        });
-        if (preauthPayment) {
-            try {
-                await bogService.rejectPreauth(preauthPayment.bogOrderId, {
-                    description: `Ride ${cancelledRide._id} cancelled by ${cancelledBy}`,
-                    idempotencyKey: require('crypto').randomUUID()
-                });
-                preauthPayment.status = 'cancelled';
-                await preauthPayment.save();
-            } catch (err) {
-                console.error(`[cancelRide] Auto-release preauth failed for ride ${cancelledRide._id}:`, err.message);
-            }
-        }
     }
 
     const populatedRide = await Ride.findById(cancelledRide._id)
@@ -1402,7 +1454,7 @@ const cancelRide = catchAsync(async (req, res, next) => {
             'ride_cancelled_driver_title',
             'ride_cancelled_driver_body',
             { rideId: cancelledRide._id.toString() }
-        ).catch(err => console.error('Push error (cancelRide/driver):', err.message));
+        ).catch(err => logger.error('Push error (cancelRide/driver):', err.message));
     }
 
     analytics.trackEvent(req.user.id, analytics.EVENTS.RIDE_CANCELLED, {
@@ -1849,7 +1901,7 @@ const expireOldRides = async (io) => {
             return { expired: 0 };
         }
 
-        console.log(`Found ${expiredRides.length} expired rides to cancel`);
+        logger.info(`Found ${expiredRides.length} expired rides to cancel`);
 
         // Update all expired rides to cancelled status
         await Ride.updateMany(
@@ -1867,29 +1919,6 @@ const expireOldRides = async (io) => {
             }
         );
 
-        // Release preauthorized payments for expired rides
-        const Payment = require('../models/payment.model');
-        const bogService = require('../services/bog.service');
-        const rideIds = expiredRides.map(r => r._id);
-        const preauthPayments = await Payment.find({
-            ride: { $in: rideIds },
-            type: 'ride_preauth',
-            captureMode: 'manual',
-            status: 'blocked'
-        });
-        for (const payment of preauthPayments) {
-            try {
-                await bogService.rejectPreauth(payment.bogOrderId, {
-                    description: 'Ride request expired',
-                    idempotencyKey: require('crypto').randomUUID()
-                });
-                payment.status = 'cancelled';
-                await payment.save();
-            } catch (err) {
-                console.error(`[expireOldRides] Auto-release preauth failed for payment ${payment._id}:`, err.message);
-            }
-        }
-
         // Emit socket events and send pushes to offline users (uses presence system — no fetchSockets)
         for (const ride of expiredRides) {
             if (io) {
@@ -1904,13 +1933,13 @@ const expireOldRides = async (io) => {
                     'ride_expired_title',
                     'ride_expired_body',
                     { rideId: ride._id.toString() }
-                ).catch(err => console.error('Push error (expireOldRides):', err.message));
+                ).catch(err => logger.error('Push error (expireOldRides):', err.message));
             }
         }
 
         return { expired: expiredRides.length };
     } catch (error) {
-        console.error('Error expiring old rides:', error);
+        logger.error('Error expiring old rides', 'scheduler', error);
         return { expired: 0, error: error.message };
     }
 };
@@ -1938,7 +1967,7 @@ const expireWaitingRides = async (io) => {
             return { cancelled: 0 };
         }
 
-        console.log(`Found ${waitingExpiredRides.length} rides with expired waiting time`);
+        logger.info(`Found ${waitingExpiredRides.length} rides with expired waiting time`);
 
         // Update all waiting-expired rides to cancelled status
         await Ride.updateMany(
@@ -1968,29 +1997,6 @@ const expireWaitingRides = async (io) => {
             );
         }
 
-        // Release preauthorized payments for waiting-expired rides
-        const Payment = require('../models/payment.model');
-        const bogService = require('../services/bog.service');
-        const waitingRideIds = waitingExpiredRides.map(r => r._id);
-        const waitingPreauthPayments = await Payment.find({
-            ride: { $in: waitingRideIds },
-            type: 'ride_preauth',
-            captureMode: 'manual',
-            status: 'blocked'
-        });
-        for (const payment of waitingPreauthPayments) {
-            try {
-                await bogService.rejectPreauth(payment.bogOrderId, {
-                    description: 'Ride cancelled - waiting timeout',
-                    idempotencyKey: require('crypto').randomUUID()
-                });
-                payment.status = 'cancelled';
-                await payment.save();
-            } catch (err) {
-                console.error(`[expireWaitingRides] Auto-release preauth failed for payment ${payment._id}:`, err.message);
-            }
-        }
-
         // Notify via socket + push (uses presence system — no fetchSockets)
         for (const ride of waitingExpiredRides) {
             if (io) {
@@ -2014,7 +2020,7 @@ const expireWaitingRides = async (io) => {
                     'waiting_timeout_passenger_title',
                     'waiting_timeout_passenger_body',
                     { rideId: ride._id.toString() }
-                ).catch(err => console.error('Push error (waitingTimeout/passenger):', err.message));
+                ).catch(err => logger.error('Push error (waitingTimeout/passenger):', err.message));
             }
 
             // Push to driver (always — they may have backgrounded the app)
@@ -2024,13 +2030,111 @@ const expireWaitingRides = async (io) => {
                     'waiting_timeout_title',
                     'waiting_timeout_body',
                     { rideId: ride._id.toString(), channelId: 'ride-requests' }
-                ).catch(err => console.error('Push error (waitingTimeout/driver):', err.message));
+                ).catch(err => logger.error('Push error (waitingTimeout/driver):', err.message));
             }
         }
 
         return { cancelled: waitingExpiredRides.length };
     } catch (error) {
-        console.error('Error expiring waiting rides:', error);
+        logger.error('Error expiring waiting rides', 'scheduler', error);
+        return { cancelled: 0, error: error.message };
+    }
+};
+
+// @desc    Auto-cancel rides where driver accepted but didn't arrive within 10 minutes
+// @access  Internal (called by scheduler)
+const expireAcceptedRides = async (io) => {
+    try {
+        const now = new Date();
+
+        const staleRides = await Ride.find({
+            status: 'accepted',
+            acceptedExpiresAt: { $lte: now }
+        }).populate({
+            path: 'driver',
+            select: '_id user',
+            populate: {
+                path: 'user',
+                select: '_id'
+            }
+        }).lean();
+
+        if (staleRides.length === 0) {
+            return { cancelled: 0 };
+        }
+
+        logger.info(`Found ${staleRides.length} accepted rides where driver didn't arrive in time`);
+
+        // Cancel all stale accepted rides
+        await Ride.updateMany(
+            {
+                status: 'accepted',
+                acceptedExpiresAt: { $lte: now }
+            },
+            {
+                $set: {
+                    status: 'cancelled',
+                    driver: null,
+                    cancelledBy: 'admin',
+                    cancellationReason: 'driver_not_moving',
+                    cancellationNote: 'Driver did not arrive within 10 minutes',
+                    acceptedExpiresAt: null,
+                }
+            }
+        );
+
+        // Reset drivers back to online
+        const driverIds = staleRides
+            .filter(r => r.driver && r.driver._id)
+            .map(r => r.driver._id);
+
+        if (driverIds.length > 0) {
+            await Driver.updateMany(
+                { _id: { $in: driverIds }, status: 'busy' },
+                { $set: { status: 'online' } }
+            );
+        }
+
+        // Notify passengers and drivers
+        for (const ride of staleRides) {
+            if (io) {
+                io.to(`user:${ride.user}`).to('admin').emit('ride:acceptedTimeout', {
+                    rideId: ride._id,
+                    message: 'Ride cancelled - driver did not arrive in time'
+                });
+
+                if (ride.driver && ride.driver.user) {
+                    io.to(`driver:${ride.driver.user._id}`).emit('ride:acceptedTimeout', {
+                        rideId: ride._id,
+                        message: 'Ride cancelled - you did not arrive within the time limit'
+                    });
+                }
+            }
+
+            // Push to passenger
+            if (!(await isUserOnlineAsync(ride.user.toString()))) {
+                pushService.sendToUser(
+                    ride.user.toString(),
+                    'accepted_timeout_passenger_title',
+                    'accepted_timeout_passenger_body',
+                    { rideId: ride._id.toString() }
+                ).catch(err => logger.error('Push error (acceptedTimeout/passenger):', err.message));
+            }
+
+            // Push to driver
+            if (ride.driver && ride.driver.user) {
+                pushService.sendToUser(
+                    ride.driver.user._id.toString(),
+                    'accepted_timeout_driver_title',
+                    'accepted_timeout_driver_body',
+                    { rideId: ride._id.toString(), channelId: 'ride-requests' }
+                ).catch(err => logger.error('Push error (acceptedTimeout/driver):', err.message));
+            }
+        }
+
+        return { cancelled: staleRides.length };
+    } catch (error) {
+        logger.error('Error expiring accepted rides', 'scheduler', error);
         return { cancelled: 0, error: error.message };
     }
 };
@@ -2164,7 +2268,7 @@ let _scheduledBroadcastRunning = false;
 const broadcastScheduledRides = async (io) => {
     // In-process lock — skips the tick if a previous run hasn't finished yet.
     if (_scheduledBroadcastRunning) {
-        console.warn('[scheduler] broadcastScheduledRides skipped — previous run still in progress (consider Redis lock for multi-instance)');
+        logger.warn('[scheduler] broadcastScheduledRides skipped — previous run still in progress', 'scheduler');
         return;
     }
     _scheduledBroadcastRunning = true;
@@ -2222,7 +2326,7 @@ const broadcastScheduledRides = async (io) => {
             // If modifiedCount is 0, another instance already stamped this ride —
             // skip broadcasting it from this instance.
             if (stampResult.modifiedCount === 0) {
-                console.warn(`[scheduler] Skipping ride ${ride._id} — already stamped by another instance`);
+                logger.warn(`[scheduler] Skipping ride ${ride._id} — already stamped by another instance`, 'scheduler');
                 continue;
             }
 
@@ -2244,10 +2348,10 @@ const broadcastScheduledRides = async (io) => {
 
             broadcast.emit('ride:request', rideData);
 
-            console.log(`[scheduler] Broadcast scheduled ride ${ride._id} (scheduledFor: ${ride.scheduledFor})`);
+            logger.info(`[scheduler] Broadcast scheduled ride ${ride._id} (scheduledFor: ${ride.scheduledFor})`, 'scheduler');
         }
     } catch (err) {
-        console.error('[scheduler] Error broadcasting scheduled rides:', err.message);
+        logger.error('[scheduler] Error broadcasting scheduled rides: ' + err.message, 'scheduler');
     } finally {
         // Always release the lock, even if an error is thrown.
         _scheduledBroadcastRunning = false;
@@ -2274,6 +2378,7 @@ module.exports = {
     receiveLocationBatch,
     expireOldRides,
     expireWaitingRides,
+    expireAcceptedRides,
     getEligibleDriverTypes,
     broadcastScheduledRides
 };

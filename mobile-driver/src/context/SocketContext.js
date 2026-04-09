@@ -280,7 +280,7 @@ export const SocketProvider = ({ children }) => {
         socketInstance.io.opts.reconnection = false;
       });
 
-      // Listen for new ride requests
+      // Listen for new ride requests (broadcast model)
       // C9: Notification scheduled outside state updater (state updaters must be pure)
       socketInstance.on('ride:request', (rideData) => {
         setNewRideRequest((current) => {
@@ -289,6 +289,48 @@ export const SocketProvider = ({ children }) => {
         });
         // Show notification separately — idempotent via notifiedRideIds check inside
         showRideNotification(rideData);
+
+        // Auto-clear broadcast requests based on ride expiry to prevent stale UI.
+        // expiresAt is set by the server (1 hour from creation). We cap the client
+        // timeout at 5 minutes to avoid showing stale requests.
+        const rideId = rideData._id;
+        let clearMs = 5 * 60 * 1000; // default 5 min max display
+        if (rideData.expiresAt) {
+          const remaining = new Date(rideData.expiresAt).getTime() - Date.now();
+          if (remaining > 0) clearMs = Math.min(remaining, clearMs);
+          else clearMs = 0; // already expired
+        }
+        if (clearMs > 0) {
+          setTimeout(() => {
+            setNewRideRequest((current) => {
+              if (current && current._id === rideId) return null;
+              return current;
+            });
+            notifiedRideIdsRef.current.delete(rideId);
+          }, clearMs);
+        }
+      });
+
+      // Listen for targeted ride offers (ETA dispatch model)
+      // Same as ride:request but includes offerTimeoutMs for countdown UI.
+      // Auto-clears after timeout if the driver doesn't respond.
+      socketInstance.on('ride:offer', (rideData) => {
+        setNewRideRequest((current) => {
+          if (current && current._id === rideData._id) return current;
+          return { ...rideData, _isOffer: true };
+        });
+        showRideNotification(rideData);
+
+        // Auto-clear after offer timeout (server will move to next driver)
+        const timeoutMs = rideData.offerTimeoutMs || 15000;
+        const rideId = rideData._id;
+        setTimeout(() => {
+          setNewRideRequest((current) => {
+            if (current && current._id === rideId) return null;
+            return current;
+          });
+          notifiedRideIdsRef.current.delete(rideId);
+        }, timeoutMs);
       });
 
       // Listen for ride updates
@@ -365,6 +407,19 @@ export const SocketProvider = ({ children }) => {
             title: i18n.t('notifications.push.waitingTimeoutTitle'),
             body: i18n.t('notifications.push.waitingTimeoutBody'),
             data: { rideId: data.rideId, type: 'waiting_timeout', _local: true },
+            sound: true,
+          },
+          trigger: null,
+        }).catch(() => {});
+      });
+
+      // Listen for accepted timeout (driver didn't arrive in time)
+      socketInstance.on('ride:acceptedTimeout', (data) => {
+        Notifications.scheduleNotificationAsync({
+          content: {
+            title: i18n.t('notifications.push.acceptedTimeoutTitle'),
+            body: i18n.t('notifications.push.acceptedTimeoutBody'),
+            data: { rideId: data.rideId, type: 'accepted_timeout', _local: true },
             sound: true,
           },
           trigger: null,
