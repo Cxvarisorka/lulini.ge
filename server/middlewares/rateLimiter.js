@@ -90,6 +90,26 @@ const rideCreateLimiter = rateLimit({
     message: { success: false, message: 'Too many ride requests, please wait a moment' }
 });
 
+// OTP send per-phone: 3 per hour per phone number (prevents abuse via IP rotation)
+// Uses phone from request body as the key instead of IP
+const otpSendPhoneLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 3,
+    standardHeaders: true,
+    legacyHeaders: false,
+    store: makeStore('otp_phone'),
+    keyGenerator: (req) => {
+        // Use phone number as the rate limit key
+        const phone = (req.body && req.body.phone) ? req.body.phone.replace(/\s+/g, '') : '';
+        if (phone) return `phone:${phone}`;
+        // No phone in body — shouldn't happen (validator catches it), but safe fallback
+        return `phone:unknown`;
+    },
+    // Disable the IPv6 key generator validation since we're keying by phone, not IP
+    validate: { xForwardedForHeader: false, default: true },
+    message: { success: false, message: 'Too many OTP requests for this phone number. Try again in an hour' }
+});
+
 // Chat messages: 30 per minute per IP (prevents message flooding)
 const chatMessageLimiter = rateLimit({
     windowMs: 60 * 1000,
@@ -104,6 +124,7 @@ module.exports = {
     globalLimiter,
     authLimiter,
     otpSendLimiter,
+    otpSendPhoneLimiter,
     otpVerifyLimiter,
     rideCreateLimiter,
     driverLocationLimiter,

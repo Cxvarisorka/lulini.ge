@@ -33,13 +33,13 @@ const userSchema = new mongoose.Schema({
         required: function() {
             return this.provider === 'local';
         },
-        minlength: [6, 'Password must be at least 6 characters']
+        minlength: [8, 'Password must be at least 8 characters']
     },
     phone: {
         type: String,
         unique: true,
         sparse: true,
-        match: [/^\+?[\d\s()-]{7,20}$/, 'Please provide a valid phone number']
+        match: [/^\+\d{7,15}$/, 'Phone must be in E.164 format (e.g. +995551234567)']
     },
     isPhoneVerified: {
         type: Boolean,

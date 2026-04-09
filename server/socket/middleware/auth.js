@@ -6,6 +6,7 @@
 const User = require('../../models/user.model');
 const { userCache, AUTH_CACHE_TTL } = require('../../utils/authCache');
 const { verifyToken } = require('../../utils/jwt.utils');
+const { isTokenBlocked, isUserTokensRevoked } = require('../../utils/tokenBlocklist');
 
 // Helper to parse cookies from raw header string
 function parseCookies(cookieString) {
@@ -43,6 +44,16 @@ function authMiddleware(io) {
             const decoded = verifyToken(token);
             if (!decoded) {
                 return next(new Error('Invalid or expired token'));
+            }
+
+            // Check token blocklist (logout, password change, account deletion)
+            if (decoded.jti && await isTokenBlocked(decoded.jti)) {
+                return next(new Error('Token has been revoked'));
+            }
+
+            // Check if all user tokens were revoked (e.g. password change)
+            if (decoded.id && decoded.iat && await isUserTokensRevoked(decoded.id, decoded.iat)) {
+                return next(new Error('Token has been revoked'));
             }
 
             // Check shared auth cache first (prevents thundering herd on mass reconnect)
