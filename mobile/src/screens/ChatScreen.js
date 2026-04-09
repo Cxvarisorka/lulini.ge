@@ -20,6 +20,7 @@ import { useTheme } from '../context/ThemeContext';
 import { chatAPI } from '../services/api';
 import { useSocket } from '../context/SocketContext';
 import { useAuth } from '../context/AuthContext';
+import { messageSent as playMessageSent, messageReceived as playMessageReceived } from '../utils/sounds';
 
 export default function ChatScreen({ route, navigation }) {
   const { rideId, driverName } = route.params || {};
@@ -77,6 +78,11 @@ export default function ChatScreen({ route, navigation }) {
       if (String(data.rideId) !== String(rideId)) return;
       const msg = data.message || data;
       if (!msg || !msg._id) return;
+      // Play sound for incoming messages from the other party
+      const senderId = typeof msg.sender === 'object' ? (msg.sender?._id || msg.sender?.id) : msg.sender;
+      if (String(senderId) !== String(myId)) {
+        playMessageReceived();
+      }
       setMessages(prev => {
         if (!Array.isArray(prev)) return [msg];
         // Avoid duplicates (optimistic update already added a temp version)
@@ -128,6 +134,7 @@ export default function ChatScreen({ route, navigation }) {
     try {
       const res = await chatAPI.sendMessage(rideId, text);
       if (res.data.success) {
+        playMessageSent();
         const realMsg = res.data.data?.message || res.data.data;
         // Replace temp with real message
         setMessages(prev =>

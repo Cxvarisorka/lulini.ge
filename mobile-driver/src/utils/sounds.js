@@ -1,10 +1,7 @@
 /**
- * Sound effects utility.
- * Uses short bundled notification sounds via expo-av.
+ * Sound effects utility for driver app.
+ * Uses short notification beep via expo-av.
  * Reads the user's sound preference from AsyncStorage before playing.
- *
- * To add custom sounds, place .wav/.mp3 files in assets/sounds/ and
- * update the SOUNDS map below with require() paths.
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -40,14 +37,7 @@ export function invalidateSoundCache() {
   _settingsLoaded = false;
 }
 
-// Active sound instance — only one at a time
 let _activeSound = null;
-
-/**
- * Play a short system notification beep.
- * Uses a single shared sound instance to avoid overlapping playback.
- * Auto-stops after MAX_DURATION_MS as a safety net.
- */
 const MAX_DURATION_MS = 3000;
 
 async function playNotificationBeep() {
@@ -56,7 +46,6 @@ async function playNotificationBeep() {
   if (!enabled) return;
 
   try {
-    // Stop any currently playing sound
     if (_activeSound) {
       try {
         const status = await _activeSound.getStatusAsync();
@@ -68,15 +57,12 @@ async function playNotificationBeep() {
       _activeSound = null;
     }
 
-    // Create a short tone using a tiny generated WAV via data URI
-    // This is a 0.3s 880Hz sine beep encoded as a minimal WAV
     const { sound } = await Audio.Sound.createAsync(
       { uri: 'data:audio/wav;base64,UklGRl4AAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YToAAAAA/38AAP9/AAD/fwAA/38AAP9/AAD/fwAA/38AAP9/AAD/fwAA/38AAP9/AAD/fwAA/38AAP9/AAD/fwAA' },
       { shouldPlay: true, volume: 0.5 }
     );
     _activeSound = sound;
 
-    // Auto-cleanup after playback or timeout
     const cleanup = async () => {
       try {
         if (_activeSound === sound) {
@@ -95,19 +81,6 @@ async function playNotificationBeep() {
   }
 }
 
-/**
- * Preload sounds — currently a no-op since we use inline generated tones.
- */
-export async function preloadSounds() {
-  if (!Audio) return;
-  try {
-    await Audio.setAudioModeAsync({ playsInSilentModeIOS: false });
-  } catch (_) {}
-}
-
-/**
- * Stop all currently playing sounds.
- */
 export async function stopAllSounds() {
   if (!Audio) return;
   if (_activeSound) {
@@ -122,10 +95,6 @@ export async function stopAllSounds() {
   }
 }
 
-// All ride events play the same short notification beep
-export const rideAccepted = () => playNotificationBeep();
-export const rideArrived = () => playNotificationBeep();
-export const rideCompleted = () => playNotificationBeep();
-export const rideCancelled = () => playNotificationBeep();
+export const rideRequest = () => playNotificationBeep();
 export const messageSent = () => playNotificationBeep();
 export const messageReceived = () => playNotificationBeep();

@@ -30,8 +30,7 @@ export default function DeleteAccountScreen({ navigation }) {
   const [isDeletionScheduled, setIsDeletionScheduled] = useState(false);
   const [scheduledDate, setScheduledDate] = useState(null);
 
-  // Determine if this account needs a password (local email/password account).
-  // OAuth (Google/Apple) and phone-only accounts do not have a password.
+  // Phone-only accounts do not have a password.
   const isLocalAccount = user?.provider === 'local' || user?.loginProvider === 'local';
 
   const deletionDate = React.useMemo(() => {

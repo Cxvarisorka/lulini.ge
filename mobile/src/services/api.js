@@ -194,61 +194,6 @@ export const settingsAPI = {
     api.get('/settings/pricing'),
 };
 
-// Payment API
-export const paymentAPI = {
-  registerCard: (lang) =>
-    api.post('/payments/cards/register', { lang }),
-
-  verifyCardRegistration: (orderId) =>
-    api.post(`/payments/cards/verify/${orderId}`),
-
-  getSavedCards: () =>
-    api.get('/payments/cards'),
-
-  deleteCard: (cardId) =>
-    api.delete(`/payments/cards/${cardId}`),
-
-  setDefaultCard: (cardId) =>
-    api.patch(`/payments/cards/${cardId}/default`),
-
-  // Pre-ride payment: charge saved card before requesting drivers
-  chargeRide: (cardId, amount, rideId, lang) =>
-    api.post('/payments/ride/charge', { cardId, amount, rideId, lang }),
-
-  // One-time payment (card / Apple Pay / Google Pay) without saved card
-  // capture: 'manual' for preauth (hold funds), 'automatic' for immediate charge
-  payRide: (amount, rideId, paymentMethods, lang, capture) =>
-    api.post('/payments/ride/pay', { amount, rideId, paymentMethods, lang, capture }),
-
-  // Preauthorize ride payment (hold funds on saved card)
-  preauthRide: (cardId, amount, lang) =>
-    api.post('/payments/ride/preauth', { cardId, amount, lang }),
-
-  // Approve preauthorized payment after ride completion
-  approveRidePayment: (paymentId, amount, rideId) =>
-    api.post(`/payments/ride/approve/${paymentId}`, { amount, rideId }),
-
-  // Reject/cancel preauthorized payment
-  rejectRidePayment: (paymentId, reason) =>
-    api.post(`/payments/ride/reject/${paymentId}`, { reason }),
-
-  verifyRidePayment: (orderId) =>
-    api.post(`/payments/ride/verify/${orderId}`),
-
-  getPaymentStatus: (paymentId) =>
-    api.get(`/payments/${paymentId}/status`),
-
-  // Refund a completed payment (full or partial)
-  refundPayment: (paymentId, amount, reason) =>
-    api.post(`/payments/${paymentId}/refund`, { amount, reason }),
-
-  getPaymentHistory: (page = 1, limit = 20) =>
-    api.get('/payments/history', { params: { page, limit } }),
-
-  getPendingPayments: () =>
-    api.get('/payments/pending'),
-};
-
 // Trip share API
 export const tripShareAPI = {
   getShareLink: (rideId) =>

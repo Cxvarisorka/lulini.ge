@@ -19,7 +19,6 @@ export default {
     ios: {
       supportsTablet: true,
       bundleIdentifier: "com.lulini.mobile",
-      usesAppleSignIn: true,
       config: {
         googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY || ""
       },
@@ -67,8 +66,6 @@ export default {
           locationWhenInUsePermission: "Allow Lulini to use your location to find nearby drivers and show your position on the map."
         }
       ],
-      "expo-web-browser",
-      "expo-apple-authentication",
       [
         "expo-notifications",
         {

@@ -10,6 +10,8 @@ const { haversineKm } = require('../utils/distance');
 const pushService = require('../services/pushNotification.service');
 const { pushIfOffline } = require('../utils/socketHelpers');
 const analytics = require('../services/analytics.service');
+const driverLocService = require('../services/driverLocation.service');
+const { isEnabled } = require('../utils/featureFlags');
 
 // Proximity thresholds (km)
 const APPROACH_NOTIFY_KM = 0.5;  // 500m — notify passenger that driver is approaching
@@ -466,6 +468,20 @@ const updateDriverLocation = catchAsync(async (req, res, next) => {
         }
     }
 
+    // ── Redis GEO dual-write (Phase 3) ──
+    // When enabled, write to Redis first (sub-ms), then MongoDB.
+    // Redis becomes the primary store; MongoDB flush happens every 30s in background.
+    const redisEnabled = isEnabled('REDIS_DRIVER_LOCATIONS');
+    if (redisEnabled) {
+        driverLocService.updateDriverLocation(driver._id.toString(), {
+            lat: latitude,
+            lng: longitude,
+            heading: heading ?? 0,
+            speed: 0,
+            vehicleType: driver.vehicle?.type,
+        }).catch(err => console.error('Redis driver location write failed:', err.message));
+    }
+
     // Parallelize: update location + check for active ride simultaneously
     const [, activeRide] = await Promise.all([
         Driver.updateOne(
@@ -814,6 +830,32 @@ const getNearbyDrivers = catchAsync(async (req, res, next) => {
         return next(new AppError('Latitude and longitude are required', 400));
     }
 
+    const parsedLat = parseFloat(lat);
+    const parsedLng = parseFloat(lng);
+
+    // ── Phase 3: Try Redis GEO first when enabled ──
+    if (isEnabled('REDIS_NEARBY_QUERY')) {
+        const vehicleTypes = vehicleType ? [vehicleType] : [];
+        const redisResults = await driverLocService.findNearbyDrivers(
+            parsedLat, parsedLng, 10, vehicleTypes, 50
+        );
+
+        if (redisResults !== null) {
+            const locations = redisResults.map(r => ({
+                lat: r.coordinates?.latitude ?? parsedLat,
+                lng: r.coordinates?.longitude ?? parsedLng,
+            }));
+
+            return res.json({
+                success: true,
+                count: locations.length,
+                data: { drivers: locations }
+            });
+        }
+        // Redis returned null (unavailable) — fall through to MongoDB
+    }
+
+    // ── MongoDB fallback (existing behavior) ──
     const query = {
         status: 'online',
         isActive: true,
@@ -822,7 +864,7 @@ const getNearbyDrivers = catchAsync(async (req, res, next) => {
             $near: {
                 $geometry: {
                     type: 'Point',
-                    coordinates: [parseFloat(lng), parseFloat(lat)]
+                    coordinates: [parsedLng, parsedLat]
                 },
                 $maxDistance: 10000 // 10km radius
             }
@@ -910,6 +952,17 @@ const batchUpdateDriverLocation = catchAsync(async (req, res, next) => {
 
     if (!accepted) {
         return res.json({ success: true, message: 'No valid locations in batch' });
+    }
+
+    // ── Redis GEO dual-write (Phase 3) ──
+    if (isEnabled('REDIS_DRIVER_LOCATIONS')) {
+        driverLocService.updateDriverLocation(driver._id.toString(), {
+            lat: accepted.latitude,
+            lng: accepted.longitude,
+            heading: accepted.heading ?? 0,
+            speed: accepted.speed ?? 0,
+            vehicleType: driver.vehicle?.type,
+        }).catch(err => console.error('Redis batch location write failed:', err.message));
     }
 
     // Parallelize: update location + check for active ride simultaneously

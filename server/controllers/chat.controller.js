@@ -14,6 +14,7 @@ const Driver = require('../models/driver.model');
 const AppError = require('../utils/AppError');
 const catchAsync = require('../utils/catchAsync');
 const analytics = require('../services/analytics.service');
+const pushNotification = require('../services/pushNotification.service');
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -36,13 +37,15 @@ async function resolveParticipant(ride, reqUser) {
     if (ride.user.toString() === userId) {
         // Determine the other party's socket room
         let otherRoom = 'admin'; // fallback if no driver yet
+        let otherUserId = null;
         if (ride.driver) {
             const driverDoc = await Driver.findById(ride.driver).select('user').lean();
             if (driverDoc) {
                 otherRoom = `driver:${driverDoc.user}`;
+                otherUserId = driverDoc.user.toString();
             }
         }
-        return { role: 'passenger', otherRoom };
+        return { role: 'passenger', otherRoom, otherUserId };
     }
 
     // Driver check — look up driver profile linked to this user
@@ -51,7 +54,8 @@ async function resolveParticipant(ride, reqUser) {
         if (driverDoc) {
             return {
                 role: 'driver',
-                otherRoom: `user:${ride.user}`
+                otherRoom: `user:${ride.user}`,
+                otherUserId: ride.user.toString(),
             };
         }
     }
@@ -122,6 +126,29 @@ const sendMessage = catchAsync(async (req, res, next) => {
             rideId: ride._id,
             message: populatedMessage
         });
+    }
+
+    // Push notification only when the other party is NOT connected via socket
+    // (i.e. app is in background / closed). If connected, they get real-time
+    // delivery + in-app sound — no need for a push.
+    if (participant.otherUserId && io && participant.otherRoom) {
+        const room = io.sockets.adapter.rooms.get(participant.otherRoom);
+        const isOnline = room && room.size > 0;
+        if (!isOnline) {
+            const senderName = populatedMessage.sender
+                ? `${populatedMessage.sender.firstName || ''} ${populatedMessage.sender.lastName || ''}`.trim()
+                : '';
+            const preview = content.trim().length > 80
+                ? content.trim().substring(0, 80) + '…'
+                : content.trim();
+            pushNotification.sendToUser(
+                participant.otherUserId,
+                'chat_message_title',
+                'chat_message_body',
+                { rideId: ride._id.toString(), type: 'chat_message', channelId: 'chat' },
+                { senderName: senderName || (participant.role === 'passenger' ? 'Passenger' : 'Driver'), content: preview }
+            ).catch(() => {}); // best-effort, don't block response
+        }
     }
 
     analytics.trackEvent(userId, analytics.EVENTS.MESSAGE_SENT, {

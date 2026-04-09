@@ -39,7 +39,7 @@ const validateCreateRide = [
         .isLength({ max: 100 }).withMessage('Passenger name too long'),
     body('passengerPhone').optional().matches(/^\+?[\d\s()-]{7,20}$/).withMessage('Invalid phone number'),
     body('paymentMethod').optional()
-        .isIn(['cash', 'card', 'apple_pay', 'google_pay', 'saved_card'])
+        .isIn(['cash'])
         .withMessage('Invalid payment method'),
     body('notes').optional().isLength({ max: 500 }).withMessage('Notes too long'),
     body('quote.totalPrice').optional().isFloat({ min: 0, max: 50000 }).withMessage('Invalid quote price'),

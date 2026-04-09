@@ -47,6 +47,36 @@ const NAV_CAMERA_DURATION = 800;
 const COLLAPSED_HEIGHT = 76; // Just enough for the go online button
 const EXPANDED_HEIGHT = SCREEN_HEIGHT * 0.55;
 
+/**
+ * Countdown progress bar for ETA dispatch offers.
+ * Shrinks from full width to zero over the timeout period.
+ */
+function OfferCountdownBar({ timeoutMs }) {
+  const progress = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    progress.setValue(1);
+    Animated.timing(progress, {
+      toValue: 0,
+      duration: timeoutMs,
+      useNativeDriver: false,
+    }).start();
+  }, [timeoutMs]);
+
+  return (
+    <View style={{ height: 4, backgroundColor: '#e5e7eb', borderRadius: 2, marginBottom: 8, overflow: 'hidden' }}>
+      <Animated.View
+        style={{
+          height: 4,
+          borderRadius: 2,
+          backgroundColor: '#f59e0b',
+          width: progress.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }),
+        }}
+      />
+    </View>
+  );
+}
+
 export default function HomeScreen({ navigation }) {
   useKeepAwake();
   const { t } = useTranslation();
@@ -1012,6 +1042,8 @@ export default function HomeScreen({ navigation }) {
         <View style={styles.modalOverlay}>
           <View style={[styles.rideRequestModal, { paddingBottom: insets.bottom + spacing['3xl'] }]}>
             <View style={styles.modalDragHandle} />
+            {/* ETA offer countdown bar */}
+            {newRideRequest?._isOffer && <OfferCountdownBar timeoutMs={newRideRequest.offerTimeoutMs || 15000} />}
             <View style={styles.modalHeader}>
               <View style={styles.modalIconBadge}>
                 <Ionicons name="car" size={28} color={colors.primaryForeground} />

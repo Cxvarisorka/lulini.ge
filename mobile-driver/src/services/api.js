@@ -58,6 +58,8 @@ export const authAPI = {
   verifyPhoneUpdateOtp: (data) => api.post('/auth/phone/update-verify-otp', data),
   sendEmailVerification: (email, language) => api.post('/auth/email/send-verification', { email, language }),
   verifyEmailForRegistration: (email, code) => api.post('/auth/email/verify-registration', { email, code }),
+  forgotPasswordSendOtp: (data) => api.post('/auth/forgot-password/send-otp', data),
+  forgotPasswordReset: (data) => api.post('/auth/forgot-password/reset', data),
 };
 
 // Driver endpoints

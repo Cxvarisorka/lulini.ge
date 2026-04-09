@@ -19,6 +19,7 @@ import { chatAPI } from '../services/api';
 import { useSocket } from '../context/SocketContext';
 import { useAuth } from '../context/AuthContext';
 import { colors, shadows, radius, spacing, useTypography } from '../theme/colors';
+import { messageSent as playMessageSent, messageReceived as playMessageReceived } from '../utils/sounds';
 
 export default function ChatScreen({ navigation, route }) {
   const { rideId, passengerName } = route.params;
@@ -74,6 +75,10 @@ export default function ChatScreen({ navigation, route }) {
       if (String(data.rideId) !== String(rideId)) return;
       const msg = data.message || data;
       if (!msg || !msg._id) return;
+      // Play sound for incoming messages from the other party
+      if (msg.senderRole !== 'driver') {
+        playMessageReceived();
+      }
       setMessages((prev) => {
         if (!Array.isArray(prev)) return [msg];
         if (prev.some((m) => m._id === msg._id)) return prev;
@@ -125,6 +130,7 @@ export default function ChatScreen({ navigation, route }) {
     try {
       const response = await chatAPI.sendMessage(rideId, text);
       if (response.data?.data?.message) {
+        playMessageSent();
         const serverMsg = response.data.data.message;
         setMessages((prev) =>
           prev.map((m) => (m._id === optimisticMsg._id ? serverMsg : m))

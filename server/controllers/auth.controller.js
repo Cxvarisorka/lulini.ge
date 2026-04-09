@@ -806,6 +806,118 @@ const cancelAccountDeletion = catchAsync(async (req, res, next) => {
     });
 });
 
+// @desc    Send OTP for password reset (unauthenticated — by phone number)
+// @route   POST /api/auth/forgot-password/send-otp
+const forgotPasswordSendOtp = catchAsync(async (req, res, next) => {
+    const { phone } = req.body;
+
+    if (!phone) {
+        return next(new AppError('Phone number is required', 400));
+    }
+
+    const phoneRegex = /^\+?[\d\s()-]{7,20}$/;
+    if (!phoneRegex.test(phone)) {
+        return next(new AppError('Please provide a valid phone number', 400));
+    }
+
+    // Check that a user with this phone exists and has a password (local provider)
+    const user = await User.findOne({ phone });
+    if (!user || user.provider !== 'local') {
+        // Don't reveal whether the phone exists — always return success
+        return res.status(200).json({
+            success: true,
+            message: 'If an account exists with this phone number, an OTP has been sent'
+        });
+    }
+
+    // Account lockout check
+    if (user.lockUntil && user.lockUntil > new Date()) {
+        const minutesLeft = Math.ceil((user.lockUntil - new Date()) / 60000);
+        return next(new AppError(`Account locked. Try again in ${minutesLeft} minutes`, 423));
+    }
+
+    // Delete any existing password-reset OTP for this phone
+    await OTP.deleteMany({ phone, purpose: 'password_reset' });
+
+    const result = await sendVerification(phone);
+    const otpCode = result.devCode || result.code;
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+    await OTP.create({ phone, code: otpCode, purpose: 'password_reset', expiresAt });
+
+    res.status(200).json({
+        success: true,
+        message: 'If an account exists with this phone number, an OTP has been sent'
+    });
+});
+
+// @desc    Verify OTP and reset password (unauthenticated)
+// @route   POST /api/auth/forgot-password/reset
+const forgotPasswordReset = catchAsync(async (req, res, next) => {
+    const { phone, code, newPassword } = req.body;
+
+    if (!phone || !code || !newPassword) {
+        return next(new AppError('Phone, OTP code, and new password are required', 400));
+    }
+
+    if (newPassword.length < 8) {
+        return next(new AppError('Password must be at least 8 characters', 400));
+    }
+    if (!/[a-z]/.test(newPassword) || !/[A-Z]/.test(newPassword) || !/\d/.test(newPassword)) {
+        return next(new AppError('Password must contain at least one uppercase letter, one lowercase letter, and one number', 400));
+    }
+
+    const user = await User.findOne({ phone, provider: 'local' });
+    if (!user) {
+        return next(new AppError('Invalid phone number', 400));
+    }
+
+    if (user.lockUntil && user.lockUntil > new Date()) {
+        const minutesLeft = Math.ceil((user.lockUntil - new Date()) / 60000);
+        return next(new AppError(`Account locked. Try again in ${minutesLeft} minutes`, 423));
+    }
+
+    const otpRecord = await OTP.findOne({ phone, purpose: 'password_reset', verified: false });
+    if (!otpRecord) {
+        return next(new AppError('OTP not found. Please request a new code', 400));
+    }
+    if (otpRecord.expiresAt < new Date()) {
+        await OTP.deleteOne({ _id: otpRecord._id });
+        return next(new AppError('OTP has expired. Please request a new code', 400));
+    }
+    if (otpRecord.attempts >= 3) {
+        await OTP.deleteOne({ _id: otpRecord._id });
+        user.failedLoginAttempts = (user.failedLoginAttempts || 0) + 3;
+        user.lockUntil = new Date(Date.now() + 30 * 60 * 1000);
+        await user.save({ validateBeforeSave: false });
+        return next(new AppError('Too many failed attempts. Please request a new code', 400));
+    }
+
+    const codeMatches = await otpRecord.compareCode(code);
+    if (!codeMatches) {
+        otpRecord.attempts += 1;
+        await otpRecord.save();
+        return next(new AppError('Invalid OTP code', 400));
+    }
+
+    await OTP.deleteOne({ _id: otpRecord._id });
+
+    // Update password
+    user.password = newPassword;
+    user.failedLoginAttempts = 0;
+    user.lockUntil = null;
+    await user.save();
+
+    // Revoke all existing tokens so user must log in with the new password
+    const { revokeAllUserTokens } = require('../utils/tokenBlocklist');
+    await revokeAllUserTokens(user._id).catch(() => {});
+    invalidateUser(user._id);
+
+    res.status(200).json({
+        success: true,
+        message: 'Password reset successful. Please login with your new password'
+    });
+});
+
 module.exports = {
     login,
     logout,
@@ -819,5 +931,7 @@ module.exports = {
     verifyEmailCode,
     updateProfile,
     deleteAccount,
-    cancelAccountDeletion
+    cancelAccountDeletion,
+    forgotPasswordSendOtp,
+    forgotPasswordReset
 };

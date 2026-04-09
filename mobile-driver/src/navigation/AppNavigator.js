@@ -25,6 +25,7 @@ import MapSelectScreen from '../screens/MapSelectScreen';
 import NavigationScreen from '../screens/NavigationScreen';
 import ChatScreen from '../screens/ChatScreen';
 import DeleteAccountScreen from '../screens/DeleteAccountScreen';
+import ForgotPasswordScreen from '../screens/ForgotPasswordScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -122,6 +123,7 @@ export default function AppNavigator() {
           <>
             <Stack.Screen name="Login" component={LoginScreen} />
             <Stack.Screen name="Register" component={RegisterScreen} />
+            <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
           </>
         ) : needsOnboarding ? (
           // ── Onboarding stack (authenticated but profile not yet set up) ──

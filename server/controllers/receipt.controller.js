@@ -157,8 +157,7 @@ const getReceipt = catchAsync(async (req, res, next) => {
                 distanceCharge: Math.round(distanceCharge * 100) / 100,
                 waitingFee: ride.waitingFee ?? 0
             },
-            paymentMethod: ride.paymentMethod,
-            paymentStatus: ride.paymentStatus
+            paymentMethod: ride.paymentMethod
         },
 
         timestamps: {

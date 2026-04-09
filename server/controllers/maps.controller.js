@@ -270,7 +270,14 @@ exports.snapToRoad = catchAsync(async (req, res, next) => {
 // ---------------------------------------------------------------------------
 // GET /api/maps/geocode
 // Proxy Google Geocoding API — backup for when Nominatim fails
+// Now with Redis caching (Phase 1.3) — geocode results are highly stable
 // ---------------------------------------------------------------------------
+const { getCachedForward, setCachedForward, getCachedReverse, setCachedReverse } = require('../services/geocodingCache.service');
+const { isEnabled } = require('../utils/featureFlags');
+
+const GEOCODE_FWD_CACHE_TTL = 86400 * 1000;  // 24 hours (in ms for setCache compat)
+const GEOCODE_REV_CACHE_TTL = 86400 * 1000;
+
 exports.geocode = catchAsync(async (req, res, next) => {
     const { address, latlng, language } = req.query;
 
@@ -280,6 +287,24 @@ exports.geocode = catchAsync(async (req, res, next) => {
 
     if (!GOOGLE_MAPS_API_KEY) {
         return next(new AppError('Google Maps API key not configured', 503));
+    }
+
+    // ── Phase 1.3: Check geocoding cache ──
+    if (isEnabled('GEOCODING_CACHE')) {
+        if (address) {
+            const cached = await getCachedForward('google', address, 'GE');
+            if (cached) {
+                return res.json({ success: true, data: { results: cached }, cached: true });
+            }
+        } else if (latlng) {
+            const [lat, lng] = latlng.split(',').map(Number);
+            if (lat && lng) {
+                const cached = await getCachedReverse('google', lat, lng);
+                if (cached) {
+                    return res.json({ success: true, data: { results: Array.isArray(cached) ? cached : [cached] }, cached: true });
+                }
+            }
+        }
     }
 
     const params = new URLSearchParams({
@@ -302,19 +327,31 @@ exports.geocode = catchAsync(async (req, res, next) => {
         return next(new AppError(`Geocoding API returned: ${data.status}`, 502));
     }
 
+    const results = (data.results || []).map(r => ({
+        placeId: r.place_id,
+        formattedAddress: r.formatted_address,
+        coordinates: {
+            latitude: r.geometry.location.lat,
+            longitude: r.geometry.location.lng,
+        },
+        addressComponents: r.address_components,
+        types: r.types,
+    }));
+
+    // ── Phase 1.3: Cache the results ──
+    if (isEnabled('GEOCODING_CACHE') && results.length > 0) {
+        if (address) {
+            setCachedForward('google', address, 'GE', results).catch(() => {});
+        } else if (latlng) {
+            const [lat, lng] = latlng.split(',').map(Number);
+            if (lat && lng) {
+                setCachedReverse('google', lat, lng, results).catch(() => {});
+            }
+        }
+    }
+
     res.json({
         success: true,
-        data: {
-            results: (data.results || []).map(r => ({
-                placeId: r.place_id,
-                formattedAddress: r.formatted_address,
-                coordinates: {
-                    latitude: r.geometry.location.lat,
-                    longitude: r.geometry.location.lng,
-                },
-                addressComponents: r.address_components,
-                types: r.types,
-            })),
-        },
+        data: { results },
     });
 });
