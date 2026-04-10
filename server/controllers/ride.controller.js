@@ -21,6 +21,7 @@ const { snapRidePickup } = require('../services/roadSnap.service');
 const { recordRecentLocation } = require('../services/recentLocations.service');
 const logger = require('../utils/logger');
 const { createOffer, sendOfferToDriver, OFFER_TIMEOUT_MS, getEligibleDriverTypes } = require('../services/driverDispatch.service');
+const { withLock } = require('../utils/distributedLock');
 
 // ── Redis pub/sub for ETA dispatch (replaces DB polling) ──
 // When a ride is accepted or cancelled, we publish to a Redis channel so the
@@ -2245,35 +2246,26 @@ const SCHEDULED_BROADCAST_DEDUP_MS = 10 * 60 * 1000; // 10 minutes
 // Problem: broadcastScheduledRides() runs on a setInterval. If the DB query
 // or the per-ride updateOne calls take longer than the interval (1 minute) the
 // next tick will start a second concurrent run, leading to duplicate broadcasts.
+// In a multi-instance deployment the same risk also exists across instances.
 //
-// Current approach — in-process boolean lock:
-//   Works correctly for single-process and PM2-cluster deployments where
-//   background jobs are restricted to instance 0 (see isPrimaryWorker in app.js).
-//   If a run is still in progress when the next interval fires the new tick is
-//   skipped and a warning is emitted — no duplicate broadcasts.
+// Defence-in-depth approach:
+//   1. Distributed lock via `withLock` (Redis SET NX EX, memory fallback) skips
+//      the tick entirely when another instance / interval is already running.
+//      TTL is 50s so if a worker crashes mid-run the next tick can take over.
+//   2. Per-ride `lastBroadcastAt` stamp (updateOne with optimistic guard) is a
+//      second line of defence — even if two holders somehow raced through the
+//      lock, only one can flip the stamp, so a given ride is only broadcast once.
 //
-// TODO (multi-instance / Redis): Replace with a Redis SET NX EX lock:
-//   const acquired = await redis.set('lock:scheduledBroadcast', '1', { NX: true, EX: 50 });
-//   if (!acquired) return;   // another instance is running — skip
-//   try { ... } finally { await redis.del('lock:scheduledBroadcast'); }
-//
-// Note: the `lastBroadcastAt` dedup stamp (written atomically via updateOne before
-// any broadcast) already provides a second line of defence. Even if two instances
-// both pass the lock simultaneously, the first one to stamp a ride will exclude it
-// from the second instance's query window, preventing a double-broadcast for the
-// same ride.
+// Tune the TTL upward if the critical section grows — but NOT so far that a
+// crashed holder blocks recovery for an unreasonable amount of time.
 // ──────────────────────────────────────────────────────────────────────────────
-let _scheduledBroadcastRunning = false;
+const SCHEDULED_LOCK_KEY = 'lock:ride:scheduledBroadcast';
+const SCHEDULED_LOCK_TTL_SECONDS = 50;
 
 const broadcastScheduledRides = async (io) => {
-    // In-process lock — skips the tick if a previous run hasn't finished yet.
-    if (_scheduledBroadcastRunning) {
-        logger.warn('[scheduler] broadcastScheduledRides skipped — previous run still in progress', 'scheduler');
-        return;
-    }
-    _scheduledBroadcastRunning = true;
-
+    let ran;
     try {
+        ran = await withLock(SCHEDULED_LOCK_KEY, SCHEDULED_LOCK_TTL_SECONDS, async () => {
         if (!io) return;
 
         const now = new Date();
@@ -2350,11 +2342,16 @@ const broadcastScheduledRides = async (io) => {
 
             logger.info(`[scheduler] Broadcast scheduled ride ${ride._id} (scheduledFor: ${ride.scheduledFor})`, 'scheduler');
         }
+        });
     } catch (err) {
+        // `withLock` rethrows anything from the critical section so we can log it
+        // here without leaking it into the caller's interval tick.
         logger.error('[scheduler] Error broadcasting scheduled rides: ' + err.message, 'scheduler');
-    } finally {
-        // Always release the lock, even if an error is thrown.
-        _scheduledBroadcastRunning = false;
+        return;
+    }
+
+    if (ran === false) {
+        logger.warn('[scheduler] broadcastScheduledRides skipped — another holder has the lock', 'scheduler');
     }
 };
 

@@ -4,6 +4,7 @@ const User = require('../models/user.model');
 const Ride = require('../models/ride.model');
 const RideOffer = require('../models/rideOffer.model');
 const DriverActivity = require('../models/driverActivity.model');
+const Settings = require('../models/settings.model');
 const AppError = require('../utils/AppError');
 const catchAsync = require('../utils/catchAsync');
 const { haversineKm } = require('../utils/distance');
@@ -607,6 +608,10 @@ const getDriverStats = catchAsync(async (req, res, next) => {
 // @desc    Get driver earnings
 // @route   GET /api/drivers/earnings
 // @access  Private/Driver
+//
+// Response is a single, flat payload the driver app can render without
+// additional calls: gross total, platform commission (% + absolute amount),
+// net after commission, trip count, and a daily breakdown for the bar chart.
 const getDriverEarnings = catchAsync(async (req, res, next) => {
     const { period = 'today' } = req.query;
 
@@ -615,30 +620,90 @@ const getDriverEarnings = catchAsync(async (req, res, next) => {
         return next(new AppError('Driver profile not found', 404));
     }
 
+    // Resolve window bounds — `today` is the local calendar day, `week` and
+    // `month` are rolling windows anchored to now.
+    const now = new Date();
     let startDate = new Date();
     if (period === 'today') {
         startDate.setHours(0, 0, 0, 0);
     } else if (period === 'week') {
-        startDate.setDate(startDate.getDate() - 7);
+        startDate.setDate(startDate.getDate() - 6); // include today + previous 6 days
+        startDate.setHours(0, 0, 0, 0);
     } else if (period === 'month') {
-        startDate.setMonth(startDate.getMonth() - 1);
+        startDate.setDate(startDate.getDate() - 29);
+        startDate.setHours(0, 0, 0, 0);
+    } else {
+        return next(new AppError('Invalid period. Use today, week, or month', 400));
     }
 
-    // Aggregate in DB instead of fetching all documents to JS
-    const result = await Ride.aggregate([
+    // Pull commission rate from Settings so admin config is the source of truth.
+    // Safe fallback to 15% if the Settings document hasn't been created yet.
+    const pricingConfig = await Settings.getPricing().catch(() => null);
+    const commissionPercent = pricingConfig?.commissionPercent ?? 15;
+    const commissionRate = commissionPercent / 100;
+
+    // Totals aggregate
+    const [totals] = await Ride.aggregate([
         { $match: { driver: driver._id, status: 'completed', endTime: { $gte: startDate } } },
         { $group: { _id: null, total: { $sum: '$fare' }, trips: { $sum: 1 } } }
     ]);
 
-    const s = result[0] || { total: 0, trips: 0 };
+    const grossTotal = totals?.total || 0;
+    const trips = totals?.trips || 0;
+    const commissionAmount = Math.round(grossTotal * commissionRate * 100) / 100;
+    const netTotal = Math.max(0, Math.round((grossTotal - commissionAmount) * 100) / 100);
+
+    // Daily breakdown — only for week/month (today is a single bar handled client-side).
+    let daily = [];
+    if (period !== 'today') {
+        const dailyAgg = await Ride.aggregate([
+            { $match: { driver: driver._id, status: 'completed', endTime: { $gte: startDate } } },
+            {
+                $group: {
+                    _id: {
+                        $dateToString: { format: '%Y-%m-%d', date: '$endTime' }
+                    },
+                    amount: { $sum: '$fare' },
+                    trips: { $sum: 1 }
+                }
+            },
+            { $sort: { _id: 1 } }
+        ]);
+
+        // Backfill zero days so the bar chart has a continuous X axis — easier
+        // for the client than having to densify the response itself.
+        const byDay = new Map(dailyAgg.map((d) => [d._id, d]));
+        const days = period === 'week' ? 7 : 30;
+        daily = [];
+        for (let i = 0; i < days; i++) {
+            const d = new Date(startDate);
+            d.setDate(d.getDate() + i);
+            if (d > now) break;
+            const key = d.toISOString().slice(0, 10);
+            const entry = byDay.get(key);
+            const amount = entry?.amount || 0;
+            daily.push({
+                date: key,
+                label: String(d.getDate()), // day-of-month label for the bar chart
+                amount: Math.round(amount * 100) / 100,
+                net: Math.round((amount - amount * commissionRate) * 100) / 100,
+                trips: entry?.trips || 0
+            });
+        }
+    }
 
     res.json({
         success: true,
         data: {
             earnings: {
-                total: s.total,
-                trips: s.trips,
-                average: s.trips > 0 ? s.total / s.trips : 0
+                // Back-compat with the current client — `total` = gross, `commission` = absolute
+                total: grossTotal,
+                trips,
+                average: trips > 0 ? Math.round((grossTotal / trips) * 100) / 100 : 0,
+                commission: commissionAmount,
+                commissionPercent,
+                net: netTotal,
+                daily,
             }
         }
     });
@@ -1402,14 +1467,17 @@ const registerDriver = catchAsync(async (req, res, next) => {
         color: vehicleColor,
     };
 
-    // Create the pending driver profile — isApproved and isActive are false by default
+    // Create the pending driver profile — isApproved/isActive stay false until
+    // admin review, and onboardingStatus starts at `pending_documents` so the
+    // mobile app can prompt for the required photo uploads.
     const driver = await Driver.create({
         user: userId,
         phone,
         licenseNumber,
         vehicle,
         isApproved: false,
-        isActive: false
+        isActive: false,
+        onboardingStatus: 'pending_documents'
     });
 
     // Do NOT promote to role=driver yet — they stay as 'user' until admin approves.
@@ -1435,6 +1503,23 @@ const VALID_DOCUMENT_TYPES = [
     'driverLicense', 'licenseFront', 'licenseBack', 'profilePhoto',
     'front', 'back', 'left', 'right', 'inside'
 ];
+
+// Minimum document set required before an application can move to review.
+// Front/back/left/right are the four vehicle exterior shots; driverLicense is
+// the combined front-back license photo; profilePhoto is the driver's face.
+const REQUIRED_ONBOARDING_DOCUMENTS = [
+    'driverLicense',
+    'profilePhoto',
+    'front',
+    'back',
+    'left',
+    'right'
+];
+
+function hasAllRequiredDocuments(docs) {
+    if (!docs) return false;
+    return REQUIRED_ONBOARDING_DOCUMENTS.every((d) => !!docs[d]);
+}
 
 // @desc    Upload a document for the driver profile (works for unapproved drivers too)
 // @route   POST /api/drivers/documents/:type
@@ -1465,6 +1550,26 @@ const uploadDriverDocument = catchAsync(async (req, res, next) => {
     const secureUrl = req.file.secure_url || req.file.url;
 
     driver.documents[type] = secureUrl;
+
+    // Auto-advance onboarding state once the minimum document set is present.
+    // Drivers that were previously rejected are NOT auto-promoted — they must
+    // re-submit explicitly via the register flow so the admin sees the updated
+    // application (and the old rejectionReason is cleared with intent).
+    const movedToReview = (
+        driver.onboardingStatus === 'pending_documents' &&
+        hasAllRequiredDocuments(driver.documents)
+    );
+    if (movedToReview) {
+        driver.onboardingStatus = 'under_review';
+        driver.submittedAt = new Date();
+
+        // Notify admins so the pending queue updates in real time.
+        const io = req.app.get('io');
+        if (io) {
+            io.to('admin').emit('driver:submitted', { driverId: driver._id });
+        }
+    }
+
     await driver.save();
 
     const { trackEvent, EVENTS } = require('../services/analytics.service');
@@ -1476,7 +1581,9 @@ const uploadDriverDocument = catchAsync(async (req, res, next) => {
         data: {
             documentType: type,
             url: secureUrl,
-            documents: driver.documents
+            documents: driver.documents,
+            onboardingStatus: driver.onboardingStatus,
+            submittedAt: driver.submittedAt
         }
     });
 });
@@ -1484,10 +1591,27 @@ const uploadDriverDocument = catchAsync(async (req, res, next) => {
 // @desc    Get pending driver registrations (unapproved)
 // @route   GET /api/drivers/admin/pending
 // @access  Private/Admin
+// Query: ?status=under_review|pending_documents|rejected  (default: under_review)
+// Admins usually only want the queue that needs action (under_review), so we
+// default to that and let them opt into other buckets explicitly.
 const getPendingDrivers = catchAsync(async (req, res) => {
-    const drivers = await Driver.find({ isApproved: false })
+    const { status = 'under_review' } = req.query;
+
+    const allowed = ['under_review', 'pending_documents', 'rejected', 'all'];
+    if (!allowed.includes(status)) {
+        return res.status(400).json({
+            success: false,
+            message: `Invalid status. Allowed: ${allowed.join(', ')}`
+        });
+    }
+
+    const query = status === 'all'
+        ? { isApproved: false }
+        : { isApproved: false, onboardingStatus: status };
+
+    const drivers = await Driver.find(query)
         .populate('user', 'firstName lastName email phone profileImage createdAt')
-        .sort({ createdAt: -1 });
+        .sort({ submittedAt: -1, createdAt: -1 });
 
     res.json({
         success: true,
@@ -1512,9 +1636,16 @@ const approveDriver = catchAsync(async (req, res, next) => {
         return next(new AppError('Driver not found', 404));
     }
 
+    const now = new Date();
+    const reviewerId = req.user._id || req.user.id;
+
     if (approved) {
         driver.isApproved = true;
         driver.isActive = true;
+        driver.onboardingStatus = 'approved';
+        driver.rejectionReason = null;
+        driver.reviewedAt = now;
+        driver.reviewedBy = reviewerId;
         // Admin assigns the vehicle type after inspecting photos
         if (vehicleType) {
             driver.vehicle.type = vehicleType;
@@ -1537,22 +1668,25 @@ const approveDriver = catchAsync(async (req, res, next) => {
             ).catch(() => {});
         }
 
-        // Emit to admin room
+        // Emit to admin room AND to the driver's user room so the driver app
+        // can update its onboarding screen in real time without polling.
         const io = req.app.get('io');
         if (io) {
             io.to('admin').emit('driver:approved', { driverId: driver._id });
             io.to(`user:${driver.user._id}`).emit('driver:approved', {
                 driverId: driver._id,
-                message: 'Your driver account has been approved!'
+                status: 'approved'
             });
         }
     } else {
-        // Rejection — keep profile but mark not approved
+        // Rejection — keep profile but mark not approved. Stamp the reason and
+        // reviewer so the driver can see what to fix and admin actions are auditable.
         driver.isApproved = false;
         driver.isActive = false;
-        if (rejectionReason) {
-            driver.rejectionReason = rejectionReason;
-        }
+        driver.onboardingStatus = 'rejected';
+        driver.rejectionReason = rejectionReason || 'Application rejected. Please re-upload documents and contact support.';
+        driver.reviewedAt = now;
+        driver.reviewedBy = reviewerId;
         await driver.save();
 
         if (driver.user) {
@@ -1560,8 +1694,19 @@ const approveDriver = catchAsync(async (req, res, next) => {
                 driver.user._id.toString(),
                 'driver_rejected_title',
                 'driver_rejected_body',
-                { type: 'driver_rejected', reason: rejectionReason || '' }
+                { type: 'driver_rejected', reason: driver.rejectionReason }
             ).catch(() => {});
+        }
+
+        // Emit real-time rejection so the driver app can redirect to the
+        // rejection screen without waiting for the next poll.
+        const io = req.app.get('io');
+        if (io && driver.user) {
+            io.to(`user:${driver.user._id}`).emit('driver:rejected', {
+                driverId: driver._id,
+                status: 'rejected',
+                reason: driver.rejectionReason
+            });
         }
     }
 
@@ -1578,27 +1723,43 @@ const approveDriver = catchAsync(async (req, res, next) => {
 // @desc    Get onboarding status for the current user (works for unapproved drivers)
 // @route   GET /api/drivers/onboarding-status
 // @access  Private (any authenticated user)
+//
+// Response shape is intentionally rich so the driver app can render the right
+// screen without a second round-trip:
+//   status              : not_started | pending_documents | under_review | approved | rejected
+//   missingDocuments    : list of required docs still needed (empty when all uploaded)
+//   rejectionReason     : set only when status === 'rejected'
+//   submittedAt         : when the driver finished upload and entered review
+//   reviewedAt          : when admin approved/rejected
 const getOnboardingStatus = catchAsync(async (req, res) => {
     const userId = req.user._id || req.user.id;
 
     const driver = await Driver.findOne({ user: userId })
-        .select('isApproved isActive vehicle documents')
+        .select('isApproved isActive onboardingStatus rejectionReason submittedAt reviewedAt vehicle documents')
         .lean();
 
     if (!driver) {
         return res.json({
             success: true,
-            data: { status: 'not_started', hasDriverProfile: false }
+            data: {
+                status: 'not_started',
+                hasDriverProfile: false,
+                missingDocuments: REQUIRED_ONBOARDING_DOCUMENTS,
+            }
         });
     }
 
-    // Check if documents have been uploaded
     const docs = driver.documents || {};
-    const hasDocuments = !!(docs.driverLicense || docs.front);
+    const missingDocuments = REQUIRED_ONBOARDING_DOCUMENTS.filter((d) => !docs[d]);
+    const hasAllDocs = missingDocuments.length === 0;
 
-    let status = 'pending'; // profile created, waiting for approval
-    if (driver.isApproved) {
-        status = 'approved';
+    // onboardingStatus is the source of truth, but fall back gracefully for
+    // profiles created before this field existed.
+    let status = driver.onboardingStatus;
+    if (!status) {
+        if (driver.isApproved) status = 'approved';
+        else if (hasAllDocs) status = 'under_review';
+        else status = 'pending_documents';
     }
 
     res.json({
@@ -1606,8 +1767,12 @@ const getOnboardingStatus = catchAsync(async (req, res) => {
         data: {
             status,
             hasDriverProfile: true,
-            isApproved: driver.isApproved,
-            hasDocuments,
+            isApproved: !!driver.isApproved,
+            hasDocuments: hasAllDocs,
+            missingDocuments,
+            rejectionReason: status === 'rejected' ? driver.rejectionReason : null,
+            submittedAt: driver.submittedAt || null,
+            reviewedAt: driver.reviewedAt || null,
             vehicle: driver.vehicle,
         }
     });

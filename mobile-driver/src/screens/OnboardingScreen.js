@@ -20,6 +20,7 @@ import * as Notifications from 'expo-notifications';
 
 import { driverAPI, authAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import { useSocket } from '../context/SocketContext';
 import { colors, shadows, radius, useTypography } from '../theme/colors';
 import DocumentUpload from '../components/DocumentUpload';
 
@@ -46,6 +47,7 @@ const CAR_PHOTO_TYPES = [
 export default function OnboardingScreen({ navigation }) {
   const { t } = useTranslation();
   const { user, updateUser } = useAuth();
+  const { socket } = useSocket();
   const insets = useSafeAreaInsets();
   const typography = useTypography();
   const styles = useMemo(() => createStyles(typography), [typography]);
@@ -122,13 +124,33 @@ export default function OnboardingScreen({ navigation }) {
         }
       } catch (_) {}
 
-      // 2. Check if driver profile already exists (submitted previously)
+      // 2. Check if driver profile already exists (submitted previously).
+      //    The status endpoint now returns a rich payload: status, rejection
+      //    reason, missing documents, etc. Handle each state explicitly so
+      //    drivers are not silently stuck on the "pending" screen after a
+      //    rejection — they need to see the reason and what to fix.
       try {
         const res = await driverAPI.getOnboardingStatus();
-        const { hasDriverProfile, isApproved } = res.data?.data || {};
-        if (mounted && hasDriverProfile && !isApproved) {
-          // Driver submitted but not yet approved — jump to pending step
-          setCurrentStep(STEPS.indexOf('pending'));
+        const data = res.data?.data || {};
+        const { hasDriverProfile, isApproved, status, rejectionReason } = data;
+
+        if (!mounted) return;
+
+        if (hasDriverProfile && !isApproved) {
+          if (status === 'rejected') {
+            // Show the rejection reason and keep the user on the welcome step
+            // so they can re-enter the flow after reading what to fix.
+            Alert.alert(
+              t('onboarding.rejected.title', { defaultValue: 'Application rejected' }),
+              rejectionReason || t('onboarding.rejected.genericReason', {
+                defaultValue: 'Your application was rejected. Please contact support for details.'
+              })
+            );
+            // Stay on welcome (step 0) so they can restart the flow
+          } else {
+            // under_review / pending_documents — show the waiting screen
+            setCurrentStep(STEPS.indexOf('pending'));
+          }
         }
       } catch (_) {}
 
@@ -136,6 +158,44 @@ export default function OnboardingScreen({ navigation }) {
     })();
     return () => { mounted = false; };
   }, []);
+
+  // ─── Listen for admin approval / rejection via Socket.io ────────────────
+  // The server emits `driver:approved` and `driver:rejected` to the driver's
+  // `user:{id}` room the moment an admin reviews the application. Reacting
+  // here lets us advance the onboarding screen without waiting for the user
+  // to manually refresh — critical for a smooth post-review experience.
+  useEffect(() => {
+    if (!socket) return;
+
+    const onApproved = () => {
+      // Promote locally so subsequent screens (Home) render in the approved state
+      updateUser({ role: 'driver' });
+      Alert.alert(
+        t('onboarding.approvedAlert.title', { defaultValue: 'Approved!' }),
+        t('onboarding.approvedAlert.body', {
+          defaultValue: 'Your driver application has been approved. Welcome to Lulini!'
+        })
+      );
+      // The root navigator will route drivers to HomeScreen based on `role`.
+    };
+
+    const onRejected = (payload) => {
+      Alert.alert(
+        t('onboarding.rejected.title', { defaultValue: 'Application rejected' }),
+        payload?.reason || t('onboarding.rejected.genericReason', {
+          defaultValue: 'Your application was rejected. Please contact support for details.'
+        })
+      );
+      setCurrentStep(0);
+    };
+
+    socket.on('driver:approved', onApproved);
+    socket.on('driver:rejected', onRejected);
+    return () => {
+      socket.off('driver:approved', onApproved);
+      socket.off('driver:rejected', onRejected);
+    };
+  }, [socket, updateUser, t]);
 
   // ─── Cache form data whenever fields change ──────────────────────────────
   const cacheTimeoutRef = useRef(null);

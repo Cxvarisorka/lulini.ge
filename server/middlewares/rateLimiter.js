@@ -1,4 +1,5 @@
 const rateLimit = require('express-rate-limit');
+const { ipKeyGenerator } = require('express-rate-limit');
 
 // Build a Redis store if REDIS_URL is configured, so rate limit counters are
 // shared across all PM2 cluster instances. Falls back to the default in-memory
@@ -120,6 +121,28 @@ const chatMessageLimiter = rateLimit({
     message: { success: false, message: 'Too many messages, please slow down' }
 });
 
+// Ride state transitions (accept / decline / arrive / start / complete / cancel).
+// Generous cap — a legitimate driver will hit ~6 transitions per ride, so 60/min
+// leaves plenty of headroom while still stopping a runaway retry loop or a
+// compromised token from spamming ride:accepted events into the socket layer.
+const rideActionLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 60,
+    standardHeaders: true,
+    legacyHeaders: false,
+    store: makeStore('ride_action'),
+    // Prefer user ID over IP — PM2 cluster + NAT'd mobile carriers share IPs.
+    // Use the library's ipKeyGenerator helper for the IP fallback so IPv6
+    // addresses are collapsed to /64 and can't bypass the limit by rotating
+    // trailing bytes.
+    keyGenerator: (req, res) => {
+        const uid = req.user?._id || req.user?.id;
+        if (uid) return `user:${uid}`;
+        return `ip:${ipKeyGenerator(req, res)}`;
+    },
+    message: { success: false, message: 'Too many ride actions, please slow down' }
+});
+
 module.exports = {
     globalLimiter,
     authLimiter,
@@ -127,6 +150,7 @@ module.exports = {
     otpSendPhoneLimiter,
     otpVerifyLimiter,
     rideCreateLimiter,
+    rideActionLimiter,
     driverLocationLimiter,
     chatMessageLimiter
 };

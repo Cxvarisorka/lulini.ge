@@ -16,24 +16,24 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useDriver } from '../context/DriverContext';
 import { colors, shadows, radius, spacing, useTypography } from '../theme/colors';
 
-// TODO: Commission rate should come from the server per-driver config instead of being hardcoded.
-//       The server can return it as part of the earnings response payload.
-const DEFAULT_COMMISSION_RATE = 0.15; // 15%
+// The server is the source of truth for commission rate. This fallback is only
+// used for pre-deploy builds where the earnings response is still the legacy
+// shape — any modern response will include `commissionPercent`.
+const FALLBACK_COMMISSION_RATE = 0.15;
 
-// Generate mock daily bar data for visual chart when server doesn't provide it
-// todayLabel is the localized string for "Today" passed in from the component
+// Build the bar chart data from the earnings payload.
+// Server responses now include a `daily` array with real values (and zero-days
+// backfilled), so the chart reflects actual earnings instead of placeholder bars.
 function buildDailyBars(earnings, period, todayLabel) {
   const total = earnings?.total || 0;
   if (period === 'today') {
-    // Single bar for today
     return [{ label: todayLabel, value: total }];
   }
-  const count = period === 'week' ? 7 : 30;
-  // If server returns daily breakdown use it, otherwise generate placeholder zeros
   if (earnings?.daily?.length) {
     return earnings.daily.map((d) => ({ label: d.label || '', value: d.amount || 0 }));
   }
-  // Placeholder bars — all zeros
+  // Defensive fallback — only hit on a malformed response.
+  const count = period === 'week' ? 7 : 30;
   return Array.from({ length: count }, (_, i) => ({ label: String(i + 1), value: 0 }));
 }
 
@@ -49,7 +49,10 @@ export default function EarningsScreen() {
     total: 0,
     trips: 0,
     average: 0,
-    commission: null, // server may or may not provide this
+    commission: null,        // absolute GEL amount, from server
+    commissionPercent: null, // platform commission %, from server Settings
+    net: null,               // gross - commission, from server
+    daily: [],               // per-day breakdown for the bar chart
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
@@ -71,12 +74,19 @@ export default function EarningsScreen() {
     }
   };
 
-  // Commission and net earnings calculations
+  // Commission and net earnings — server is the source of truth. If the server
+  // returns `commission` and `commissionPercent`, trust them. Otherwise fall
+  // back to the legacy 15% assumption so older builds still render correctly.
   const grossEarnings = earnings.total || 0;
+  const commissionRate = earnings.commissionPercent != null
+    ? earnings.commissionPercent / 100
+    : FALLBACK_COMMISSION_RATE;
   const commissionAmount = earnings.commission != null
     ? earnings.commission
-    : Math.round(grossEarnings * DEFAULT_COMMISSION_RATE * 100) / 100;
-  const netEarnings = Math.max(0, grossEarnings - commissionAmount);
+    : Math.round(grossEarnings * commissionRate * 100) / 100;
+  const netEarnings = earnings.net != null
+    ? earnings.net
+    : Math.max(0, Math.round((grossEarnings - commissionAmount) * 100) / 100);
 
   const periods = [
     { id: 'today', label: t('earnings.today'), icon: 'today' },
@@ -360,7 +370,7 @@ export default function EarningsScreen() {
                     })
                   : '—';
                 const fareNet = ride.fare != null
-                  ? Math.max(0, ride.fare - Math.round(ride.fare * DEFAULT_COMMISSION_RATE * 100) / 100)
+                  ? Math.max(0, ride.fare - Math.round(ride.fare * commissionRate * 100) / 100)
                   : null;
                 return (
                   <View key={ride._id || index}>

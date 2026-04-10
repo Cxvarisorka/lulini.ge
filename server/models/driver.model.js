@@ -108,6 +108,36 @@ const driverSchema = new mongoose.Schema({
         type: Boolean,
         default: false
     },
+    // Fine-grained onboarding state — kept separate from isApproved so we can
+    // distinguish "profile created, docs missing" from "docs uploaded, awaiting
+    // admin review" from "rejected, needs resubmit".
+    //
+    //   pending_documents  — driver profile created, still needs to upload photos
+    //   under_review       — all required documents uploaded, awaiting admin decision
+    //   approved           — admin accepted (also sets isApproved/isActive = true)
+    //   rejected           — admin rejected; rejectionReason is populated
+    onboardingStatus: {
+        type: String,
+        enum: ['pending_documents', 'under_review', 'approved', 'rejected'],
+        default: 'pending_documents'
+    },
+    rejectionReason: {
+        type: String,
+        default: null
+    },
+    submittedAt: {
+        type: Date,
+        default: null
+    },
+    reviewedAt: {
+        type: Date,
+        default: null
+    },
+    reviewedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        default: null
+    },
     documents: {
         licenseImage: { type: String, default: null },
         vehicleRegistration: { type: String, default: null },
