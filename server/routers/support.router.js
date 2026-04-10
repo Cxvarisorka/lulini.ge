@@ -2,24 +2,16 @@ const express = require('express');
 const SupportTicket = require('../models/supportTicket.model');
 const AppError = require('../utils/AppError');
 const catchAsync = require('../utils/catchAsync');
-const rateLimit = require('express-rate-limit');
 
 const router = express.Router();
 
-// Rate limiter: 5 tickets per hour per IP
-const supportLimiter = rateLimit({
-    windowMs: 60 * 60 * 1000,
-    max: 5,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { success: false, message: 'Too many submissions, please try again later' }
-});
+// NOTE: Rate limiter temporarily removed.
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const VALID_CATEGORIES = ['ride_issue', 'payment', 'account', 'driver_feedback', 'app_bug', 'suggestion', 'other'];
 
 // POST /api/support - Submit a support ticket
-router.post('/', supportLimiter, catchAsync(async (req, res, next) => {
+router.post('/', catchAsync(async (req, res, next) => {
     const { name, email, category, subject, message } = req.body;
 
     if (!name || !email || !category || !subject || !message) {

@@ -19,8 +19,9 @@ const {
     forgotPasswordReset
 } = require('../controllers/auth.controller');
 const { protect } = require('../middlewares/auth.middleware');
-const { authLimiter, otpSendLimiter, otpSendPhoneLimiter, otpVerifyLimiter } = require('../middlewares/rateLimiter');
 const { validateLogin, validateSendPhoneOtp } = require('../middlewares/validators');
+
+// NOTE: Rate limiters temporarily removed.
 
 // Health check / test route
 router.get('/test', (req, res) => {
@@ -28,16 +29,16 @@ router.get('/test', (req, res) => {
 });
 
 // Core auth routes
-router.post('/login', authLimiter, validateLogin, login);
+router.post('/login', validateLogin, login);
 router.post('/logout', logout);
 router.get('/me', protect, getMe);
 
 // Phone OTP authentication routes
-router.post('/phone/send-otp', otpSendLimiter, otpSendPhoneLimiter, validateSendPhoneOtp, sendPhoneOtp);
-router.post('/phone/verify-otp', otpVerifyLimiter, verifyPhoneOtp);
+router.post('/phone/send-otp', validateSendPhoneOtp, sendPhoneOtp);
+router.post('/phone/verify-otp', verifyPhoneOtp);
 
 // Phone update routes (authenticated)
-router.post('/phone/update-send-otp', protect, otpSendPhoneLimiter, validateSendPhoneOtp, sendPhoneUpdateOtp);
+router.post('/phone/update-send-otp', protect, validateSendPhoneOtp, sendPhoneUpdateOtp);
 router.post('/phone/update-verify-otp', protect, verifyPhoneUpdateOtp);
 
 // Complete onboarding
@@ -51,8 +52,8 @@ router.post('/email/send-code', protect, sendEmailCode);
 router.post('/email/verify-code', protect, verifyEmailCode);
 
 // Forgot password (phone OTP verification)
-router.post('/forgot-password/send-otp', otpSendLimiter, otpSendPhoneLimiter, validateSendPhoneOtp, forgotPasswordSendOtp);
-router.post('/forgot-password/reset', otpVerifyLimiter, forgotPasswordReset);
+router.post('/forgot-password/send-otp', validateSendPhoneOtp, forgotPasswordSendOtp);
+router.post('/forgot-password/reset', forgotPasswordReset);
 
 // Account deletion (Apple App Store requirement)
 // DELETE /account        - schedule deletion (30-day grace period)
