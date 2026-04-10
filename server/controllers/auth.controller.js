@@ -246,22 +246,14 @@ const verifyPhoneOtp = catchAsync(async (req, res, next) => {
             return next(new AppError('Phone not verified. Please verify your phone first', 400));
         }
 
-        let user;
-        try {
-            user = await User.create({
-                firstName,
-                lastName,
-                phone,
-                provider: 'phone',
-                isPhoneVerified: true,
-                isVerified: true
-            });
-        } catch (err) {
-            if (err && err.code === 11000) {
-                return next(new AppError('A user with this phone number already exists', 409));
-            }
-            throw err;
-        }
+        const user = await User.create({
+            firstName,
+            lastName,
+            phone,
+            provider: 'phone',
+            isPhoneVerified: true,
+            isVerified: true
+        });
         return sendTokenResponse(user, 201, res, 'Registration successful', true);
     }
 
@@ -334,21 +326,14 @@ const verifyPhoneOtp = catchAsync(async (req, res, next) => {
             });
         }
 
-        try {
-            user = await User.create({
-                firstName,
-                lastName,
-                phone,
-                provider: 'phone',
-                isPhoneVerified: true,
-                isVerified: true
-            });
-        } catch (err) {
-            if (err && err.code === 11000) {
-                return next(new AppError('A user with this phone number already exists', 409));
-            }
-            throw err;
-        }
+        user = await User.create({
+            firstName,
+            lastName,
+            phone,
+            provider: 'phone',
+            isPhoneVerified: true,
+            isVerified: true
+        });
         isNewUser = true;
     } else {
         user.isPhoneVerified = true;
