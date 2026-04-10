@@ -1,7 +1,8 @@
 const express = require('express');
 const { protect } = require('../middlewares/auth.middleware');
-const { chatMessageLimiter } = require('../middlewares/rateLimiter');
 const { sendMessage, getMessages, markAsRead } = require('../controllers/chat.controller');
+
+// NOTE: Rate limiters temporarily removed.
 
 const router = express.Router();
 
@@ -9,7 +10,7 @@ const router = express.Router();
 router.use(protect);
 
 // Nested under ride context
-router.post('/rides/:rideId/messages', chatMessageLimiter, sendMessage);
+router.post('/rides/:rideId/messages', sendMessage);
 router.get('/rides/:rideId/messages', getMessages);
 router.patch('/rides/:rideId/messages/read', markAsRead);
 

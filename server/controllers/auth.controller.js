@@ -13,6 +13,19 @@ const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const EmailOTP = require('../models/emailOtp.model');
 const emailService = require('../services/email.service');
+const { normalizePhone, isE164 } = require('../utils/phone');
+
+// Build a find-query that matches either the normalized (E.164) phone or the
+// raw input the client sent. This lets us transparently recover users whose
+// phone was stored in a non-E.164 format before normalization was added.
+function phoneMatchQuery(normalized, raw) {
+    const values = [];
+    if (normalized) values.push(normalized);
+    if (raw && raw !== normalized) values.push(raw);
+    if (values.length === 0) return null;
+    if (values.length === 1) return values[0];
+    return { $in: values };
+}
 
 function generateEmailCode() {
     return String(crypto.randomInt(100000, 1000000));
@@ -169,23 +182,22 @@ const getMe = catchAsync(async (req, res, next) => {
 // @desc    Send OTP to phone number
 // @route   POST /api/auth/phone/send-otp
 const sendPhoneOtp = catchAsync(async (req, res, next) => {
-    const { phone } = req.body;
+    const { phone: rawPhone } = req.body;
 
-    if (!phone) {
+    if (!rawPhone) {
         return next(new AppError('Phone number is required', 400));
     }
 
-    // Validate phone format (E.164)
-    const phoneRegex = /^\+?[\d\s()-]{7,20}$/;
-    if (!phoneRegex.test(phone)) {
+    const phone = normalizePhone(rawPhone);
+    if (!phone) {
         return next(new AppError('Please provide a valid phone number', 400));
     }
 
-    // Check if user already exists with this phone
-    const existingUser = await User.findOne({ phone });
+    // Check if user already exists with this phone (either normalized or legacy raw form)
+    const existingUser = await User.findOne({ phone: phoneMatchQuery(phone, rawPhone) });
 
-    // Delete any existing OTP for this phone
-    await OTP.deleteMany({ phone });
+    // Delete any existing OTP for this phone (both forms, to clean up legacy rows)
+    await OTP.deleteMany({ phone: phoneMatchQuery(phone, rawPhone) });
 
     // Send OTP via SMSOffice (or dev fallback)
     const result = await sendVerification(phone);
@@ -204,11 +216,18 @@ const sendPhoneOtp = catchAsync(async (req, res, next) => {
 // @desc    Verify OTP and login/register user
 // @route   POST /api/auth/phone/verify-otp
 const verifyPhoneOtp = catchAsync(async (req, res, next) => {
-    const { phone, code, firstName, lastName } = req.body;
+    const { phone: rawPhone, code, firstName, lastName } = req.body;
 
-    if (!phone) {
+    if (!rawPhone) {
         return next(new AppError('Phone number is required', 400));
     }
+
+    const phone = normalizePhone(rawPhone);
+    if (!phone) {
+        return next(new AppError('Please provide a valid phone number', 400));
+    }
+
+    const phoneQuery = phoneMatchQuery(phone, rawPhone);
 
     // Registration completion flow (phone already verified, no code needed)
     if (!code && firstName) {
@@ -237,14 +256,14 @@ const verifyPhoneOtp = catchAsync(async (req, res, next) => {
     }
 
     // Phone-level lockout: if user exists and is locked, reject early
-    const existingUser = await User.findOne({ phone });
+    const existingUser = await User.findOne({ phone: phoneQuery });
     if (existingUser && existingUser.lockUntil && existingUser.lockUntil > new Date()) {
         const minutesLeft = Math.ceil((existingUser.lockUntil - new Date()) / 60000);
         return next(new AppError(`Too many failed attempts. Try again in ${minutesLeft} minutes`, 423));
     }
 
     // Verify OTP against local DB
-    const otpRecord = await OTP.findOne({ phone, verified: false });
+    const otpRecord = await OTP.findOne({ phone: phoneQuery, verified: false });
 
     if (!otpRecord) {
         return next(new AppError('OTP not found. Please request a new code', 400));
@@ -281,7 +300,7 @@ const verifyPhoneOtp = catchAsync(async (req, res, next) => {
     await OTP.deleteOne({ _id: otpRecord._id });
 
     // OTP verified - find or create user
-    let user = await User.findOne({ phone });
+    let user = await User.findOne({ phone: phoneQuery });
     let isNewUser = false;
 
     if (!user) {
@@ -313,6 +332,10 @@ const verifyPhoneOtp = catchAsync(async (req, res, next) => {
     } else {
         user.isPhoneVerified = true;
         user.isVerified = true;
+        // Migrate legacy phone to E.164 so future saves pass validation
+        if (!isE164(user.phone)) {
+            user.phone = phone;
+        }
         // Reset lockout counters on successful verification
         if (user.failedLoginAttempts > 0 || user.lockUntil) {
             user.failedLoginAttempts = 0;
@@ -395,27 +418,29 @@ const completeOnboarding = catchAsync(async (req, res, next) => {
 // @desc    Send OTP for phone number update (authenticated user)
 // @route   POST /api/auth/phone/update-send-otp
 const sendPhoneUpdateOtp = catchAsync(async (req, res, next) => {
-    const { phone } = req.body;
+    const { phone: rawPhone } = req.body;
     const userId = req.user.id;
 
-    if (!phone) {
+    if (!rawPhone) {
         return next(new AppError('Phone number is required', 400));
     }
 
-    // Validate phone format
-    const phoneRegex = /^\+?[\d\s()-]{7,20}$/;
-    if (!phoneRegex.test(phone)) {
+    const phone = normalizePhone(rawPhone);
+    if (!phone) {
         return next(new AppError('Please provide a valid phone number', 400));
     }
 
-    // Check if phone is already used by another user
-    const existingUser = await User.findOne({ phone, _id: { $ne: userId } });
+    // Check if phone is already used by another user (either normalized or legacy raw form)
+    const existingUser = await User.findOne({
+        phone: phoneMatchQuery(phone, rawPhone),
+        _id: { $ne: userId }
+    });
     if (existingUser) {
         return next(new AppError('This phone number is already registered to another account', 400));
     }
 
     // Delete any existing OTP for this phone
-    await OTP.deleteMany({ phone });
+    await OTP.deleteMany({ phone: phoneMatchQuery(phone, rawPhone) });
 
     // Send OTP via SMSOffice (or dev fallback)
     const result = await sendVerification(phone);
@@ -434,15 +459,20 @@ const sendPhoneUpdateOtp = catchAsync(async (req, res, next) => {
 // @desc    Verify OTP and update phone number (authenticated user)
 // @route   POST /api/auth/phone/update-verify-otp
 const verifyPhoneUpdateOtp = catchAsync(async (req, res, next) => {
-    const { phone, code } = req.body;
+    const { phone: rawPhone, code } = req.body;
     const userId = req.user.id;
 
-    if (!phone || !code) {
+    if (!rawPhone || !code) {
         return next(new AppError('Phone number and OTP code are required', 400));
     }
 
+    const phone = normalizePhone(rawPhone);
+    if (!phone) {
+        return next(new AppError('Please provide a valid phone number', 400));
+    }
+
     // Verify OTP against local DB
-    const otpRecord = await OTP.findOne({ phone });
+    const otpRecord = await OTP.findOne({ phone: phoneMatchQuery(phone, rawPhone) });
 
     if (!otpRecord) {
         return next(new AppError('OTP not found. Please request a new code', 400));
@@ -464,7 +494,7 @@ const verifyPhoneUpdateOtp = catchAsync(async (req, res, next) => {
 
     await OTP.deleteOne({ _id: otpRecord._id });
 
-    // Update user's phone number
+    // Update user's phone number (always store in E.164)
     const user = await User.findById(userId);
     if (!user) {
         return next(new AppError('User not found', 404));
@@ -809,19 +839,20 @@ const cancelAccountDeletion = catchAsync(async (req, res, next) => {
 // @desc    Send OTP for password reset (unauthenticated — by phone number)
 // @route   POST /api/auth/forgot-password/send-otp
 const forgotPasswordSendOtp = catchAsync(async (req, res, next) => {
-    const { phone } = req.body;
+    const { phone: rawPhone } = req.body;
 
-    if (!phone) {
+    if (!rawPhone) {
         return next(new AppError('Phone number is required', 400));
     }
 
-    const phoneRegex = /^\+?[\d\s()-]{7,20}$/;
-    if (!phoneRegex.test(phone)) {
+    const phone = normalizePhone(rawPhone);
+    if (!phone) {
         return next(new AppError('Please provide a valid phone number', 400));
     }
 
     // Check that a user with this phone exists and has a password (local provider)
-    const user = await User.findOne({ phone });
+    // Look up both normalized and raw form to handle legacy records.
+    const user = await User.findOne({ phone: phoneMatchQuery(phone, rawPhone) });
     if (!user || user.provider !== 'local') {
         // Don't reveal whether the phone exists — always return success
         return res.status(200).json({
@@ -837,7 +868,7 @@ const forgotPasswordSendOtp = catchAsync(async (req, res, next) => {
     }
 
     // Delete any existing password-reset OTP for this phone
-    await OTP.deleteMany({ phone, purpose: 'password_reset' });
+    await OTP.deleteMany({ phone: phoneMatchQuery(phone, rawPhone), purpose: 'password_reset' });
 
     const result = await sendVerification(phone);
     const otpCode = result.devCode || result.code;
@@ -853,9 +884,9 @@ const forgotPasswordSendOtp = catchAsync(async (req, res, next) => {
 // @desc    Verify OTP and reset password (unauthenticated)
 // @route   POST /api/auth/forgot-password/reset
 const forgotPasswordReset = catchAsync(async (req, res, next) => {
-    const { phone, code, newPassword } = req.body;
+    const { phone: rawPhone, code, newPassword } = req.body;
 
-    if (!phone || !code || !newPassword) {
+    if (!rawPhone || !code || !newPassword) {
         return next(new AppError('Phone, OTP code, and new password are required', 400));
     }
 
@@ -866,7 +897,15 @@ const forgotPasswordReset = catchAsync(async (req, res, next) => {
         return next(new AppError('Password must contain at least one uppercase letter, one lowercase letter, and one number', 400));
     }
 
-    const user = await User.findOne({ phone, provider: 'local' });
+    const phone = normalizePhone(rawPhone);
+    if (!phone) {
+        return next(new AppError('Please provide a valid phone number', 400));
+    }
+
+    const phoneQuery = phoneMatchQuery(phone, rawPhone);
+
+    // Look up user by normalized or legacy raw phone form
+    const user = await User.findOne({ phone: phoneQuery, provider: 'local' });
     if (!user) {
         return next(new AppError('Invalid phone number', 400));
     }
@@ -876,7 +915,7 @@ const forgotPasswordReset = catchAsync(async (req, res, next) => {
         return next(new AppError(`Account locked. Try again in ${minutesLeft} minutes`, 423));
     }
 
-    const otpRecord = await OTP.findOne({ phone, purpose: 'password_reset', verified: false });
+    const otpRecord = await OTP.findOne({ phone: phoneQuery, purpose: 'password_reset', verified: false });
     if (!otpRecord) {
         return next(new AppError('OTP not found. Please request a new code', 400));
     }
@@ -900,6 +939,12 @@ const forgotPasswordReset = catchAsync(async (req, res, next) => {
     }
 
     await OTP.deleteOne({ _id: otpRecord._id });
+
+    // Migrate legacy non-E.164 phone to canonical form so full-document
+    // validation on save() doesn't reject the stored value.
+    if (!isE164(user.phone)) {
+        user.phone = phone;
+    }
 
     // Update password
     user.password = newPassword;

@@ -2,24 +2,16 @@ const express = require('express');
 const Waitlist = require('../models/waitlist.model');
 const AppError = require('../utils/AppError');
 const catchAsync = require('../utils/catchAsync');
-const rateLimit = require('express-rate-limit');
 
 const router = express.Router();
 
-// Rate limiter: 5 submissions per hour per IP
-const waitlistLimiter = rateLimit({
-    windowMs: 60 * 60 * 1000,
-    max: 5,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { success: false, message: 'Too many submissions, please try again later' }
-});
+// NOTE: Rate limiter temporarily removed.
 
 // Email format validation
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
 // POST /api/waitlist - Join the waiting list
-router.post('/', waitlistLimiter, catchAsync(async (req, res, next) => {
+router.post('/', catchAsync(async (req, res, next) => {
     const { email, name } = req.body;
 
     if (!email) {

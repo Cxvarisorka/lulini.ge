@@ -8,7 +8,6 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const mongoSanitize = require('express-mongo-sanitize');
 const Sentry = require('@sentry/node');
-const { globalLimiter } = require('./middlewares/rateLimiter');
 require('dotenv').config();
 
 // ── 1. Validate environment variables FIRST — before any other initialisation.
@@ -134,8 +133,7 @@ app.use(cors({
     exposedHeaders: ['set-cookie']
 }));
 
-// Global rate limiter: 200 req / 15 min per IP
-app.use(globalLimiter);
+// NOTE: Global rate limiter temporarily disabled.
 
 // Body parsing with size limits (prevents payload bombs)
 app.use(express.json({ limit: '16kb' }));
