@@ -87,9 +87,17 @@ const createDriver = catchAsync(async (req, res, next) => {
     }
 
     // Check if user with this email already exists
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
+    const existingByEmail = await User.findOne({ email });
+    if (existingByEmail) {
         return next(new AppError('User with this email already exists', 400));
+    }
+
+    // Check if any user (passenger or driver) already uses this phone. The
+    // User model has a unique index on phone and will otherwise reject the
+    // insert with an opaque E11000 error.
+    const existingByPhone = await User.findOne({ phone });
+    if (existingByPhone) {
+        return next(new AppError('A user with this phone number already exists', 400));
     }
 
     // Check if driver with this license already exists
@@ -208,6 +216,16 @@ const updateDriver = catchAsync(async (req, res, next) => {
         if (!phone) {
             return next(new AppError('Please provide a valid phone number', 400));
         }
+
+        // Reject early if another user already owns this phone, otherwise the
+        // User model's unique index returns an opaque E11000 on save.
+        const conflict = await User.findOne({
+            phone,
+            _id: { $ne: driver.user ? driver.user._id : null }
+        });
+        if (conflict) {
+            return next(new AppError('A user with this phone number already exists', 400));
+        }
     }
 
     // Update driver fields
@@ -223,7 +241,12 @@ const updateDriver = catchAsync(async (req, res, next) => {
     if (driver.user) {
         if (firstName) driver.user.firstName = firstName;
         if (lastName) driver.user.lastName = lastName;
-        if (phone) driver.user.phone = phone;
+        // Only reassign phone when it actually changed — avoids a pointless
+        // full-document re-validation and protects against any race where
+        // another doc was just written with the same value.
+        if (phone && driver.user.phone !== phone) {
+            driver.user.phone = phone;
+        }
         await driver.user.save();
     }
 
