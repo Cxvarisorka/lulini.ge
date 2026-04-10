@@ -862,10 +862,12 @@ const forgotPasswordSendOtp = catchAsync(async (req, res, next) => {
         return next(new AppError('Please provide a valid phone number', 400));
     }
 
-    // Check that a user with this phone exists and has a password (local provider)
-    // Look up both normalized and raw form to handle legacy records.
-    const user = await User.findOne({ phone: phoneMatchQuery(phone, rawPhone) });
-    if (!user || user.provider !== 'local') {
+    // Check that a user with this phone exists and has a password (local provider).
+    // Filter by provider in the query itself — otherwise, if a passenger account
+    // (provider: 'phone') shares the same phone number as a driver (provider:
+    // 'local'), findOne may return the passenger and we silently no-op.
+    const user = await User.findOne({ phone: phoneMatchQuery(phone, rawPhone), provider: 'local' });
+    if (!user) {
         // Don't reveal whether the phone exists — always return success
         return res.status(200).json({
             success: true,
