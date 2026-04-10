@@ -13,6 +13,7 @@ const { pushIfOffline } = require('../utils/socketHelpers');
 const analytics = require('../services/analytics.service');
 const driverLocService = require('../services/driverLocation.service');
 const { isEnabled } = require('../utils/featureFlags');
+const { normalizePhone } = require('../utils/phone');
 
 // Proximity thresholds (km)
 const APPROACH_NOTIFY_KM = 0.5;  // 500m — notify passenger that driver is approaching
@@ -71,11 +72,18 @@ async function checkProximityAndNotify(io, driverLat, driverLng, ride) {
 // @route   POST /api/drivers
 // @access  Private/Admin
 const createDriver = catchAsync(async (req, res, next) => {
-    const { email, password, firstName, lastName, phone, licenseNumber, vehicle } = req.body;
+    const { email, password, firstName, lastName, phone: rawPhone, licenseNumber, vehicle } = req.body;
 
     // Validate required fields
-    if (!email || !password || !firstName || !lastName || !phone || !licenseNumber || !vehicle) {
+    if (!email || !password || !firstName || !lastName || !rawPhone || !licenseNumber || !vehicle) {
         return next(new AppError('All required fields must be provided', 400));
+    }
+
+    // Normalize phone to E.164 so it passes User model validation and matches
+    // the canonical form used everywhere else in auth.
+    const phone = normalizePhone(rawPhone);
+    if (!phone) {
+        return next(new AppError('Please provide a valid phone number', 400));
     }
 
     // Check if user with this email already exists
@@ -185,11 +193,21 @@ const getDriver = catchAsync(async (req, res, next) => {
 // @route   PATCH /api/drivers/:id
 // @access  Private/Admin
 const updateDriver = catchAsync(async (req, res, next) => {
-    const { firstName, lastName, phone, licenseNumber, vehicle, isActive, isApproved } = req.body;
+    const { firstName, lastName, phone: rawPhone, licenseNumber, vehicle, isActive, isApproved } = req.body;
 
     const driver = await Driver.findById(req.params.id).populate('user');
     if (!driver) {
         return next(new AppError('Driver not found', 404));
+    }
+
+    // Normalize phone to E.164 when provided — the User model rejects anything
+    // else, and everywhere else in auth expects the canonical form.
+    let phone;
+    if (rawPhone) {
+        phone = normalizePhone(rawPhone);
+        if (!phone) {
+            return next(new AppError('Please provide a valid phone number', 400));
+        }
     }
 
     // Update driver fields
