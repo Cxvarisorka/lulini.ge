@@ -6,7 +6,7 @@ const OTP = require('../models/otp.model');
 const { generateToken, verifyToken } = require('../utils/jwt.utils');
 const AppError = require('../utils/AppError');
 const catchAsync = require('../utils/catchAsync');
-const { sendVerification } = require('../services/sms.service');
+const { sendVerification, generateOTP } = require('../services/sms.service');
 const { invalidateUser, invalidateDriver } = require('../utils/authCache');
 const analytics = require('../services/analytics.service');
 const crypto = require('crypto');
@@ -199,13 +199,19 @@ const sendPhoneOtp = catchAsync(async (req, res, next) => {
     // Delete any existing OTP for this phone (both forms, to clean up legacy rows)
     await OTP.deleteMany({ phone: phoneMatchQuery(phone, rawPhone) });
 
-    // Send OTP via SMSOffice (or dev fallback)
-    const result = await sendVerification(phone);
-
-    // Store OTP locally (code comes back from sendVerification in all modes)
-    const otpCode = result.devCode || result.code;
+    // Persist the OTP row BEFORE attempting SMS delivery so a hang or failure
+    // in the SMS provider can be rolled back cleanly and the user can retry.
+    const otpCode = generateOTP();
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-    await OTP.create({ phone, code: otpCode, expiresAt });
+    const otpRow = await OTP.create({ phone, code: otpCode, expiresAt });
+
+    try {
+        await sendVerification(phone, otpCode);
+    } catch (smsErr) {
+        await OTP.deleteOne({ _id: otpRow._id }).catch(() => {});
+        console.error('sendPhoneOtp: SMS delivery failed', smsErr);
+        return next(new AppError('Unable to send verification code right now. Please try again in a moment.', 503));
+    }
 
     res.status(200).json({
         success: true,
@@ -442,13 +448,19 @@ const sendPhoneUpdateOtp = catchAsync(async (req, res, next) => {
     // Delete any existing OTP for this phone
     await OTP.deleteMany({ phone: phoneMatchQuery(phone, rawPhone) });
 
-    // Send OTP via SMSOffice (or dev fallback)
-    const result = await sendVerification(phone);
-
-    // Store OTP locally
-    const otpCode = result.devCode || result.code;
+    // Persist the OTP row BEFORE attempting SMS delivery so a hang or failure
+    // in the SMS provider can be rolled back cleanly and the user can retry.
+    const otpCode = generateOTP();
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-    await OTP.create({ phone, code: otpCode, expiresAt });
+    const otpRow = await OTP.create({ phone, code: otpCode, expiresAt });
+
+    try {
+        await sendVerification(phone, otpCode);
+    } catch (smsErr) {
+        await OTP.deleteOne({ _id: otpRow._id }).catch(() => {});
+        console.error('sendPhoneUpdateOtp: SMS delivery failed', smsErr);
+        return next(new AppError('Unable to send verification code right now. Please try again in a moment.', 503));
+    }
 
     res.status(200).json({
         success: true,
@@ -870,10 +882,20 @@ const forgotPasswordSendOtp = catchAsync(async (req, res, next) => {
     // Delete any existing password-reset OTP for this phone
     await OTP.deleteMany({ phone: phoneMatchQuery(phone, rawPhone), purpose: 'password_reset' });
 
-    const result = await sendVerification(phone);
-    const otpCode = result.devCode || result.code;
+    // Persist the OTP row BEFORE attempting SMS delivery. If the SMS send hangs,
+    // times out, or fails, we roll back the row so the user can retry cleanly
+    // and never ends up with a stored code they never received.
+    const otpCode = generateOTP();
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-    await OTP.create({ phone, code: otpCode, purpose: 'password_reset', expiresAt });
+    const otpRow = await OTP.create({ phone, code: otpCode, purpose: 'password_reset', expiresAt });
+
+    try {
+        await sendVerification(phone, otpCode);
+    } catch (smsErr) {
+        await OTP.deleteOne({ _id: otpRow._id }).catch(() => {});
+        console.error('forgotPasswordSendOtp: SMS delivery failed', smsErr);
+        return next(new AppError('Unable to send verification code right now. Please try again in a moment.', 503));
+    }
 
     res.status(200).json({
         success: true,

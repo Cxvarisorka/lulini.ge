@@ -22,13 +22,16 @@ const formatPhone = (phone) => {
     return phone.replace(/[\s()\-+]/g, '').replace(/^00/, '');
 };
 
+// Timeout for a single SMSOffice HTTP request (ms).
+const SMS_REQUEST_TIMEOUT_MS = 10000;
+// Number of retries on transient network/timeout errors (1 retry = up to 2 attempts).
+const SMS_MAX_RETRIES = 1;
+
 /**
- * Send SMS via smsoffice.ge API
- * @param {string} phone - Phone number
- * @param {string} content - Message text
- * @returns {Promise<object>} API response
+ * Perform a single HTTP request to SMSOffice with an explicit socket timeout.
+ * Rejects on network errors, timeout, non-2xx responses, or invalid JSON.
  */
-const sendSms = (phone, content) => {
+const sendSmsOnce = (phone, content) => {
     return new Promise((resolve, reject) => {
         const destination = formatPhone(phone);
         const params = new URLSearchParams({
@@ -41,28 +44,68 @@ const sendSms = (phone, content) => {
 
         const url = `https://smsoffice.ge/api/v2/send/?${params.toString()}`;
 
-        https.get(url, (res) => {
+        const req = https.get(url, (res) => {
             let data = '';
             res.on('data', (chunk) => { data += chunk; });
             res.on('end', () => {
+                if (res.statusCode && (res.statusCode < 200 || res.statusCode >= 300)) {
+                    const err = new Error(`SMS API HTTP ${res.statusCode}: ${data}`);
+                    err.transient = res.statusCode >= 500;
+                    return reject(err);
+                }
                 try {
-                    const parsed = JSON.parse(data);
-                    resolve(parsed);
+                    resolve(JSON.parse(data));
                 } catch (e) {
                     reject(new Error(`SMS API returned invalid JSON: ${data}`));
                 }
             });
-        }).on('error', reject);
+        });
+
+        req.setTimeout(SMS_REQUEST_TIMEOUT_MS, () => {
+            const err = new Error(`SMS API request timed out after ${SMS_REQUEST_TIMEOUT_MS}ms`);
+            err.transient = true;
+            req.destroy(err);
+        });
+
+        req.on('error', (err) => {
+            // Network-level errors (ECONNRESET, ETIMEDOUT, ENOTFOUND, ...) are transient.
+            if (!('transient' in err)) err.transient = true;
+            reject(err);
+        });
     });
+};
+
+/**
+ * Send SMS via smsoffice.ge API with a bounded retry on transient errors.
+ * @param {string} phone - Phone number
+ * @param {string} content - Message text
+ * @returns {Promise<object>} API response
+ */
+const sendSms = async (phone, content) => {
+    let lastErr;
+    for (let attempt = 0; attempt <= SMS_MAX_RETRIES; attempt++) {
+        try {
+            return await sendSmsOnce(phone, content);
+        } catch (err) {
+            lastErr = err;
+            if (!err.transient || attempt === SMS_MAX_RETRIES) throw err;
+            console.warn(`SMSOffice transient error (attempt ${attempt + 1}/${SMS_MAX_RETRIES + 1}): ${err.message}. Retrying...`);
+            // Small backoff before retrying.
+            await new Promise(r => setTimeout(r, 500));
+        }
+    }
+    throw lastErr;
 };
 
 /**
  * Send phone verification OTP
  * @param {string} phone - Phone number to verify
+ * @param {string} [providedCode] - Optional pre-generated OTP code. When the
+ *   caller persists the OTP before sending, it must pass the same code it stored.
  * @returns {Promise<object>} { devCode } in dev/no-key mode, { sent: true } in production
  */
-const sendVerification = async (phone) => {
-    const code = generateOTP();
+const sendVerification = async (phone, providedCode) => {
+    const code = providedCode || generateOTP();
 
     if (!apiKey) {
         console.warn('SMS_API not configured. OTP code:', code);
