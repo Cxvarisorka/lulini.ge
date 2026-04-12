@@ -76,6 +76,11 @@ const RIDE_CACHE_MAX_AGE = 5 * 60 * 1000;
 let _searchStartedAt = null;   // Timestamp when search began (for progress calculation)
 let _nearbyDriversCache = [];  // Drivers visible during search
 
+// Module-level route cache — survives unmount/remount for instant polyline display.
+// Without this, the route line is blank until an OSRM network fetch completes.
+let _cachedDriverRoute = null;   // Last driverRoute polyline (driver→pickup or driver→dest)
+let _cachedRoutePolyline = null; // Last routePolyline (static pickup→dest route)
+
 function setCachedRide(ride) {
   _rideCache = ride ? { ride, timestamp: Date.now() } : null;
 }
@@ -93,6 +98,19 @@ function clearCachedRide() {
 function clearSearchMeta() {
   _searchStartedAt = null;
   _nearbyDriversCache = [];
+  _cachedDriverRoute = null;
+  _cachedRoutePolyline = null;
+}
+
+// PERF: Shallow-compare two driver arrays by position.
+// Returns true if both arrays have the same length and identical lat/lng values,
+// meaning the previous React state reference can be kept (no re-render).
+function driversEqual(a, b) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].lat !== b[i].lat || a[i].lng !== b[i].lng) return false;
+  }
+  return true;
 }
 
 // Distance threshold (km) for "driver is close" notification
@@ -253,7 +271,8 @@ export default function TaxiScreen({ navigation }) {
 
   // Native map states
   const [nearbyDrivers, setNearbyDrivers] = useState([]);
-  const [driverRoute, setDriverRoute] = useState(null);
+  const [driverRoute, _setDriverRoute] = useState(_cachedDriverRoute);
+  const setDriverRoute = useCallback((val) => { _cachedDriverRoute = val; _setDriverRoute(val); }, []);
   const [totalDistance, setTotalDistance] = useState(null); // Total route KM (pickup → stops → destination)
   const routeDistanceRef = useRef(null); // Persists route distance across closures
 
@@ -303,7 +322,8 @@ export default function TaxiScreen({ navigation }) {
   const searchStartedAtRef = useRef(null);
 
   // Route polyline for directions
-  const [routePolyline, setRoutePolyline] = useState(null);
+  const [routePolyline, _setRoutePolyline] = useState(_cachedRoutePolyline);
+  const setRoutePolyline = useCallback((val) => { _cachedRoutePolyline = val; _setRoutePolyline(val); }, []);
   const [isLoadingDirections, setIsLoadingDirections] = useState(false);
 
   // Map selection mode — stores which input triggered it: 'pickup', 'destination', or stop index (number)
@@ -406,7 +426,8 @@ export default function TaxiScreen({ navigation }) {
           loc.latitude,
           loc.longitude
         );
-        setNearbyDrivers(res.data?.data?.drivers || []);
+        const fresh = res.data?.data?.drivers || [];
+        setNearbyDrivers(prev => driversEqual(prev, fresh) ? prev : fresh);
       } catch {
         // Ambient drivers are cosmetic — don't alert on failure
       }
@@ -523,7 +544,9 @@ export default function TaxiScreen({ navigation }) {
     if (ride.paymentMethod) setPaymentMethod(ride.paymentMethod);
     if (ride.driver?.location?.coordinates) {
       const [lng, lat] = ride.driver.location.coordinates;
-      setDriverLocation({ latitude: lat, longitude: lng });
+      const dLoc = { latitude: lat, longitude: lng };
+      setDriverLocation(dLoc);
+      driverLocationRef.current = dLoc;
     }
 
     switch (ride.status) {
@@ -1209,31 +1232,39 @@ export default function TaxiScreen({ navigation }) {
     });
 
     socket.on('ride:completed', async (data) => {
-      const ride = data.ride || data;
-      // Skip driver-targeted events (shape: { rideId, updatedStats }) or malformed data
-      if (!ride._id || !ride.driver) return;
-      // Dedup: prevent double-fire from admin room or reconnection buffer
-      const key = `${ride._id}:completed`;
-      if (shownAlertsRef.current.has(key)) return;
-      shownAlertsRef.current.add(key);
+      // Wrap the entire handler so a malformed payload, a failing native call,
+      // or an unexpected ride shape can never propagate into React's event
+      // dispatch and crash the passenger app (previously tripped ErrorBoundary).
+      try {
+        const ride = data?.ride || data;
+        // Skip driver-targeted events (shape: { rideId, updatedStats }) or malformed data
+        if (!ride || !ride._id || !ride.driver) return;
+        // Dedup: prevent double-fire from admin room or reconnection buffer
+        const key = `${ride._id}:completed`;
+        if (shownAlertsRef.current.has(key)) return;
+        shownAlertsRef.current.add(key);
 
-      let completedData = ride;
-      // If driver info is missing (not populated), fetch full ride from API
-      if (!ride.driver?.user) {
-        try {
-          const res = await taxiAPI.getRideById(ride._id);
-          if (res.data?.data?.ride) completedData = res.data.data.ride;
-        } catch (e) {
-          if (__DEV__) console.warn('[TaxiScreen] Failed to fetch ride details for review:', e.message);
+        let completedData = ride;
+        // If driver info is missing (not populated), fetch full ride from API
+        if (!ride.driver?.user) {
+          try {
+            const res = await taxiAPI.getRideById(ride._id);
+            if (res.data?.data?.ride) completedData = res.data.data.ride;
+          } catch (e) {
+            if (__DEV__) console.warn('[TaxiScreen] Failed to fetch ride details for review:', e.message);
+          }
         }
-      }
 
-      setCompletedRide(completedData);
-      setShowReviewModal(true);
-      resetBookingState();
-      notificationSuccess();
-      rideCompleted();
-      maybePromptReview();
+        setCompletedRide(completedData);
+        setShowReviewModal(true);
+        resetBookingState();
+        // Fire-and-forget side effects — never allow them to reject the handler.
+        Promise.resolve(notificationSuccess()).catch(() => {});
+        Promise.resolve(rideCompleted()).catch(() => {});
+        Promise.resolve(maybePromptReview()).catch(() => {});
+      } catch (err) {
+        if (__DEV__) console.error('[TaxiScreen] ride:completed handler error:', err);
+      }
     });
 
     socket.on('ride:cancelled', (ride) => {
@@ -1460,8 +1491,11 @@ export default function TaxiScreen({ navigation }) {
   // ETA countdown — no longer sends notifications, just kept as state for UI display
 
   const resetBookingState = () => {
-    stopAllSounds();
-    dismissRideNotification();
+    // Fire-and-forget async cleanups — swallow failures so we can't crash the
+    // caller (e.g. the ride:completed handler) if expo-av / expo-notifications
+    // throws on the underlying native call.
+    Promise.resolve(stopAllSounds()).catch(() => {});
+    Promise.resolve(dismissRideNotification()).catch(() => {});
     clearCachedRide();
     clearSearchMeta();
     setCurrentRide(null);
@@ -1995,7 +2029,7 @@ export default function TaxiScreen({ navigation }) {
           );
           const drivers = driversRes.data?.data?.drivers || [];
           _nearbyDriversCache = drivers;
-          setNearbyDrivers(drivers);
+          setNearbyDrivers(prev => driversEqual(prev, drivers) ? prev : drivers);
         } catch (err) {
           if (__DEV__) console.warn('[TaxiScreen] Failed to fetch nearby drivers:', err.message);
         }
@@ -2196,21 +2230,29 @@ export default function TaxiScreen({ navigation }) {
     }
   }, []);
 
+  // PERF: Track whether user is actively panning/pinching — suppress zoom
+  // state updates during gestures to avoid mid-gesture cluster rebuilds.
+  const isPanningRef = useRef(false);
+  const handlePanDrag = useCallback(() => { isPanningRef.current = true; }, []);
+
   // Handle map press for location selection (routed to the correct input)
   // Sets pin immediately, then reverse geocodes address in background
   const handleRegionChangeComplete = useCallback((region) => {
     // Persist region so remount starts where the user left off (no flash)
     _lastMapRegion = region;
+    isPanningRef.current = false;
 
     // Only track zoom when DriverCluster is rendered (RIDE_OPTIONS / SEARCHING)
     if (!driversVisibleRef.current) return;
     if (zoomDebounceRef.current) clearTimeout(zoomDebounceRef.current);
     zoomDebounceRef.current = setTimeout(() => {
+      // Skip if user started another gesture while debounce was pending
+      if (isPanningRef.current) return;
       if (region.latitudeDelta > 0) {
         const zoom = Math.round(Math.log2(360 / region.latitudeDelta));
         setMapZoomLevel(prev => prev === zoom ? prev : zoom);
       }
-    }, 500);
+    }, 600);
   }, []);
 
   const handleMapPress = useCallback(async (event) => {
@@ -2359,12 +2401,16 @@ export default function TaxiScreen({ navigation }) {
     stops, lastDestination,
   ]);
 
-  // Memoized map children — markers + polylines only re-render when map-relevant
-  // state changes. Unrelated state (modals, sheets, loading, chat) won't cause
-  // native marker/polyline reconstruction.
+  // Memoized map markers — only re-render when marker-relevant state changes.
+  // Unrelated state (modals, sheets, loading, chat) won't cause native marker
+  // reconstruction. Route polylines are separated into routeElement below.
+  //
+  // PERF: Three isolated memos for three independent change frequencies:
+  //   1. mapChildren — markers (changes on booking step, driver location ~2s)
+  //   2. routeElement — polylines (changes on route fetch ~10-15s)
+  //   3. driverClusterElement — clusters (changes on zoom or polling ~30s)
   const mapChildren = useMemo(() => {
     const isSearchPhase = bookingStep === BOOKING_STEPS.LOCATION_SEARCH || bookingStep === BOOKING_STEPS.RIDE_OPTIONS;
-    const routeStyle = isDark ? ROUTE_STYLE_DARK : ROUTE_STYLE;
 
     return (
       <>
@@ -2403,27 +2449,32 @@ export default function TaxiScreen({ navigation }) {
         {driverLocation && (
           <AnimatedCarMarker coordinate={driverLocation} isAssigned={true} />
         )}
-
-        {/* Nearby drivers while searching - clustered when zoomed out */}
-        {nearbyDrivers.length > 0 && (
-          <DriverCluster drivers={nearbyDrivers} zoomLevel={mapZoomLevel} />
-        )}
-
-        {/* Route polyline — only ONE line on screen at a time.
-            driverRoute (live) takes priority over routePolyline (static).
-            PolylineWrapper auto-simplifies high-density OSRM routes. */}
-        {driverRoute && driverRoute.length > 1 ? (
-          <Polyline id="driver-route" coordinates={driverRoute} {...routeStyle} />
-        ) : routePolyline && routePolyline.length > 1 ? (
-          <Polyline id="route-main" coordinates={routePolyline} {...routeStyle} />
-        ) : null}
       </>
     );
   }, [
-    bookingStep, isDark, customPickup, destinationCoords, stops,
-    driverLocation, nearbyDrivers, mapZoomLevel, driverRoute, routePolyline,
-    handlePickupDragEnd,
+    bookingStep, customPickup, destinationCoords, stops,
+    driverLocation, handlePickupDragEnd,
   ]);
+
+  // PERF: Isolated route polyline memo — route fetches (10-15s interval) no longer
+  // rebuild the marker subtree. Only the polyline native component updates.
+  const routeElement = useMemo(() => {
+    const routeStyle = isDark ? ROUTE_STYLE_DARK : ROUTE_STYLE;
+    if (driverRoute && driverRoute.length > 1) {
+      return <Polyline id="driver-route" coordinates={driverRoute} {...routeStyle} />;
+    }
+    if (routePolyline && routePolyline.length > 1) {
+      return <Polyline id="route-main" coordinates={routePolyline} {...routeStyle} />;
+    }
+    return null;
+  }, [isDark, driverRoute, routePolyline]);
+
+  // PERF: Isolated DriverCluster memo — zoom and nearbyDrivers changes only
+  // rebuild cluster markers, never touching pickup/destination/stop/polyline nodes.
+  const driverClusterElement = useMemo(() => {
+    if (nearbyDrivers.length === 0) return null;
+    return <DriverCluster drivers={nearbyDrivers} zoomLevel={mapZoomLevel} />;
+  }, [nearbyDrivers, mapZoomLevel]);
 
   // Memoize showsUserLocation — avoids native map reconfiguration on unrelated re-renders.
   // Only actually changes when entering/leaving IN_PROGRESS.
@@ -2502,11 +2553,15 @@ export default function TaxiScreen({ navigation }) {
           showsCompass={false}
           moveOnMarkerPress={false}
           rotateEnabled={false}
+          onPanDrag={handlePanDrag}
           onRegionChangeComplete={handleRegionChangeComplete}
         >
-          {/* Memoized map children — only re-creates when map-relevant state changes.
-              Prevents marker/polyline re-renders from unrelated state (modals, sheets, loading). */}
+          {/* Memoized map markers — only re-creates when marker-relevant state changes */}
           {mapChildren}
+          {/* PERF: Route polyline isolated — 10-15s refresh doesn't rebuild markers */}
+          {routeElement}
+          {/* PERF: Cluster rendered separately so zoom changes don't rebuild markers */}
+          {driverClusterElement}
         </MapView>
 
         {/* Loading Overlay */}
