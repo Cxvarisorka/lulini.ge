@@ -86,9 +86,11 @@ export const driverService = {
     return apiRequest(`/drivers/${id}/reviews`);
   },
 
-  // Get pending driver registrations (Admin)
+  // Get pending driver registrations (Admin).
+  // status=all returns every unapproved driver (pending_documents + under_review + rejected)
+  // so a driver who just submitted the form is visible before photos are uploaded.
   getPending: async () => {
-    return apiRequest('/drivers/admin/pending');
+    return apiRequest('/drivers/admin/pending?status=all');
   },
 
   // Approve or reject a driver registration (Admin)
