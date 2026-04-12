@@ -29,6 +29,14 @@ const emailOtpSchema = new mongoose.Schema({
         type: Number,
         default: 0,
     },
+    // Set to true once the user has successfully entered the code. For the
+    // registration flow this lets /auth/register confirm that the email was
+    // actually verified before creating the local account (the OTP row lives
+    // for a short grace window after verification so the next call succeeds).
+    verified: {
+        type: Boolean,
+        default: false,
+    },
     expiresAt: {
         type: Date,
         required: true,
