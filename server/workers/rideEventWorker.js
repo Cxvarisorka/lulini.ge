@@ -26,9 +26,9 @@ async function startRideEventWorker() {
 
         try {
             io = new Server();
+            const { createSubscriberClient } = require('../configs/redis.config');
             const pubClient = await getRedisClient();
-            _subClient = pubClient.duplicate();
-            await _subClient.connect();
+            _subClient = await createSubscriberClient('rideEventWorker-adapter');
             io.adapter(createAdapter(pubClient, _subClient));
             console.log('RideEventWorker: Socket.io Redis adapter enabled');
         } catch (err) {

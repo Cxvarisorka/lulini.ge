@@ -18,7 +18,7 @@
  */
 
 const { EventEmitter } = require('events');
-const { getRedisClient } = require('../configs/redis.config');
+const { getRedisClient, createSubscriberClient } = require('../configs/redis.config');
 const logger = require('../utils/logger');
 
 const RIDE_DISPATCH_CHANNEL = 'ride:dispatch:response';
@@ -37,13 +37,8 @@ async function initSubscriber() {
 
     initPromise = (async () => {
         try {
-            const main = await getRedisClient();
             // One dedicated pub/sub connection for the lifetime of the process.
-            const sub = main.duplicate();
-            sub.on('error', (err) => {
-                logger.error('rideDispatchPubsub subscriber error: ' + err.message, 'pubsub');
-            });
-            await sub.connect();
+            const sub = await createSubscriberClient('rideDispatchPubsub');
             await sub.subscribe(RIDE_DISPATCH_CHANNEL, (message) => {
                 try {
                     const data = JSON.parse(message);

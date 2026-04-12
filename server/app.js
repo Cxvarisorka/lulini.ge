@@ -93,9 +93,9 @@ async function setupRedisAdapter() {
         const { getRedisClient } = require('./configs/redis.config');
 
         try {
+            const { createSubscriberClient } = require('./configs/redis.config');
             const pubClient = await getRedisClient();
-            const subClient = pubClient.duplicate();
-            await subClient.connect();
+            const subClient = await createSubscriberClient('socketio-adapter');
             io.adapter(createAdapter(pubClient, subClient));
             logger.info('Socket.io Redis adapter enabled', 'redis');
         } catch (err) {
@@ -487,6 +487,19 @@ process.on('unhandledRejection', (reason) => {
 });
 
 process.on('uncaughtException', (error) => {
+    // Known @redis/client@5.11 decoder bug: #getTypeMapping accesses
+    // #waitingForReply.head.value without null-checking head. When a pub/sub
+    // push message arrives on an empty command queue the decoder throws a
+    // TypeError. The decoder recovers on its own — don't crash the process.
+    const isRedisDecoderBug =
+        error instanceof TypeError &&
+        error.message === "Cannot read properties of undefined (reading 'value')" &&
+        error.stack && error.stack.includes('commands-queue');
+    if (isRedisDecoderBug) {
+        logger.error('Redis decoder bug (non-fatal, suppressed): ' + error.message, 'redis');
+        return; // swallow — decoder state is recoverable
+    }
+
     logger.error('Uncaught Exception', 'process', error);
     try {
         const Sentry = require('@sentry/node');
