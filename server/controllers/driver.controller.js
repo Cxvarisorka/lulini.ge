@@ -159,7 +159,16 @@ const getAllDrivers = catchAsync(async (req, res, next) => {
     const query = {};
     if (status && status !== 'all') query.status = status;
     if (isActive !== undefined) query.isActive = isActive === 'true';
-    if (isApproved !== undefined) query.isApproved = isApproved === 'true';
+
+    // Default to approved drivers only. Unapproved applications belong in the
+    // pending queue (GET /drivers/admin/pending) — they should not pollute the
+    // main Drivers page. Admins can opt in by passing ?isApproved=false or
+    // ?isApproved=all explicitly.
+    if (isApproved === undefined) {
+        query.isApproved = true;
+    } else if (isApproved !== 'all') {
+        query.isApproved = isApproved === 'true';
+    }
 
     const drivers = await Driver.find(query)
         .populate('user', 'firstName lastName email phone profileImage')
