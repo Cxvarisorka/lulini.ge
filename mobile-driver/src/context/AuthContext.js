@@ -119,6 +119,29 @@ export const AuthProvider = ({ children }) => {
     }
   }, []);
 
+  // Accept an already-obtained token + user data (e.g. from /auth/register)
+  // so the caller doesn't need a separate login round-trip.
+  const loginWithToken = useCallback(async (token, userData) => {
+    try {
+      if (userData.role === 'admin') {
+        throw new Error('Not authorized as driver');
+      }
+
+      await SecureStore.setItemAsync('token', token);
+      await SecureStore.setItemAsync('user', JSON.stringify(userData));
+
+      setUser(userData);
+      setIsAuthenticated(true);
+
+      return { success: true, user: userData };
+    } catch (error) {
+      const message = error.message === 'Not authorized as driver'
+        ? error.message
+        : 'Failed to save session';
+      return { success: false, message };
+    }
+  }, []);
+
   const logout = useCallback(async () => {
     try {
       await unregisterPushToken();
@@ -158,9 +181,10 @@ export const AuthProvider = ({ children }) => {
     loading,
     isAuthenticated,
     login,
+    loginWithToken,
     logout,
     updateUser,
-  }), [user, loading, isAuthenticated, login, logout, updateUser]);
+  }), [user, loading, isAuthenticated, login, loginWithToken, logout, updateUser]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

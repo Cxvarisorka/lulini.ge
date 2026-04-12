@@ -58,6 +58,8 @@ export const authAPI = {
   verifyPhoneUpdateOtp: (data) => api.post('/auth/phone/update-verify-otp', data),
   sendEmailVerification: (email, language) => api.post('/auth/email/send-verification', { email, language }),
   verifyEmailForRegistration: (email, code) => api.post('/auth/email/verify-registration', { email, code }),
+  sendRegistrationPhoneOtp: (phone) => api.post('/auth/phone/send-registration-otp', { phone }),
+  verifyRegistrationPhoneOtp: (phone, code) => api.post('/auth/phone/verify-registration-otp', { phone, code }),
   forgotPasswordSendOtp: (data) => api.post('/auth/forgot-password/send-otp', data),
   forgotPasswordReset: (data) => api.post('/auth/forgot-password/reset', data),
 };

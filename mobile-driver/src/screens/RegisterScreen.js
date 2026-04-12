@@ -25,7 +25,7 @@ const CACHE_KEY = 'driver_register_draft';
 
 export default function RegisterScreen({ navigation }) {
   const { t, i18n } = useTranslation();
-  const { login } = useAuth();
+  const { loginWithToken } = useAuth();
   const insets = useSafeAreaInsets();
   const typography = useTypography();
   const styles = useMemo(() => createStyles(typography), [typography]);
@@ -51,6 +51,15 @@ export default function RegisterScreen({ navigation }) {
   const [lastName, setLastName] = useState('');
   const [phone, setPhone] = useState('');
 
+  // Phone verification modal — the phone must be verified BEFORE the user row
+  // is created so a failed SMS verification doesn't leave an orphan account.
+  const [showPhoneVerifyModal, setShowPhoneVerifyModal] = useState(false);
+  const [phoneCode, setPhoneCode] = useState('');
+  const [phoneVerifyLoading, setPhoneVerifyLoading] = useState(false);
+  const [phoneResendTimer, setPhoneResendTimer] = useState(0);
+  const phoneResendTimerRef = useRef(null);
+  const phoneCodeInputRef = useRef(null);
+
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [cacheLoaded, setCacheLoaded] = useState(false);
@@ -65,8 +74,9 @@ export default function RegisterScreen({ navigation }) {
           if (data.firstName) setFirstName(data.firstName);
           if (data.lastName) setLastName(data.lastName);
           if (data.phone) setPhone(data.phone);
-          if (data.step) setStep(data.step);
-          if (data.emailVerified) setEmailVerified(true);
+          // Never restore step past 1 or emailVerified — the server-side
+          // EmailOTP proof has a 30-min TTL and may have expired.
+          // The user must re-verify email when resuming.
         } catch {}
       }
       setCacheLoaded(true);
@@ -75,9 +85,9 @@ export default function RegisterScreen({ navigation }) {
 
   // ─── Cache: persist on change ───────────────────────────────────────────
   const saveCache = useCallback(() => {
-    const data = { email, firstName, lastName, phone, step, emailVerified };
+    const data = { email, firstName, lastName, phone };
     AsyncStorage.setItem(CACHE_KEY, JSON.stringify(data)).catch(() => {});
-  }, [email, firstName, lastName, phone, step, emailVerified]);
+  }, [email, firstName, lastName, phone]);
 
   useEffect(() => {
     if (cacheLoaded) saveCache();
@@ -103,8 +113,23 @@ export default function RegisterScreen({ navigation }) {
   useEffect(() => {
     return () => {
       if (resendTimerRef.current) clearInterval(resendTimerRef.current);
+      if (phoneResendTimerRef.current) clearInterval(phoneResendTimerRef.current);
     };
   }, []);
+
+  const startPhoneResendTimer = () => {
+    setPhoneResendTimer(60);
+    if (phoneResendTimerRef.current) clearInterval(phoneResendTimerRef.current);
+    phoneResendTimerRef.current = setInterval(() => {
+      setPhoneResendTimer(prev => {
+        if (prev <= 1) {
+          clearInterval(phoneResendTimerRef.current);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
 
   // ─── Validation helpers ────────────────────────────────────────────────
 
@@ -242,11 +267,47 @@ export default function RegisterScreen({ navigation }) {
     if (resendTimerRef.current) clearInterval(resendTimerRef.current);
   };
 
+  // Step 2 submit: send the phone OTP and open the verification modal. The
+  // user row is only created AFTER the phone is verified, inside
+  // handleVerifyPhoneAndRegister — a failed verification therefore leaves no
+  // orphan account in the DB.
   const handleRegister = async () => {
     if (!validateStep2()) return;
 
     setLoading(true);
     try {
+      const response = await authAPI.sendRegistrationPhoneOtp(phone.trim());
+      if (response.data.success) {
+        setPhoneCode('');
+        setShowPhoneVerifyModal(true);
+        startPhoneResendTimer();
+        setTimeout(() => phoneCodeInputRef.current?.focus(), 400);
+      }
+    } catch (error) {
+      const serverMessage = error.response?.data?.message;
+      if (serverMessage?.toLowerCase().includes('another driver')) {
+        Alert.alert(t('common.error'), serverMessage);
+      } else {
+        Alert.alert(t('common.error'), serverMessage || t('errors.somethingWentWrong'));
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Verify the phone OTP and, on success, atomically create the user.
+  const handleVerifyPhoneAndRegister = async () => {
+    if (phoneCode.trim().length !== 6) {
+      Alert.alert(t('common.error'), t('register.enterVerificationCode'));
+      return;
+    }
+
+    setPhoneVerifyLoading(true);
+    try {
+      // Step A: prove phone ownership
+      await authAPI.verifyRegistrationPhoneOtp(phone.trim(), phoneCode.trim());
+
+      // Step B: create the user (both email + phone now verified server-side)
       const registerResponse = await authAPI.register({
         email: email.trim().toLowerCase(),
         password,
@@ -263,18 +324,20 @@ export default function RegisterScreen({ navigation }) {
         return;
       }
 
-      // Clear cache on successful registration
+      if (phoneResendTimerRef.current) clearInterval(phoneResendTimerRef.current);
+      setShowPhoneVerifyModal(false);
       clearCache();
 
-      // Auto-login after registration
-      const loginResult = await login(email.trim().toLowerCase(), password);
-      if (!loginResult.success) {
-        Alert.alert(
-          t('register.successTitle'),
-          t('register.successLoginManually')
-        );
+      // Auto-login using the token returned by /auth/register
+      const { token, data } = registerResponse.data;
+      if (token && data?.user) {
+        const result = await loginWithToken(token, data.user);
+        if (!result.success) {
+          navigation.replace('Login');
+        }
+      } else {
+        // Fallback: token missing (shouldn't happen), redirect to login
         navigation.replace('Login');
-        return;
       }
     } catch (error) {
       const serverMessage = error.response?.data?.message;
@@ -284,8 +347,27 @@ export default function RegisterScreen({ navigation }) {
         Alert.alert(t('common.error'), serverMessage || t('errors.somethingWentWrong'));
       }
     } finally {
-      setLoading(false);
+      setPhoneVerifyLoading(false);
     }
+  };
+
+  const handleResendPhoneCode = async () => {
+    if (phoneResendTimer > 0) return;
+    setPhoneVerifyLoading(true);
+    try {
+      await authAPI.sendRegistrationPhoneOtp(phone.trim());
+      startPhoneResendTimer();
+    } catch (error) {
+      const message = error.response?.data?.message || t('errors.somethingWentWrong');
+      Alert.alert(t('common.error'), message);
+    } finally {
+      setPhoneVerifyLoading(false);
+    }
+  };
+
+  const handleClosePhoneVerifyModal = () => {
+    setShowPhoneVerifyModal(false);
+    if (phoneResendTimerRef.current) clearInterval(phoneResendTimerRef.current);
   };
 
   const handleEmailChange = (text) => {
@@ -616,6 +698,90 @@ export default function RegisterScreen({ navigation }) {
               <Text style={[styles.resendText, resendTimer > 0 && styles.resendTextDisabled]}>
                 {resendTimer > 0
                   ? t('register.resendIn', { seconds: resendTimer })
+                  : t('register.resendCode')}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* ── Phone Verification Modal ── */}
+      <Modal
+        visible={showPhoneVerifyModal}
+        transparent
+        animationType="slide"
+        onRequestClose={handleClosePhoneVerifyModal}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <TouchableOpacity
+            style={styles.modalBackdrop}
+            activeOpacity={1}
+            onPress={handleClosePhoneVerifyModal}
+          />
+          <View style={[styles.modalContent, { paddingBottom: insets.bottom + 24 }]}>
+            <View style={styles.modalHandle} />
+
+            <TouchableOpacity
+              style={styles.modalCloseButton}
+              onPress={handleClosePhoneVerifyModal}
+              accessibilityLabel={t('common.close')}
+            >
+              <Ionicons name="close" size={24} color={colors.mutedForeground} />
+            </TouchableOpacity>
+
+            <View style={styles.modalHeader}>
+              <View style={styles.modalIconContainer}>
+                <Ionicons name="call-outline" size={40} color={colors.primary} />
+              </View>
+              <Text style={styles.modalTitle}>{t('register.verifyPhoneTitle')}</Text>
+              <Text style={styles.modalSubtitle}>
+                {t('register.codeSentToPhone', { phone: phone.trim() })}
+              </Text>
+            </View>
+
+            <View style={styles.modalInputContainer}>
+              <Ionicons name="keypad-outline" size={20} color={colors.mutedForeground} style={styles.inputIcon} />
+              <TextInput
+                ref={phoneCodeInputRef}
+                style={[styles.input, styles.codeInput]}
+                placeholder="000000"
+                placeholderTextColor={colors.mutedForeground}
+                value={phoneCode}
+                onChangeText={(text) => setPhoneCode(text.replace(/[^0-9]/g, '').slice(0, 6))}
+                keyboardType="number-pad"
+                maxLength={6}
+                editable={!phoneVerifyLoading}
+                returnKeyType="done"
+                onSubmitEditing={handleVerifyPhoneAndRegister}
+              />
+            </View>
+
+            <TouchableOpacity
+              style={[styles.primaryButton, phoneVerifyLoading && styles.primaryButtonDisabled]}
+              onPress={handleVerifyPhoneAndRegister}
+              disabled={phoneVerifyLoading}
+            >
+              {phoneVerifyLoading ? (
+                <ActivityIndicator color={colors.primaryForeground} />
+              ) : (
+                <>
+                  <Text style={styles.primaryButtonText}>{t('register.verifyPhone')}</Text>
+                  <Ionicons name="checkmark-circle-outline" size={20} color={colors.primaryForeground} />
+                </>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={handleResendPhoneCode}
+              disabled={phoneResendTimer > 0 || phoneVerifyLoading}
+              style={styles.resendButton}
+            >
+              <Text style={[styles.resendText, phoneResendTimer > 0 && styles.resendTextDisabled]}>
+                {phoneResendTimer > 0
+                  ? t('register.resendIn', { seconds: phoneResendTimer })
                   : t('register.resendCode')}
               </Text>
             </TouchableOpacity>

@@ -446,7 +446,10 @@
     "verifyEmail": "Verify Email",
     "enterVerificationCode": "Please enter the 6-digit verification code",
     "resendCode": "Resend Code",
-    "resendIn": "Resend in {{seconds}}s"
+    "resendIn": "Resend in {{seconds}}s",
+    "verifyPhoneTitle": "Verify Your Phone",
+    "codeSentToPhone": "We sent a 6-digit verification code to {{phone}}",
+    "verifyPhone": "Verify Phone"
   },
   "onboarding": {
     "stepOf": "{{current}} / {{total}}",
