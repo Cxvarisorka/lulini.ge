@@ -1,357 +1,205 @@
+'use strict';
+
+/**
+ * Maps Controller — thin HTTP layer over the service modules.
+ *
+ * All provider selection, caching, and fallback logic lives in:
+ *   - services/routing.service
+ *   - services/geocoding.service
+ *   - services/autocomplete.service
+ *   - providers/google.provider (for snap-to-road, which has no fallback)
+ *
+ * Response shapes emit BOTH new unified fields (distanceMeters, durationSeconds)
+ * AND legacy fields (distance [km], duration [min], distanceText, durationText)
+ * during the client migration window. Legacy fields can be removed once
+ * mobile/mobile-driver are updated.
+ */
+
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/AppError');
 
-const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
-const BASE_URL = 'https://maps.googleapis.com/maps/api';
-const ROADS_URL = 'https://roads.googleapis.com/v1';
+const routing = require('../services/routing.service');
+const geocoding = require('../services/geocoding.service');
+const autocomplete = require('../services/autocomplete.service');
+const google = require('../providers/google.provider');
 
-// ---------------------------------------------------------------------------
-// Maps cache — uses Redis when available, falls back to in-memory LRU
-// ---------------------------------------------------------------------------
-const cache = new Map();
-const DIRECTIONS_CACHE_TTL = 5 * 60 * 1000;    // 5 minutes
-const DISTANCE_MATRIX_CACHE_TTL = 3 * 60 * 1000; // 3 minutes
-const MAX_CACHE_SIZE = 2000;
-
-let _redisClient = null;
-async function getRedis() {
-    if (_redisClient) return _redisClient;
-    try {
-        const { getRedisClient } = require('../configs/redis.config');
-        _redisClient = await getRedisClient();
-        return _redisClient;
-    } catch {
-        return null;
+function fmtDistance(m) {
+    if (m >= 1000) return `${(m / 1000).toFixed(1)} km`;
+    return `${Math.round(m)} m`;
+}
+function fmtDuration(s) {
+    const min = Math.round(s / 60);
+    if (min >= 60) {
+        const h = Math.floor(min / 60);
+        const rem = min % 60;
+        return rem ? `${h} h ${rem} min` : `${h} h`;
     }
+    return `${min} min`;
 }
 
-async function getCached(key) {
-    // Try Redis first
-    try {
-        const redis = process.env.REDIS_URL ? await getRedis() : null;
-        if (redis) {
-            const data = await redis.get(`maps:${key}`);
-            return data ? JSON.parse(data) : null;
-        }
-    } catch { /* fall through to in-memory */ }
-
-    // In-memory fallback with LRU
-    const entry = cache.get(key);
-    if (!entry) return null;
-    if (Date.now() - entry.ts > entry.ttl) {
-        cache.delete(key);
-        return null;
-    }
-    // LRU refresh: delete and re-insert to move to end of Map iteration order
-    cache.delete(key);
-    cache.set(key, entry);
-    return entry.data;
-}
-
-async function setCache(key, data, ttl) {
-    // Try Redis first
-    try {
-        const redis = process.env.REDIS_URL ? await getRedis() : null;
-        if (redis) {
-            await redis.set(`maps:${key}`, JSON.stringify(data), { PX: ttl });
-            return;
-        }
-    } catch { /* fall through to in-memory */ }
-
-    // In-memory fallback with LRU eviction
-    if (cache.size >= MAX_CACHE_SIZE) {
-        const firstKey = cache.keys().next().value;
-        cache.delete(firstKey);
-    }
-    cache.set(key, { data, ts: Date.now(), ttl });
-}
-
-// Proactive cleanup of expired in-memory entries
-setInterval(() => {
-    if (process.env.REDIS_URL) return; // Redis handles TTL automatically
-    const now = Date.now();
-    for (const [key, entry] of cache) {
-        if (now - entry.ts > entry.ttl) {
-            cache.delete(key);
-        }
-    }
-}, 60 * 1000);
-
-// ---------------------------------------------------------------------------
-// Polyline decoder (server-side)
-// ---------------------------------------------------------------------------
-function decodePolyline(encoded) {
-    if (!encoded) return [];
-    const poly = [];
-    let index = 0, lat = 0, lng = 0;
-
-    while (index < encoded.length) {
-        let b, shift = 0, result = 0;
-        do {
-            b = encoded.charCodeAt(index++) - 63;
-            result |= (b & 0x1f) << shift;
-            shift += 5;
-        } while (b >= 0x20);
-        lat += (result & 1) ? ~(result >> 1) : (result >> 1);
-
-        shift = 0; result = 0;
-        do {
-            b = encoded.charCodeAt(index++) - 63;
-            result |= (b & 0x1f) << shift;
-            shift += 5;
-        } while (b >= 0x20);
-        lng += (result & 1) ? ~(result >> 1) : (result >> 1);
-
-        poly.push([lat / 1e5, lng / 1e5]);
-    }
-    return poly;
-}
-
-// ---------------------------------------------------------------------------
-// GET /api/maps/directions
-// Proxy Google Directions API — API key stays server-side
-// ---------------------------------------------------------------------------
+// ── GET /api/maps/directions ────────────────────────────────────────────────
+// Query: originLat, originLng, destLat, destLng [, steps=true]
 exports.getDirections = catchAsync(async (req, res, next) => {
-    const { originLat, originLng, destLat, destLng } = req.query;
-
+    const { originLat, originLng, destLat, destLng, steps } = req.query;
     if (!originLat || !originLng || !destLat || !destLng) {
-        return next(new AppError('Missing coordinates: originLat, originLng, destLat, destLng required', 400));
+        return next(new AppError('Missing coordinates: originLat, originLng, destLat, destLng', 400));
     }
 
-    if (!GOOGLE_MAPS_API_KEY) {
-        return next(new AppError('Google Maps API key not configured', 503));
-    }
+    const route = await routing.getRoute(
+        { lat: +originLat, lng: +originLng },
+        { lat: +destLat,  lng: +destLng },
+        { steps: steps === 'true' || steps === '1' },
+    );
 
-    // Round to 4 decimals for cache hits (~11m precision — good enough for routing)
-    const oLat = (+originLat).toFixed(4);
-    const oLng = (+originLng).toFixed(4);
-    const dLat = (+destLat).toFixed(4);
-    const dLng = (+destLng).toFixed(4);
-    const cacheKey = `dir:${oLat},${oLng}-${dLat},${dLng}`;
-
-    const cached = await getCached(cacheKey);
-    if (cached) {
-        return res.json({ success: true, data: cached, cached: true });
-    }
-
-    const url = `${BASE_URL}/directions/json?` +
-        `origin=${originLat},${originLng}` +
-        `&destination=${destLat},${destLng}` +
-        `&mode=driving` +
-        `&departure_time=now` +
-        `&key=${GOOGLE_MAPS_API_KEY}`;
-
-    const response = await fetch(url);
-    const data = await response.json();
-
-    if (data.status !== 'OK') {
-        return next(new AppError(`Directions API returned: ${data.status}`, 502));
-    }
-
-    const route = data.routes[0];
-    const leg = route.legs[0];
-
-    const result = {
-        distance: leg.distance.value / 1000,
-        duration: Math.round((leg.duration_in_traffic?.value || leg.duration.value) / 60),
-        distanceText: leg.distance.text,
-        durationText: leg.duration_in_traffic?.text || leg.duration.text,
-        polyline: decodePolyline(route.overview_polyline.points),
-        startAddress: leg.start_address,
-        endAddress: leg.end_address,
-        steps: leg.steps.map(s => ({
-            distance: s.distance.text,
-            duration: s.duration.text,
-            instruction: s.html_instructions.replace(/<[^>]*>/g, ''),
-            maneuver: s.maneuver || null,
-        })),
-    };
-
-    await setCache(cacheKey, result, DIRECTIONS_CACHE_TTL);
-    res.json({ success: true, data: result });
+    res.json({
+        success: true,
+        cached: !!route.cached,
+        data: {
+            // Unified contract
+            distanceMeters: route.distanceMeters,
+            durationSeconds: route.durationSeconds,
+            polyline: route.polyline,
+            provider: route.provider,
+            steps: route.steps || [],
+            // Legacy fields (deprecated — remove after Phase 4 ships)
+            distance: route.distanceMeters / 1000,
+            duration: Math.round(route.durationSeconds / 60),
+            distanceText: fmtDistance(route.distanceMeters),
+            durationText: fmtDuration(route.durationSeconds),
+            startAddress: route.startAddress || null,
+            endAddress: route.endAddress || null,
+        },
+    });
 });
 
-// ---------------------------------------------------------------------------
-// GET /api/maps/distance-matrix
-// Proxy Google Distance Matrix API — for ETA calculations
-// ---------------------------------------------------------------------------
+// ── GET /api/maps/distance-matrix ───────────────────────────────────────────
+// Query: origins=lat,lng|lat,lng  destinations=lat,lng|lat,lng
 exports.getDistanceMatrix = catchAsync(async (req, res, next) => {
     const { origins, destinations } = req.query;
-
     if (!origins || !destinations) {
         return next(new AppError('Missing origins or destinations parameter', 400));
     }
 
-    if (!GOOGLE_MAPS_API_KEY) {
-        return next(new AppError('Google Maps API key not configured', 503));
-    }
+    const parse = (s) => s.split('|').map(pair => {
+        const [lat, lng] = pair.split(',').map(Number);
+        return { lat, lng };
+    });
 
-    const cacheKey = `dm:${origins}-${destinations}`;
-    const cached = await getCached(cacheKey);
-    if (cached) {
-        return res.json({ success: true, data: cached, cached: true });
-    }
+    const O = parse(origins);
+    const D = parse(destinations);
 
-    const url = `${BASE_URL}/distancematrix/json?` +
-        `origins=${encodeURIComponent(origins)}` +
-        `&destinations=${encodeURIComponent(destinations)}` +
-        `&mode=driving` +
-        `&key=${GOOGLE_MAPS_API_KEY}`;
+    const matrix = await routing.getMatrix(O, D);
 
-    const response = await fetch(url);
-    const data = await response.json();
-
-    if (data.status !== 'OK') {
-        return next(new AppError(`Distance Matrix API returned: ${data.status}`, 502));
-    }
-
-    const result = data.rows.map(row =>
-        row.elements.map(el => ({
-            distance: el.distance ? el.distance.value / 1000 : 0,
-            distanceText: el.distance?.text || '',
-            duration: el.duration ? Math.round(el.duration.value / 60) : 0,
-            durationText: el.duration?.text || '',
-            status: el.status,
-        }))
+    // Legacy shape: 2D array of {distance, distanceText, duration, durationText, status}
+    const legacyRows = matrix.durations.map((durRow, i) =>
+        durRow.map((dur, j) => {
+            const dist = matrix.distances?.[i]?.[j] ?? null;
+            const ok = dur != null && dist != null;
+            return {
+                distance: ok ? dist / 1000 : 0,
+                distanceText: ok ? fmtDistance(dist) : '',
+                duration: ok ? Math.round(dur / 60) : 0,
+                durationText: ok ? fmtDuration(dur) : '',
+                status: ok ? 'OK' : 'ZERO_RESULTS',
+                // Unified fields
+                distanceMeters: dist,
+                durationSeconds: dur,
+            };
+        })
     );
-
-    await setCache(cacheKey, result, DISTANCE_MATRIX_CACHE_TTL);
-    res.json({ success: true, data: result });
-});
-
-// ---------------------------------------------------------------------------
-// GET /api/maps/snap-to-road
-// Proxy Google Roads API — snap GPS points to nearest road
-// ---------------------------------------------------------------------------
-exports.snapToRoad = catchAsync(async (req, res, next) => {
-    const { path } = req.query;
-
-    if (!path) {
-        return next(new AppError('Missing path parameter (lat,lng|lat,lng|...)', 400));
-    }
-
-    if (!GOOGLE_MAPS_API_KEY) {
-        return next(new AppError('Google Maps API key not configured', 503));
-    }
-
-    // Google Roads API allows max 100 points per request
-    const points = path.split('|');
-    if (points.length > 100) {
-        return next(new AppError('Maximum 100 points per request', 400));
-    }
-
-    const url = `${ROADS_URL}/snapToRoads?` +
-        `path=${encodeURIComponent(path)}` +
-        `&interpolate=true` +
-        `&key=${GOOGLE_MAPS_API_KEY}`;
-
-    const response = await fetch(url);
-    const data = await response.json();
-
-    if (data.error) {
-        return next(new AppError(`Roads API: ${data.error.message}`, 502));
-    }
 
     res.json({
         success: true,
-        data: {
-            snappedPoints: (data.snappedPoints || []).map(p => ({
-                location: {
-                    latitude: p.location.latitude,
-                    longitude: p.location.longitude,
-                },
-                originalIndex: p.originalIndex,
-                placeId: p.placeId,
-            })),
-        },
+        cached: !!matrix.cached,
+        data: legacyRows,
+        meta: { provider: matrix.provider },
     });
 });
 
-// ---------------------------------------------------------------------------
-// GET /api/maps/geocode
-// Proxy Google Geocoding API — backup for when Nominatim fails
-// Now with Redis caching (Phase 1.3) — geocode results are highly stable
-// ---------------------------------------------------------------------------
-const { getCachedForward, setCachedForward, getCachedReverse, setCachedReverse } = require('../services/geocodingCache.service');
-const { isEnabled } = require('../utils/featureFlags');
-
-const GEOCODE_FWD_CACHE_TTL = 86400 * 1000;  // 24 hours (in ms for setCache compat)
-const GEOCODE_REV_CACHE_TTL = 86400 * 1000;
-
+// ── GET /api/maps/geocode ───────────────────────────────────────────────────
+// Query: address=... [&countryCode=GE&language=ka]
+//   OR:  latlng=lat,lng [&language=ka]
 exports.geocode = catchAsync(async (req, res, next) => {
-    const { address, latlng, language } = req.query;
-
+    const { address, latlng, language, countryCode } = req.query;
     if (!address && !latlng) {
         return next(new AppError('Missing address or latlng parameter', 400));
     }
 
-    if (!GOOGLE_MAPS_API_KEY) {
-        return next(new AppError('Google Maps API key not configured', 503));
-    }
-
-    // ── Phase 1.3: Check geocoding cache ──
-    if (isEnabled('GEOCODING_CACHE')) {
-        if (address) {
-            const cached = await getCachedForward('google', address, 'GE');
-            if (cached) {
-                return res.json({ success: true, data: { results: cached }, cached: true });
-            }
-        } else if (latlng) {
-            const [lat, lng] = latlng.split(',').map(Number);
-            if (lat && lng) {
-                const cached = await getCachedReverse('google', lat, lng);
-                if (cached) {
-                    return res.json({ success: true, data: { results: Array.isArray(cached) ? cached : [cached] }, cached: true });
-                }
-            }
-        }
-    }
-
-    const params = new URLSearchParams({
-        key: GOOGLE_MAPS_API_KEY,
-        language: language || 'ka',
-    });
-
     if (address) {
-        params.set('address', address);
-        params.set('components', 'country:GE');
-    } else {
-        params.set('latlng', latlng);
+        const { results, provider, cached } = await geocoding.forwardGeocode(address, {
+            countryCode: countryCode || 'GE',
+            language: language || 'ka',
+        });
+        return res.json({ success: true, cached, data: { results, provider } });
     }
 
-    const url = `${BASE_URL}/geocode/json?${params.toString()}`;
-    const response = await fetch(url);
-    const data = await response.json();
-
-    if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') {
-        return next(new AppError(`Geocoding API returned: ${data.status}`, 502));
+    const [lat, lng] = latlng.split(',').map(Number);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return next(new AppError('Invalid latlng value', 400));
     }
-
-    const results = (data.results || []).map(r => ({
-        placeId: r.place_id,
-        formattedAddress: r.formatted_address,
-        coordinates: {
-            latitude: r.geometry.location.lat,
-            longitude: r.geometry.location.lng,
-        },
-        addressComponents: r.address_components,
-        types: r.types,
-    }));
-
-    // ── Phase 1.3: Cache the results ──
-    if (isEnabled('GEOCODING_CACHE') && results.length > 0) {
-        if (address) {
-            setCachedForward('google', address, 'GE', results).catch(() => {});
-        } else if (latlng) {
-            const [lat, lng] = latlng.split(',').map(Number);
-            if (lat && lng) {
-                setCachedReverse('google', lat, lng, results).catch(() => {});
-            }
-        }
-    }
-
+    const result = await geocoding.reverseGeocode(lat, lng, { language: language || 'ka' });
     res.json({
         success: true,
-        data: { results },
+        cached: !!result?.cached,
+        data: { result, provider: result?.provider || null },
+    });
+});
+
+// ── GET /api/maps/autocomplete ──────────────────────────────────────────────
+// Query: input=... [&language=ka&countryCode=GE&lat&lng&radius&sessionToken]
+exports.autocomplete = catchAsync(async (req, res, next) => {
+    const { input, language, countryCode, lat, lng, radius, sessionToken } = req.query;
+    if (!input) return next(new AppError('Missing input parameter', 400));
+
+    const opts = {
+        language: language || 'ka',
+        countryCode: countryCode || 'GE',
+        sessionToken,
+        radius: radius ? +radius : undefined,
+    };
+    if (lat && lng) opts.location = { lat: +lat, lng: +lng };
+
+    const result = await autocomplete.getPredictions(input, opts);
+    res.json({
+        success: true,
+        cached: result.cached,
+        data: { predictions: result.predictions, provider: result.provider },
+    });
+});
+
+// ── GET /api/maps/place-details ─────────────────────────────────────────────
+// Resolve a prediction placeId → coords + address.
+exports.placeDetails = catchAsync(async (req, res, next) => {
+    const { placeId, language, sessionToken } = req.query;
+    if (!placeId) return next(new AppError('Missing placeId', 400));
+
+    const result = await autocomplete.resolvePrediction(placeId, { language, sessionToken });
+    res.json({ success: true, data: { result } });
+});
+
+// ── GET /api/maps/snap-to-road ──────────────────────────────────────────────
+// Google-only; no fallback.
+exports.snapToRoad = catchAsync(async (req, res, next) => {
+    const { path } = req.query;
+    if (!path) return next(new AppError('Missing path parameter (lat,lng|lat,lng|...)', 400));
+
+    const points = path.split('|').map(pair => {
+        const [lat, lng] = pair.split(',').map(Number);
+        return { lat, lng };
+    });
+    if (points.length > 100) return next(new AppError('Maximum 100 points per request', 400));
+
+    const snapped = await google.snapToRoads(points);
+
+    // Legacy response shape
+    res.json({
+        success: true,
+        data: {
+            snappedPoints: snapped.map(p => ({
+                location: { latitude: p.coords.lat, longitude: p.coords.lng },
+                originalIndex: p.originalIndex,
+                placeId: p.placeId,
+            })),
+        },
     });
 });
