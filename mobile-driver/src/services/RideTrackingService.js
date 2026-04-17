@@ -52,7 +52,6 @@ export default class RideTrackingService {
     this.throttle = null;
     this.heartbeat = null;
     this.buffer = null;
-    this.foregroundSub = null;
     this._listeners = new Set();
     this._socketEmitFn = null; // Set by SocketContext integration
   }
@@ -106,19 +105,9 @@ export default class RideTrackingService {
       serverConfirmed: !isRecovery,
     });
 
-    // Start foreground watcher (high-frequency for UI + real-time delivery)
-    try {
-      this.foregroundSub = await Location.watchPositionAsync(
-        {
-          accuracy: Location.Accuracy.High,
-          distanceInterval: 5,
-          timeInterval: 2000,
-        },
-        (location) => this._onForegroundLocation(location),
-      );
-    } catch (e) {
-      console.warn('[RideTracking] Foreground watcher start failed:', e.message);
-    }
+    // NOTE: No foreground watcher here — LocationContext owns the single GPS
+    // subscription and pipes updates via ingestLocation(). This eliminates
+    // the dual-watcher conflict that caused silent watcher death on Android OEMs.
 
     // Ensure background task is running with ride-active params
     try {
@@ -158,11 +147,7 @@ export default class RideTrackingService {
     this.heartbeat?.stop();
     this.heartbeat = null;
 
-    // Stop foreground watcher
-    if (this.foregroundSub) {
-      this.foregroundSub.remove();
-      this.foregroundSub = null;
-    }
+    // NOTE: No foreground watcher to stop — LocationContext owns it.
 
     // Flush remaining buffer to server
     if (this.buffer) {
@@ -183,6 +168,27 @@ export default class RideTrackingService {
     this.throttle = null;
     this.buffer = null;
     this._notifyListeners({ type: 'rideEnded', rideId });
+  }
+
+  // ─── Public: receive location from LocationContext ───────────────────────
+
+  /**
+   * Called by LocationContext's single foreground watcher on every GPS tick.
+   * This replaces the old duplicate watchPositionAsync that lived here.
+   * @param {{ latitude, longitude, heading, speed, accuracy }} coords
+   */
+  ingestLocation(coords) {
+    if (!this.isTracking) return;
+    this._onForegroundLocation({
+      coords: {
+        latitude: coords.latitude,
+        longitude: coords.longitude,
+        heading: coords.heading ?? null,
+        speed: coords.speed ?? null,
+        accuracy: coords.accuracy ?? null,
+      },
+      timestamp: Date.now(),
+    });
   }
 
   // ─── Foreground location handler ────────────────────────────────────────

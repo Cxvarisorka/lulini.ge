@@ -80,6 +80,10 @@ TopDownCar.displayName = 'TopDownCar';
 
 const ROTATION_DURATION = 300; // ms for smooth rotation animation
 
+// Stable anchor constant — prevents new object allocation on every render
+// that would cause unnecessary native marker reconfiguration.
+const ANCHOR_CENTER = { x: 0.5, y: 0.5 };
+
 const AnimatedCarMarker = memo(
   ({ coordinate, isAssigned = false }) => {
     const lat = coordinate?.latitude;
@@ -174,7 +178,7 @@ const AnimatedCarMarker = memo(
           ref={markerRef}
           coordinate={coord}
           image={isAssigned ? markerImages.carAssigned : markerImages.car}
-          anchor={{ x: 0.5, y: 0.5 }}
+          anchor={ANCHOR_CENTER}
           flat={true}
           rotation={androidRotation}
           tracksViewChanges={false}

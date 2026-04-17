@@ -446,7 +446,10 @@
     "verifyEmail": "ელ. ფოსტის დადასტურება",
     "enterVerificationCode": "გთხოვთ შეიყვანოთ 6-ნიშნა კოდი",
     "resendCode": "კოდის ხელახლა გაგზავნა",
-    "resendIn": "ხელახლა გაგზავნა {{seconds}} წმ-ში"
+    "resendIn": "ხელახლა გაგზავნა {{seconds}} წმ-ში",
+    "verifyPhoneTitle": "დაადასტურეთ ტელეფონი",
+    "codeSentToPhone": "6-ნიშნა კოდი გაგზავნილია {{phone}}-ზე",
+    "verifyPhone": "ტელეფონის დადასტურება"
   },
   "onboarding": {
     "stepOf": "{{current}} / {{total}}",

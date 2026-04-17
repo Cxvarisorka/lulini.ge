@@ -13,6 +13,7 @@ const { pushIfOffline } = require('../utils/socketHelpers');
 const analytics = require('../services/analytics.service');
 const driverLocService = require('../services/driverLocation.service');
 const { isEnabled } = require('../utils/featureFlags');
+const { normalizePhone } = require('../utils/phone');
 
 // Proximity thresholds (km)
 const APPROACH_NOTIFY_KM = 0.5;  // 500m — notify passenger that driver is approaching
@@ -71,11 +72,18 @@ async function checkProximityAndNotify(io, driverLat, driverLng, ride) {
 // @route   POST /api/drivers
 // @access  Private/Admin
 const createDriver = catchAsync(async (req, res, next) => {
-    const { email, password, firstName, lastName, phone, licenseNumber, vehicle } = req.body;
+    const { email, password, firstName, lastName, phone: rawPhone, licenseNumber, vehicle } = req.body;
 
     // Validate required fields
-    if (!email || !password || !firstName || !lastName || !phone || !licenseNumber || !vehicle) {
+    if (!email || !password || !firstName || !lastName || !rawPhone || !licenseNumber || !vehicle) {
         return next(new AppError('All required fields must be provided', 400));
+    }
+
+    // Normalize phone to E.164 so it passes User model validation and matches
+    // the canonical form used everywhere else in auth.
+    const phone = normalizePhone(rawPhone);
+    if (!phone) {
+        return next(new AppError('Please provide a valid phone number', 400));
     }
 
     // Check if user with this email already exists
@@ -151,7 +159,16 @@ const getAllDrivers = catchAsync(async (req, res, next) => {
     const query = {};
     if (status && status !== 'all') query.status = status;
     if (isActive !== undefined) query.isActive = isActive === 'true';
-    if (isApproved !== undefined) query.isApproved = isApproved === 'true';
+
+    // Default to approved drivers only. Unapproved applications belong in the
+    // pending queue (GET /drivers/admin/pending) — they should not pollute the
+    // main Drivers page. Admins can opt in by passing ?isApproved=false or
+    // ?isApproved=all explicitly.
+    if (isApproved === undefined) {
+        query.isApproved = true;
+    } else if (isApproved !== 'all') {
+        query.isApproved = isApproved === 'true';
+    }
 
     const drivers = await Driver.find(query)
         .populate('user', 'firstName lastName email phone profileImage')
@@ -185,11 +202,21 @@ const getDriver = catchAsync(async (req, res, next) => {
 // @route   PATCH /api/drivers/:id
 // @access  Private/Admin
 const updateDriver = catchAsync(async (req, res, next) => {
-    const { firstName, lastName, phone, licenseNumber, vehicle, isActive, isApproved } = req.body;
+    const { firstName, lastName, phone: rawPhone, licenseNumber, vehicle, isActive, isApproved } = req.body;
 
     const driver = await Driver.findById(req.params.id).populate('user');
     if (!driver) {
         return next(new AppError('Driver not found', 404));
+    }
+
+    // Normalize phone to E.164 when provided — the User model rejects anything
+    // else, and everywhere else in auth expects the canonical form.
+    let phone;
+    if (rawPhone) {
+        phone = normalizePhone(rawPhone);
+        if (!phone) {
+            return next(new AppError('Please provide a valid phone number', 400));
+        }
     }
 
     // Update driver fields
@@ -205,7 +232,12 @@ const updateDriver = catchAsync(async (req, res, next) => {
     if (driver.user) {
         if (firstName) driver.user.firstName = firstName;
         if (lastName) driver.user.lastName = lastName;
-        if (phone) driver.user.phone = phone;
+        // Only reassign phone when it actually changed — avoids a pointless
+        // full-document re-validation and protects against any race where
+        // another doc was just written with the same value.
+        if (phone && driver.user.phone !== phone) {
+            driver.user.phone = phone;
+        }
         await driver.user.save();
     }
 

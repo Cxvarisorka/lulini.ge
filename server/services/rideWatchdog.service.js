@@ -23,7 +23,11 @@ const MOVING_HARD_THRESHOLD = 120;   // 2 min — visible push + notify passenge
 const STATIONARY_SOFT_THRESHOLD = 180; // 3 min — silent push
 const STATIONARY_HARD_THRESHOLD = 300; // 5 min — visible push + notify passenger
 
+const NOTIFICATION_COOLDOWN_MS = 5 * 60 * 1000; // 5 min between visible pushes per ride
+
 let _intervalId = null;
+// Map<rideId, timestamp> — last time we sent a visible push for this ride
+const _lastNotified = new Map();
 
 /**
  * Start the ride tracking watchdog.
@@ -100,8 +104,14 @@ async function runWatchdogCheck(io) {
             : STATIONARY_HARD_THRESHOLD;
 
         if (silentSeconds > hardThreshold) {
-            // Tier 2: Visible push + notify passenger
-            if (driver.user) {
+            const rideKey = ride._id.toString();
+            const lastSent = _lastNotified.get(rideKey) || 0;
+            const cooldownElapsed = (now - lastSent) >= NOTIFICATION_COOLDOWN_MS;
+
+            // Tier 2: Visible push + notify passenger (with cooldown)
+            if (cooldownElapsed && driver.user) {
+                _lastNotified.set(rideKey, now);
+
                 pushService.sendToUser(
                     driver.user.toString(),
                     'tracking_paused_title',
@@ -116,7 +126,7 @@ async function runWatchdogCheck(io) {
                 );
             }
 
-            // Notify passenger that tracking is degraded
+            // Socket event is cheap — always send so passenger UI stays updated
             if (io && ride.user) {
                 const lastKnown = driver.location?.coordinates
                     ? {
@@ -148,6 +158,14 @@ async function runWatchdogCheck(io) {
                     console.error('[Watchdog] Silent push failed:', err.message)
                 );
             }
+        }
+    }
+
+    // Purge cooldown entries for rides that are no longer active
+    const activeRideIds = new Set(activeRides.map(r => r._id.toString()));
+    for (const rideId of _lastNotified.keys()) {
+        if (!activeRideIds.has(rideId)) {
+            _lastNotified.delete(rideId);
         }
     }
 }

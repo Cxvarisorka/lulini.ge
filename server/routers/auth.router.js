@@ -12,6 +12,11 @@ const {
     verifyPhoneUpdateOtp,
     sendEmailCode,
     verifyEmailCode,
+    sendEmailVerification,
+    verifyEmailForRegistration,
+    sendRegistrationPhoneOtp,
+    verifyRegistrationPhoneOtp,
+    register,
     updateProfile,
     deleteAccount,
     cancelAccountDeletion,
@@ -32,6 +37,16 @@ router.get('/test', (req, res) => {
 router.post('/login', validateLogin, login);
 router.post('/logout', logout);
 router.get('/me', protect, getMe);
+
+// Local (email/password) registration — driver mobile app self-signup.
+// Requires a prior /email/send-verification + /email/verify-registration pair
+// AND a /phone/send-registration-otp + /phone/verify-registration-otp pair, so
+// the user is only written to the DB after both email and phone are proven.
+router.post('/register', register);
+router.post('/email/send-verification', sendEmailVerification);
+router.post('/email/verify-registration', verifyEmailForRegistration);
+router.post('/phone/send-registration-otp', validateSendPhoneOtp, sendRegistrationPhoneOtp);
+router.post('/phone/verify-registration-otp', verifyRegistrationPhoneOtp);
 
 // Phone OTP authentication routes
 router.post('/phone/send-otp', validateSendPhoneOtp, sendPhoneOtp);

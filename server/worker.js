@@ -24,9 +24,9 @@ async function startWorker() {
 
         try {
             io = new Server();
+            const { createSubscriberClient } = require('./configs/redis.config');
             const pubClient = await getRedisClient();
-            _subClient = pubClient.duplicate();
-            await _subClient.connect();
+            _subClient = await createSubscriberClient('worker-adapter');
             io.adapter(createAdapter(pubClient, _subClient));
             console.log('Worker: Socket.io Redis adapter enabled');
         } catch (err) {

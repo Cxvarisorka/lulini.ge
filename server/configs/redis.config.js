@@ -46,4 +46,30 @@ function getBullMQConnection() {
     };
 }
 
-module.exports = { getRedisClient, getBullMQConnection };
+/**
+ * Create an independent Redis client for subscriber use (Socket.io adapter,
+ * pub/sub listeners, etc.).
+ *
+ * Why not `.duplicate()`: @redis/client@5.11 has a decoder bug where
+ * `#getTypeMapping` accesses `#waitingForReply.head.value` without a null
+ * check. When a pub/sub push message arrives on an empty command queue the
+ * decoder throws a TypeError that escapes as an uncaughtException. Using a
+ * fresh `createClient` call (identical to duplicate, but with an explicit
+ * error handler and reconnect strategy) keeps each subscriber isolated and
+ * lets us log the error instead of crashing.
+ */
+async function createSubscriberClient(label = 'subscriber') {
+    const sub = createClient({
+        url: process.env.REDIS_URL || 'redis://localhost:6379',
+        socket: {
+            reconnectStrategy: (retries) => Math.min(retries * 100, 5000),
+        },
+    });
+    sub.on('error', (err) => {
+        console.error(`Redis ${label} error:`, err.message);
+    });
+    await sub.connect();
+    return sub;
+}
+
+module.exports = { getRedisClient, getBullMQConnection, createSubscriberClient };

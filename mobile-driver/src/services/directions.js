@@ -1,154 +1,103 @@
 /**
- * OSRM Navigation Service for Driver App
- * Provides turn-by-turn routing with step-by-step maneuver data
+ * Navigation helpers for driver app.
+ *
+ * getNavigationRoute: fetches turn-by-turn data from /api/maps/directions?steps=true.
+ *                    Server handles OSRM→Google fallback + caching.
+ * formatDistance / formatDuration / getManeuverIcon / getManeuverInstruction:
+ *                    pure UI helpers, kept local.
  */
 
-// Cache for route results (bounded LRU)
-const routeCache = new Map();
-const CACHE_TTL = 300000; // 5 minutes
-const MAX_CACHE_ENTRIES = 50;
+import * as SecureStore from 'expo-secure-store';
 
-// Lazy TTL cleanup — called on cache access instead of a module-level setInterval.
-// Prevents leaked intervals on hot reload and avoids unnecessary CPU usage.
-let lastCleanup = Date.now();
-function cleanupExpiredEntries() {
-  const now = Date.now();
-  if (now - lastCleanup < CACHE_TTL) return; // at most once per TTL period
-  lastCleanup = now;
-  for (const [key, entry] of routeCache) {
-    if (now - entry.timestamp > CACHE_TTL) {
-      routeCache.delete(key);
-    }
-  }
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://api.lulini.ge/api';
+
+async function getAuthToken() {
+  try { return await SecureStore.getItemAsync('token'); } catch { return null; }
 }
 
-/**
- * Fetch OSRM route with full step-by-step maneuver data
- * @param {Object} origin - { latitude, longitude }
- * @param {Object} destination - { latitude, longitude }
- * @returns {Promise<Object|null>}
- */
 export async function getNavigationRoute(origin, destination) {
-  // Lazy cleanup instead of module-level setInterval
-  cleanupExpiredEntries();
+  if (!origin || !destination) return null;
+  const token = await getAuthToken();
+  if (!token) return null;
 
-  const cacheKey = `${origin.latitude.toFixed(5)},${origin.longitude.toFixed(5)}-${destination.latitude.toFixed(5)},${destination.longitude.toFixed(5)}`;
-
-  const cached = routeCache.get(cacheKey);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    return cached.data;
-  }
+  const params = new URLSearchParams({
+    originLat: origin.latitude,
+    originLng: origin.longitude,
+    destLat:   destination.latitude,
+    destLng:   destination.longitude,
+    steps: 'true',
+  }).toString();
 
   try {
-    const url = `https://router.project-osrm.org/route/v1/driving/${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}?overview=full&geometries=geojson&steps=true`;
+    const res = await fetch(`${API_URL}/maps/directions?${params}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await res.json();
+    if (!data?.success) return null;
 
-    const response = await fetch(url);
-    const data = await response.json();
-
-    if (data.code !== 'Ok' || !data.routes?.length) {
-      return null;
-    }
-
-    const route = data.routes[0];
-    const leg = route.legs[0];
-
-    // GeoJSON [lng, lat] -> [lat, lng] for Leaflet
-    const polyline = route.geometry.coordinates.map(coord => [coord[1], coord[0]]);
-
-    const steps = leg.steps.map((step, index) => ({
-      index,
+    const d = data.data;
+    // Server unified step shape: { distanceMeters, durationSeconds, name, maneuver:{type,modifier,location:[lat,lng]}, geometry:[[lat,lng],...] }
+    const steps = (d.steps || []).map((s, i) => ({
+      index: i,
       maneuver: {
-        type: step.maneuver.type,
-        modifier: step.maneuver.modifier || null,
-        location: [step.maneuver.location[1], step.maneuver.location[0]], // [lat, lng]
+        type: s.maneuver?.type,
+        modifier: s.maneuver?.modifier || null,
+        location: s.maneuver?.location || null,
       },
-      name: step.name || '',
-      distance: step.distance, // meters
-      duration: step.duration, // seconds
-      geometry: step.geometry.coordinates.map(c => [c[1], c[0]]),
+      name: s.name || '',
+      distance: s.distanceMeters ?? 0,
+      duration: s.durationSeconds ?? 0,
+      geometry: s.geometry || [],
     }));
 
-    const result = {
-      distance: route.distance,
-      duration: route.duration,
-      distanceText: formatDistance(route.distance),
-      durationText: formatDuration(route.duration),
-      polyline,
+    return {
+      distance:     d.distanceMeters ?? (d.distance * 1000),
+      duration:     d.durationSeconds ?? (d.duration * 60),
+      distanceText: d.distanceText || formatDistance(d.distanceMeters),
+      durationText: d.durationText || formatDuration(d.durationSeconds),
+      polyline:     d.polyline || [],
       steps,
     };
-
-    // LRU eviction when cache exceeds max
-    if (routeCache.size >= MAX_CACHE_ENTRIES) {
-      const oldestKey = routeCache.keys().next().value;
-      routeCache.delete(oldestKey);
-    }
-    routeCache.set(cacheKey, { data: result, timestamp: Date.now() });
-    return result;
-  } catch (error) {
-    // Failed to fetch navigation route
+  } catch {
     return null;
   }
 }
 
-/**
- * Format distance in meters to human-readable
- */
+// ── Pure UI helpers ─────────────────────────────────────────────────────────
+
 export function formatDistance(meters) {
-  if (meters < 1000) {
-    return `${Math.round(meters)} m`;
-  }
+  if (meters == null) return '';
+  if (meters < 1000) return `${Math.round(meters)} m`;
   return `${(meters / 1000).toFixed(1)} km`;
 }
 
-/**
- * Format duration in seconds to human-readable
- */
 export function formatDuration(seconds) {
-  if (seconds < 60) {
-    return `${Math.round(seconds)} sec`;
-  }
+  if (seconds == null) return '';
+  if (seconds < 60) return `${Math.round(seconds)} sec`;
   const mins = Math.round(seconds / 60);
-  if (mins < 60) {
-    return `${mins} min`;
-  }
+  if (mins < 60) return `${mins} min`;
   const hours = Math.floor(mins / 60);
-  const remainingMins = mins % 60;
-  return `${hours}h ${remainingMins}m`;
+  const rem = mins % 60;
+  return `${hours}h ${rem}m`;
 }
 
-
-/**
- * Get Ionicons name for a maneuver type/modifier
- */
 export function getManeuverIcon(type, modifier) {
   if (type === 'depart') return 'navigate';
   if (type === 'arrive') return 'flag';
   if (type === 'roundabout' || type === 'rotary') return 'refresh';
-
   switch (modifier) {
-    case 'left':
-      return 'arrow-back';
-    case 'sharp left':
-      return 'return-down-back';
-    case 'slight left':
-      return 'arrow-back';
-    case 'right':
-      return 'arrow-forward';
-    case 'sharp right':
-      return 'return-down-forward';
-    case 'slight right':
-      return 'arrow-forward';
-    case 'uturn':
-      return 'arrow-undo';
+    case 'left':        return 'arrow-back';
+    case 'sharp left':  return 'return-down-back';
+    case 'slight left': return 'arrow-back';
+    case 'right':       return 'arrow-forward';
+    case 'sharp right': return 'return-down-forward';
+    case 'slight right':return 'arrow-forward';
+    case 'uturn':       return 'arrow-undo';
     case 'straight':
-    default:
-      return 'arrow-up';
+    default:            return 'arrow-up';
   }
 }
 
-/**
- * Get human-readable instruction from OSRM step
- */
 export function getManeuverInstruction(step, t) {
   const { type, modifier } = step.maneuver;
   const streetName = step.name;
@@ -161,22 +110,15 @@ export function getManeuverInstruction(step, t) {
   }
 
   const directionKey = modifier ? modifier.replace(/ /g, '_') : 'straight';
-
   if (t) {
     return streetName
       ? t(`nav.${directionKey}_onto`, { street: streetName })
       : t(`nav.${directionKey}`);
   }
-
   const directionText = modifier || 'straight';
   return streetName
     ? `Turn ${directionText} onto ${streetName}`
     : `Continue ${directionText}`;
 }
 
-/**
- * Clear the route cache
- */
-export function clearRouteCache() {
-  routeCache.clear();
-}
+export function clearRouteCache() { /* server owns cache */ }

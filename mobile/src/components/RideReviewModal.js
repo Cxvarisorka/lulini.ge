@@ -65,11 +65,21 @@ export default function RideReviewModal({ visible, ride, onClose, onSubmit, isLo
 
   if (!ride) return null;
 
-  const driver = ride.driver;
-  const driverUser = driver?.user;
+  // Defensive: server sends a fully populated ride, but during reconnection
+  // replay or fallback fetches, sub-documents may be missing. Never access
+  // nested fields without null-guards — a render-time throw here crashes the
+  // app via ErrorBoundary the moment the driver ends the ride.
+  const driver = ride.driver || null;
+  const driverUser = driver?.user || null;
   const driverName = [driverUser?.firstName, driverUser?.lastName].filter(Boolean).join(' ')
     || driverUser?.fullName
     || t('taxi.driver');
+  const driverRating = typeof driver?.rating === 'number' ? driver.rating : 0;
+  const driverTrips = typeof driver?.totalTrips === 'number' ? driver.totalTrips : 0;
+  const vehicle = driver?.vehicle || null;
+  const fareDisplay = ride.fare ?? ride.quote?.totalPrice ?? null;
+  const durationDisplay = ride.quote?.durationText || '—';
+  const distanceDisplay = ride.quote?.distanceText || '—';
 
   return (
     <Modal
@@ -100,31 +110,33 @@ export default function RideReviewModal({ visible, ride, onClose, onSubmit, isLo
               <View style={styles.driverDetails}>
                 <Text style={styles.driverName} numberOfLines={1}>{driverName}</Text>
                 <View style={styles.driverMeta}>
-                  {driver?.rating > 0 && (
+                  {driverRating > 0 && (
                     <View style={styles.driverRatingRow}>
                       <Ionicons name="star" size={14} color={colors.warning} />
                       <Text style={styles.driverRating}>
-                        {driver.rating.toFixed(1)}
+                        {driverRating.toFixed(1)}
                       </Text>
                     </View>
                   )}
-                  {driver?.totalTrips > 0 && (
+                  {driverTrips > 0 && (
                     <Text style={styles.driverTrips}>
-                      {driver.rating > 0 ? '• ' : ''}{driver.totalTrips} {t('taxi.trips')}
+                      {driverRating > 0 ? '• ' : ''}{driverTrips} {t('taxi.trips')}
                     </Text>
                   )}
                 </View>
-                <View style={styles.vehicleInfo}>
-                  <Ionicons name="car" size={14} color={colors.mutedForeground} />
-                  <Text style={styles.vehicleText}>
-                    {driver?.vehicle?.make} {driver?.vehicle?.model}
-                  </Text>
-                  {driver?.vehicle?.licensePlate && (
-                    <View style={styles.licensePlateBadge}>
-                      <Text style={styles.licensePlateText}>{driver.vehicle.licensePlate}</Text>
-                    </View>
-                  )}
-                </View>
+                {vehicle && (
+                  <View style={styles.vehicleInfo}>
+                    <Ionicons name="car" size={14} color={colors.mutedForeground} />
+                    <Text style={styles.vehicleText}>
+                      {[vehicle.make, vehicle.model].filter(Boolean).join(' ') || '—'}
+                    </Text>
+                    {vehicle.licensePlate ? (
+                      <View style={styles.licensePlateBadge}>
+                        <Text style={styles.licensePlateText}>{vehicle.licensePlate}</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                )}
               </View>
             </View>
 
@@ -190,17 +202,19 @@ export default function RideReviewModal({ visible, ride, onClose, onSubmit, isLo
               <View style={styles.summaryRow}>
                 <Ionicons name="cash-outline" size={20} color={colors.mutedForeground} />
                 <Text style={styles.summaryLabel}>{t('taxi.totalFare')}</Text>
-                <Text style={styles.summaryValue}>{ride.fare || ride.quote?.totalPrice} ₾</Text>
+                <Text style={styles.summaryValue}>
+                  {fareDisplay != null ? `${fareDisplay} ₾` : '—'}
+                </Text>
               </View>
               <View style={styles.summaryRow}>
                 <Ionicons name="time-outline" size={20} color={colors.mutedForeground} />
                 <Text style={styles.summaryLabel}>{t('taxi.duration')}</Text>
-                <Text style={styles.summaryValue}>{ride.quote?.durationText}</Text>
+                <Text style={styles.summaryValue}>{durationDisplay}</Text>
               </View>
               <View style={styles.summaryRow}>
                 <Ionicons name="navigate-outline" size={20} color={colors.mutedForeground} />
                 <Text style={styles.summaryLabel}>{t('taxi.distance')}</Text>
-                <Text style={styles.summaryValue}>{ride.quote?.distanceText}</Text>
+                <Text style={styles.summaryValue}>{distanceDisplay}</Text>
               </View>
             </View>
           </ScrollView>

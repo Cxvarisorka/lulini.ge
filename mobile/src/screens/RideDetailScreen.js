@@ -11,7 +11,6 @@ import {
 import MapView from '../components/map/MapViewWrapper';
 import Marker from '../components/map/MarkerWrapper';
 import Polyline from '../components/map/PolylineWrapper';
-import { mapStyle, mapStyleDark } from '../components/map/mapStyle';
 import { markerImages } from '../components/map/markerImages';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
@@ -20,6 +19,7 @@ import { shadows, radius, useTypography } from '../theme/colors';
 import { useTheme } from '../context/ThemeContext';
 import { getDirections } from '../services/googleMaps';
 import { safeFitToCoordinates, safePolyline } from '../utils/mapSafety';
+import { mapStyleDark } from '../components/map/mapStyle';
 
 function getStatusColors(colors) {
   return {
@@ -151,7 +151,7 @@ export default function RideDetailScreen({ route, navigation }) {
         <MapView
           ref={mapRef}
           style={styles.map}
-          customMapStyle={isDark ? mapStyleDark : mapStyle}
+          customMapStyle={isDark ? mapStyleDark : []}
           initialRegion={initialRegion}
           onMapReady={fitMapToMarkers}
           onLayout={fitMapToMarkers}

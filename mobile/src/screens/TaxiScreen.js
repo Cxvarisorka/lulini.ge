@@ -49,8 +49,9 @@ import DriverCluster from '../components/map/DriverCluster';
 import StopMarker from '../components/map/StopMarker';
 import DraggablePickupMarker from '../components/map/DraggablePickupMarker';
 import Marker from '../components/map/MarkerWrapper';
-import { markerImages } from '../components/map/markerImages';
-import { mapStyle, mapStyleDark, ROUTE_STYLE, ROUTE_STYLE_DARK } from '../components/map/mapStyle';
+import BoltPin from '../components/map/BoltPin';
+const { Circle } = require('react-native-maps');
+import { mapStyleDark, ROUTE_STYLE, ROUTE_STYLE_DARK } from '../components/map/mapStyle';
 import { haversineKm } from '../utils/distance';
 
 // Safe wrappers for native map calls — prevents iOS crash when map isn't ready
@@ -76,6 +77,11 @@ const RIDE_CACHE_MAX_AGE = 5 * 60 * 1000;
 let _searchStartedAt = null;   // Timestamp when search began (for progress calculation)
 let _nearbyDriversCache = [];  // Drivers visible during search
 
+// Module-level route cache — survives unmount/remount for instant polyline display.
+// Without this, the route line is blank until an OSRM network fetch completes.
+let _cachedDriverRoute = null;   // Last driverRoute polyline (driver→pickup or driver→dest)
+let _cachedRoutePolyline = null; // Last routePolyline (static pickup→dest route)
+
 function setCachedRide(ride) {
   _rideCache = ride ? { ride, timestamp: Date.now() } : null;
 }
@@ -93,6 +99,19 @@ function clearCachedRide() {
 function clearSearchMeta() {
   _searchStartedAt = null;
   _nearbyDriversCache = [];
+  _cachedDriverRoute = null;
+  _cachedRoutePolyline = null;
+}
+
+// PERF: Shallow-compare two driver arrays by position.
+// Returns true if both arrays have the same length and identical lat/lng values,
+// meaning the previous React state reference can be kept (no re-render).
+function driversEqual(a, b) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].lat !== b[i].lat || a[i].lng !== b[i].lng) return false;
+  }
+  return true;
 }
 
 // Distance threshold (km) for "driver is close" notification
@@ -103,6 +122,11 @@ const HIT_SLOP = { top: 10, bottom: 10, left: 10, right: 10 };
 
 // Stable marker anchor constants — avoids new object allocation per render
 const ANCHOR_BOTTOM = { x: 0.5, y: 1 };
+
+// Stable reference for the light-mode map style. Passing a fresh `[]` literal
+// on every render makes react-native-maps call setMapStyle() on the native
+// GoogleMap each time, which stutters during pan/zoom gestures.
+const EMPTY_MAP_STYLE = [];
 
 // Stable edge padding constants for fitToCoordinates
 const EDGE_PAD_RIDE = { top: 80, right: 50, bottom: 250, left: 50 };
@@ -253,7 +277,8 @@ export default function TaxiScreen({ navigation }) {
 
   // Native map states
   const [nearbyDrivers, setNearbyDrivers] = useState([]);
-  const [driverRoute, setDriverRoute] = useState(null);
+  const [driverRoute, _setDriverRoute] = useState(_cachedDriverRoute);
+  const setDriverRoute = useCallback((val) => { _cachedDriverRoute = val; _setDriverRoute(val); }, []);
   const [totalDistance, setTotalDistance] = useState(null); // Total route KM (pickup → stops → destination)
   const routeDistanceRef = useRef(null); // Persists route distance across closures
 
@@ -303,7 +328,8 @@ export default function TaxiScreen({ navigation }) {
   const searchStartedAtRef = useRef(null);
 
   // Route polyline for directions
-  const [routePolyline, setRoutePolyline] = useState(null);
+  const [routePolyline, _setRoutePolyline] = useState(_cachedRoutePolyline);
+  const setRoutePolyline = useCallback((val) => { _cachedRoutePolyline = val; _setRoutePolyline(val); }, []);
   const [isLoadingDirections, setIsLoadingDirections] = useState(false);
 
   // Map selection mode — stores which input triggered it: 'pickup', 'destination', or stop index (number)
@@ -406,7 +432,8 @@ export default function TaxiScreen({ navigation }) {
           loc.latitude,
           loc.longitude
         );
-        setNearbyDrivers(res.data?.data?.drivers || []);
+        const fresh = res.data?.data?.drivers || [];
+        setNearbyDrivers(prev => driversEqual(prev, fresh) ? prev : fresh);
       } catch {
         // Ambient drivers are cosmetic — don't alert on failure
       }
@@ -523,7 +550,9 @@ export default function TaxiScreen({ navigation }) {
     if (ride.paymentMethod) setPaymentMethod(ride.paymentMethod);
     if (ride.driver?.location?.coordinates) {
       const [lng, lat] = ride.driver.location.coordinates;
-      setDriverLocation({ latitude: lat, longitude: lng });
+      const dLoc = { latitude: lat, longitude: lng };
+      setDriverLocation(dLoc);
+      driverLocationRef.current = dLoc;
     }
 
     switch (ride.status) {
@@ -534,7 +563,16 @@ export default function TaxiScreen({ navigation }) {
     }
   }, []);
 
-  const fitMapToRide = useCallback((ride) => {
+  // Captured at first render — true if the map region was preserved from a
+  // previous mount (screen navigation during an active ride). We use this to
+  // skip the initial ride-fit so the user's view doesn't visibly re-zoom.
+  const hadLastRegionOnMount = useRef(_lastMapRegion != null).current;
+
+  const fitMapToRide = useCallback((ride, { initialRestore = false } = {}) => {
+    // Screen navigation path: the map already shows the right region via
+    // _lastMapRegion. Don't animate over it — that's the zoom-in-then-out bug.
+    if (initialRestore && hadLastRegionOnMount) return;
+
     setTimeout(() => {
       if (!mapRef.current) return;
       const coords = [];
@@ -564,11 +602,12 @@ export default function TaxiScreen({ navigation }) {
       if (coords.length >= 2) {
         safeFit(mapRef, coords, {
           edgePadding: EDGE_PAD_RIDE,
-          animated: true,
+          // Cold-start during active ride: snap into place, no animation.
+          animated: !initialRestore,
         });
       }
-    }, 500);
-  }, []);
+    }, initialRestore ? 0 : 500);
+  }, [hadLastRegionOnMount]);
 
   // Restore active ride on mount:
   //   1. In-memory cache (fastest — screen navigation)
@@ -590,7 +629,7 @@ export default function TaxiScreen({ navigation }) {
         }
 
         applyRideToState(cached);
-        fitMapToRide(cached);
+        fitMapToRide(cached, { initialRestore: true });
 
         if (cached.dropoff?.lat && cached.dropoff?.lng) {
           // Refs already set by applyRideToState
@@ -653,7 +692,7 @@ export default function TaxiScreen({ navigation }) {
           }
 
           applyRideToState(activeRide);
-          fitMapToRide(activeRide);
+          fitMapToRide(activeRide, { initialRestore: true });
           setCachedRide(activeRide); // Cache for future screen navigation
 
           if (!activeRide.quote?.distance && !routeDistanceRef.current
@@ -842,9 +881,17 @@ export default function TaxiScreen({ navigation }) {
   //   - DRIVER_FOUND / DRIVER_ARRIVED → driver → pickup (every 15s)
   //   - IN_PROGRESS → driver → destination (every 10s)
   useEffect(() => {
+    // Clear the previous phase's driver route immediately so stale lines
+    // (e.g. driver→pickup) don't linger into IN_PROGRESS while the new
+    // route fetches. A straight-line fallback rendered in routeElement
+    // fills the gap until OSRM responds.
+    setDriverRoute(null);
+
+    // DRIVER_ARRIVED = driver at pickup; no line to render.
+    if (bookingStep === BOOKING_STEPS.DRIVER_ARRIVED) return;
+
     const isTracking =
       bookingStep === BOOKING_STEPS.DRIVER_FOUND ||
-      bookingStep === BOOKING_STEPS.DRIVER_ARRIVED ||
       bookingStep === BOOKING_STEPS.IN_PROGRESS;
     if (!isTracking) return;
 
@@ -854,7 +901,7 @@ export default function TaxiScreen({ navigation }) {
       const dLoc = driverLocationRef.current;
       if (!dLoc) return;
 
-      if (bookingStep === BOOKING_STEPS.DRIVER_FOUND || bookingStep === BOOKING_STEPS.DRIVER_ARRIVED) {
+      if (bookingStep === BOOKING_STEPS.DRIVER_FOUND) {
         const pickup = customPickup || locationRef.current;
         if (!pickup) return;
         fetchRouteOSRM(dLoc, pickup).then(setDriverRoute);
@@ -869,7 +916,7 @@ export default function TaxiScreen({ navigation }) {
     fetchRoute();
     const id = setInterval(fetchRoute, intervalMs);
     return () => clearInterval(id);
-  }, [bookingStep, destinationCoords, customPickup]);
+  }, [bookingStep, destinationCoords, customPickup, setDriverRoute]);
 
   // Fit map to driver + pickup — only on first driver location, not every update.
   // Constant fitToCoordinates prevents user from panning the map manually.
@@ -1209,31 +1256,39 @@ export default function TaxiScreen({ navigation }) {
     });
 
     socket.on('ride:completed', async (data) => {
-      const ride = data.ride || data;
-      // Skip driver-targeted events (shape: { rideId, updatedStats }) or malformed data
-      if (!ride._id || !ride.driver) return;
-      // Dedup: prevent double-fire from admin room or reconnection buffer
-      const key = `${ride._id}:completed`;
-      if (shownAlertsRef.current.has(key)) return;
-      shownAlertsRef.current.add(key);
+      // Wrap the entire handler so a malformed payload, a failing native call,
+      // or an unexpected ride shape can never propagate into React's event
+      // dispatch and crash the passenger app (previously tripped ErrorBoundary).
+      try {
+        const ride = data?.ride || data;
+        // Skip driver-targeted events (shape: { rideId, updatedStats }) or malformed data
+        if (!ride || !ride._id || !ride.driver) return;
+        // Dedup: prevent double-fire from admin room or reconnection buffer
+        const key = `${ride._id}:completed`;
+        if (shownAlertsRef.current.has(key)) return;
+        shownAlertsRef.current.add(key);
 
-      let completedData = ride;
-      // If driver info is missing (not populated), fetch full ride from API
-      if (!ride.driver?.user) {
-        try {
-          const res = await taxiAPI.getRideById(ride._id);
-          if (res.data?.data?.ride) completedData = res.data.data.ride;
-        } catch (e) {
-          if (__DEV__) console.warn('[TaxiScreen] Failed to fetch ride details for review:', e.message);
+        let completedData = ride;
+        // If driver info is missing (not populated), fetch full ride from API
+        if (!ride.driver?.user) {
+          try {
+            const res = await taxiAPI.getRideById(ride._id);
+            if (res.data?.data?.ride) completedData = res.data.data.ride;
+          } catch (e) {
+            if (__DEV__) console.warn('[TaxiScreen] Failed to fetch ride details for review:', e.message);
+          }
         }
-      }
 
-      setCompletedRide(completedData);
-      setShowReviewModal(true);
-      resetBookingState();
-      notificationSuccess();
-      rideCompleted();
-      maybePromptReview();
+        setCompletedRide(completedData);
+        setShowReviewModal(true);
+        resetBookingState();
+        // Fire-and-forget side effects — never allow them to reject the handler.
+        Promise.resolve(notificationSuccess()).catch(() => {});
+        Promise.resolve(rideCompleted()).catch(() => {});
+        Promise.resolve(maybePromptReview()).catch(() => {});
+      } catch (err) {
+        if (__DEV__) console.error('[TaxiScreen] ride:completed handler error:', err);
+      }
     });
 
     socket.on('ride:cancelled', (ride) => {
@@ -1460,8 +1515,11 @@ export default function TaxiScreen({ navigation }) {
   // ETA countdown — no longer sends notifications, just kept as state for UI display
 
   const resetBookingState = () => {
-    stopAllSounds();
-    dismissRideNotification();
+    // Fire-and-forget async cleanups — swallow failures so we can't crash the
+    // caller (e.g. the ride:completed handler) if expo-av / expo-notifications
+    // throws on the underlying native call.
+    Promise.resolve(stopAllSounds()).catch(() => {});
+    Promise.resolve(dismissRideNotification()).catch(() => {});
     clearCachedRide();
     clearSearchMeta();
     setCurrentRide(null);
@@ -1735,8 +1793,13 @@ export default function TaxiScreen({ navigation }) {
 
     await fetchDirectionsAndUpdate(coords);
 
-    // Auto-transition to ride options when destination is selected
-    setBookingStep(BOOKING_STEPS.RIDE_OPTIONS);
+    // Delay booking step change to a separate render cycle so the native MapView
+    // processes the new Polyline child before the bottom sheet layout changes.
+    // Without this, React 18 batches both updates into one render and
+    // react-native-maps silently drops the polyline on the native side.
+    requestAnimationFrame(() => {
+      setBookingStep(BOOKING_STEPS.RIDE_OPTIONS);
+    });
   }, [fetchDirectionsAndUpdate]);
 
   // H3: No random coordinates — only update text; require Places selection for coords
@@ -1995,7 +2058,7 @@ export default function TaxiScreen({ navigation }) {
           );
           const drivers = driversRes.data?.data?.drivers || [];
           _nearbyDriversCache = drivers;
-          setNearbyDrivers(drivers);
+          setNearbyDrivers(prev => driversEqual(prev, drivers) ? prev : drivers);
         } catch (err) {
           if (__DEV__) console.warn('[TaxiScreen] Failed to fetch nearby drivers:', err.message);
         }
@@ -2129,6 +2192,19 @@ export default function TaxiScreen({ navigation }) {
     }
   }, []);
 
+  // Handle draggable dropoff pin drop — update destinationCoords + reverse geocode address
+  const handleDropoffDragEnd = useCallback(async (coords) => {
+    setDestinationCoords(coords);
+    try {
+      const result = await reverseGeocode(coords.latitude, coords.longitude);
+      if (result) {
+        setDestination(result.mainText || result.address);
+      }
+    } catch (e) {
+      if (__DEV__) console.warn('[TaxiScreen] Reverse geocode on dropoff drag error:', e.message);
+    }
+  }, []);
+
   const handleAddStop = useCallback(() => {
     setStops(prev => {
       if (prev.length >= 2) return prev;
@@ -2175,6 +2251,15 @@ export default function TaxiScreen({ navigation }) {
       return;
     }
 
+    // During search/ride-options, also reset a dragged pickup pin back to GPS
+    const isSearchPhase =
+      bookingStep === BOOKING_STEPS.LOCATION_SEARCH ||
+      bookingStep === BOOKING_STEPS.RIDE_OPTIONS;
+    if (isSearchPhase && customPickup) {
+      setCustomPickup(null);
+      refreshLocation();
+    }
+
     if (loc) {
       safeAnimate(mapRef,
         {
@@ -2186,7 +2271,7 @@ export default function TaxiScreen({ navigation }) {
         300
       );
     }
-  }, [bookingStep]);
+  }, [bookingStep, customPickup]);
 
   // Handle "Select on Map" icon press — target: 'pickup', 'destination', or stop index
   const handleSelectOnMap = useCallback((target = 'destination') => {
@@ -2196,21 +2281,29 @@ export default function TaxiScreen({ navigation }) {
     }
   }, []);
 
+  // PERF: Track whether user is actively panning/pinching — suppress zoom
+  // state updates during gestures to avoid mid-gesture cluster rebuilds.
+  const isPanningRef = useRef(false);
+  const handlePanDrag = useCallback(() => { isPanningRef.current = true; }, []);
+
   // Handle map press for location selection (routed to the correct input)
   // Sets pin immediately, then reverse geocodes address in background
   const handleRegionChangeComplete = useCallback((region) => {
     // Persist region so remount starts where the user left off (no flash)
     _lastMapRegion = region;
+    isPanningRef.current = false;
 
     // Only track zoom when DriverCluster is rendered (RIDE_OPTIONS / SEARCHING)
     if (!driversVisibleRef.current) return;
     if (zoomDebounceRef.current) clearTimeout(zoomDebounceRef.current);
     zoomDebounceRef.current = setTimeout(() => {
+      // Skip if user started another gesture while debounce was pending
+      if (isPanningRef.current) return;
       if (region.latitudeDelta > 0) {
         const zoom = Math.round(Math.log2(360 / region.latitudeDelta));
         setMapZoomLevel(prev => prev === zoom ? prev : zoom);
       }
-    }, 500);
+    }, 600);
   }, []);
 
   const handleMapPress = useCallback(async (event) => {
@@ -2265,7 +2358,10 @@ export default function TaxiScreen({ navigation }) {
       setIsLoadingDirections(true);
       try {
         await fetchDirectionsAndUpdate(coords);
-        setBookingStep(BOOKING_STEPS.RIDE_OPTIONS);
+        // Separate render cycle — see handleDestinationSelectWithCoords comment
+        requestAnimationFrame(() => {
+          setBookingStep(BOOKING_STEPS.RIDE_OPTIONS);
+        });
       } finally {
         setIsLoadingDirections(false);
       }
@@ -2359,36 +2455,87 @@ export default function TaxiScreen({ navigation }) {
     stops, lastDestination,
   ]);
 
-  // Memoized map children — markers + polylines only re-render when map-relevant
-  // state changes. Unrelated state (modals, sheets, loading, chat) won't cause
-  // native marker/polyline reconstruction.
+  // Memoized map markers — only re-render when marker-relevant state changes.
+  // Unrelated state (modals, sheets, loading, chat) won't cause native marker
+  // reconstruction. Route polylines are separated into routeElement below.
+  //
+  // PERF: Three isolated memos for three independent change frequencies:
+  //   1. mapChildren — markers (changes on booking step, driver location ~2s)
+  //   2. routeElement — polylines (changes on route fetch ~10-15s)
+  //   3. driverClusterElement — clusters (changes on zoom or polling ~30s)
   const mapChildren = useMemo(() => {
     const isSearchPhase = bookingStep === BOOKING_STEPS.LOCATION_SEARCH || bookingStep === BOOKING_STEPS.RIDE_OPTIONS;
-    const routeStyle = isDark ? ROUTE_STYLE_DARK : ROUTE_STYLE;
+    const isDriverEnRoute = bookingStep === BOOKING_STEPS.DRIVER_FOUND || bookingStep === BOOKING_STEPS.DRIVER_ARRIVED;
+    const isInProgress = bookingStep === BOOKING_STEPS.IN_PROGRESS;
+
+    // Pickup is meaningful until the ride actually starts — then it's the past.
+    const showPickup = !isInProgress;
+    // Dropoff is shown for route planning and the trip itself, hidden while
+    // driver is en-route to pickup (keeps the map focused on the pickup zone).
+    const showDropoff = !isDriverEnRoute;
+
+    // Effective pickup — user override takes priority, otherwise GPS.
+    const effectivePickup = customPickup || location;
+
+    // Suggested pickup/dropoff zone radius (meters). Mirrors Bolt/Yandex.
+    const ZONE_RADIUS = 40;
+    const PICKUP_COLOR = '#10B981';
+    const DROPOFF_COLOR = '#111827';
 
     return (
       <>
-        {/* Custom pickup pin — draggable during search phase */}
-        {customPickup && isSearchPhase && (
+        {/* Suggested pickup zone circle */}
+        {showPickup && effectivePickup && (
+          <Circle
+            center={effectivePickup}
+            radius={ZONE_RADIUS}
+            strokeColor={`${PICKUP_COLOR}B3`}
+            strokeWidth={2}
+            fillColor={`${PICKUP_COLOR}26`}
+            zIndex={1}
+          />
+        )}
+
+        {/* Suggested dropoff zone circle */}
+        {showDropoff && destinationCoords && (
+          <Circle
+            center={destinationCoords}
+            radius={ZONE_RADIUS}
+            strokeColor={`${DROPOFF_COLOR}B3`}
+            strokeWidth={2}
+            fillColor={`${DROPOFF_COLOR}26`}
+            zIndex={1}
+          />
+        )}
+
+        {/* Pickup pin — draggable during search/ride-options, static during active ride */}
+        {showPickup && effectivePickup && isSearchPhase && (
           <DraggablePickupMarker
-            coordinate={customPickup}
+            coordinate={effectivePickup}
             onDragEnd={handlePickupDragEnd}
           />
         )}
 
-        {/* Static pickup pin — during active ride steps (not draggable) */}
-        {customPickup && !isSearchPhase && (
+        {showPickup && effectivePickup && !isSearchPhase && (
           <Marker
-            coordinate={customPickup}
-            image={markerImages.pickup}
+            coordinate={effectivePickup}
             anchor={ANCHOR_BOTTOM}
             tracksViewChanges={false}
             zIndex={6}
-          />
+          >
+            <BoltPin color={PICKUP_COLOR} caption="Pickup" title="Here" />
+          </Marker>
         )}
 
-        {/* Destination marker - red pin with flag */}
-        {destinationCoords && <DestinationMarker coordinate={destinationCoords} />}
+        {/* Destination marker — Bolt-style pill with ETA, draggable during search phase */}
+        {showDropoff && destinationCoords && (
+          <DestinationMarker
+            coordinate={destinationCoords}
+            etaMinutes={estimatedDuration}
+            draggable={isSearchPhase}
+            onDragEnd={handleDropoffDragEnd}
+          />
+        )}
 
         {/* Stop markers */}
         {stops.map((stop, index) => stop.coords && (
@@ -2398,32 +2545,64 @@ export default function TaxiScreen({ navigation }) {
             index={index}
           />
         ))}
-
-        {/* Driver marker - animated car with rotation */}
-        {driverLocation && (
-          <AnimatedCarMarker coordinate={driverLocation} isAssigned={true} />
-        )}
-
-        {/* Nearby drivers while searching - clustered when zoomed out */}
-        {nearbyDrivers.length > 0 && (
-          <DriverCluster drivers={nearbyDrivers} zoomLevel={mapZoomLevel} />
-        )}
-
-        {/* Route polyline — only ONE line on screen at a time.
-            driverRoute (live) takes priority over routePolyline (static).
-            PolylineWrapper auto-simplifies high-density OSRM routes. */}
-        {driverRoute && driverRoute.length > 1 ? (
-          <Polyline id="driver-route" coordinates={driverRoute} {...routeStyle} />
-        ) : routePolyline && routePolyline.length > 1 ? (
-          <Polyline id="route-main" coordinates={routePolyline} {...routeStyle} />
-        ) : null}
       </>
     );
   }, [
-    bookingStep, isDark, customPickup, destinationCoords, stops,
-    driverLocation, nearbyDrivers, mapZoomLevel, driverRoute, routePolyline,
-    handlePickupDragEnd,
+    bookingStep, customPickup, location, destinationCoords, stops,
+    estimatedDuration, handlePickupDragEnd, handleDropoffDragEnd,
   ]);
+
+  // PERF: Driver marker isolated from mapChildren. driverLocation updates
+  // every ~2s and was rebuilding the entire marker subtree (pickup, dropoff,
+  // stops, circles) on each tick — visible as jitter during map inertia.
+  const driverMarkerElement = useMemo(() => {
+    if (!driverLocation) return null;
+    return <AnimatedCarMarker coordinate={driverLocation} isAssigned={true} />;
+  }, [driverLocation]);
+
+  // PERF: Isolated route polyline memo — route fetches (10-15s interval) no longer
+  // rebuild the marker subtree. Only the polyline native component updates.
+  const routeElement = useMemo(() => {
+    const routeStyle = isDark ? ROUTE_STYLE_DARK : ROUTE_STYLE;
+
+    // DRIVER_ARRIVED: driver at pickup, no line.
+    if (bookingStep === BOOKING_STEPS.DRIVER_ARRIVED) return null;
+
+    // Driver tracking phases — show OSRM driver route, fall back to a straight
+    // line from driver to target so the user sees something instantly.
+    if (bookingStep === BOOKING_STEPS.DRIVER_FOUND || bookingStep === BOOKING_STEPS.IN_PROGRESS) {
+      if (driverRoute && driverRoute.length > 1) {
+        return <Polyline id="driver-route" coordinates={driverRoute} {...routeStyle} />;
+      }
+      const dLoc = driverLocation;
+      const target = bookingStep === BOOKING_STEPS.DRIVER_FOUND
+        ? (customPickup || location)
+        : destinationCoords;
+      if (dLoc && target) {
+        return (
+          <Polyline
+            id="driver-route-fallback"
+            coordinates={[dLoc, target]}
+            {...routeStyle}
+          />
+        );
+      }
+      return null;
+    }
+
+    // RIDE_OPTIONS / SEARCHING — static pickup→dropoff polyline.
+    if (routePolyline && routePolyline.length > 1) {
+      return <Polyline id="route-main" coordinates={routePolyline} {...routeStyle} />;
+    }
+    return null;
+  }, [isDark, bookingStep, driverRoute, driverLocation, customPickup, location, destinationCoords, routePolyline]);
+
+  // PERF: Isolated DriverCluster memo — zoom and nearbyDrivers changes only
+  // rebuild cluster markers, never touching pickup/destination/stop/polyline nodes.
+  const driverClusterElement = useMemo(() => {
+    if (nearbyDrivers.length === 0) return null;
+    return <DriverCluster drivers={nearbyDrivers} zoomLevel={mapZoomLevel} />;
+  }, [nearbyDrivers, mapZoomLevel]);
 
   // Memoize showsUserLocation — avoids native map reconfiguration on unrelated re-renders.
   // Only actually changes when entering/leaving IN_PROGRESS.
@@ -2443,6 +2622,33 @@ export default function TaxiScreen({ navigation }) {
       longitudeDelta: 0.02,
     }
   ).current;
+
+  // Stable customMapStyle reference — array identity must not change per render
+  // or react-native-maps reapplies the style on the native map mid-gesture.
+  const customMapStyle = useMemo(
+    () => (isDark ? mapStyleDark : EMPTY_MAP_STYLE),
+    [isDark]
+  );
+
+  // Stable onMapReady — inline arrows allocate fresh closures every render,
+  // which some rn-maps versions treat as prop change and re-bind on native.
+  const handleMapReady = useCallback(() => {
+    mapReadyRef.current = true;
+    if (pendingFitRef.current) {
+      const { coords, opts } = pendingFitRef.current;
+      pendingFitRef.current = null;
+      didFitToDriverRef.current = true;
+      safeFit(mapRef, coords, opts);
+    } else if (!didInitialCenter.current && locationRef.current) {
+      didInitialCenter.current = true;
+      safeAnimate(mapRef, {
+        latitude: locationRef.current.latitude,
+        longitude: locationRef.current.longitude,
+        latitudeDelta: 0.015,
+        longitudeDelta: 0.015,
+      }, 500);
+    }
+  }, []);
 
   return (
     <View style={styles.container}>
@@ -2474,27 +2680,9 @@ export default function TaxiScreen({ navigation }) {
         <MapView
           ref={mapRef}
           style={styles.map}
-          customMapStyle={isDark ? mapStyleDark : mapStyle}
+          customMapStyle={customMapStyle}
           initialRegion={initialRegion}
-          onMapReady={() => {
-            mapReadyRef.current = true;
-            // Flush queued fit (driver+pickup) that arrived before map was ready
-            if (pendingFitRef.current) {
-              const { coords, opts } = pendingFitRef.current;
-              pendingFitRef.current = null;
-              didFitToDriverRef.current = true;
-              safeFit(mapRef, coords, opts);
-            } else if (!didInitialCenter.current && locationRef.current) {
-              // No pending fit — center on user location
-              didInitialCenter.current = true;
-              safeAnimate(mapRef, {
-                latitude: locationRef.current.latitude,
-                longitude: locationRef.current.longitude,
-                latitudeDelta: 0.015,
-                longitudeDelta: 0.015,
-              }, 500);
-            }
-          }}
+          onMapReady={handleMapReady}
           onPress={isSelectingOnMap != null ? handleMapPress : undefined}
           showsUserLocation={showsUserLocation}
           showsMyLocationButton={false}
@@ -2502,11 +2690,17 @@ export default function TaxiScreen({ navigation }) {
           showsCompass={false}
           moveOnMarkerPress={false}
           rotateEnabled={false}
+          onPanDrag={handlePanDrag}
           onRegionChangeComplete={handleRegionChangeComplete}
         >
-          {/* Memoized map children — only re-creates when map-relevant state changes.
-              Prevents marker/polyline re-renders from unrelated state (modals, sheets, loading). */}
+          {/* Memoized map markers — only re-creates when marker-relevant state changes */}
           {mapChildren}
+          {/* PERF: Driver marker isolated — 2s position updates don't rebuild other markers */}
+          {driverMarkerElement}
+          {/* PERF: Route polyline isolated — 10-15s refresh doesn't rebuild markers */}
+          {routeElement}
+          {/* PERF: Cluster rendered separately so zoom changes don't rebuild markers */}
+          {driverClusterElement}
         </MapView>
 
         {/* Loading Overlay */}
@@ -2514,6 +2708,14 @@ export default function TaxiScreen({ navigation }) {
           <View style={styles.loadingOverlay}>
             <ActivityIndicator size="large" color={colors.primary} />
             <Text style={styles.loadingText}>{t('taxi.gettingLocation')}</Text>
+          </View>
+        )}
+
+        {/* Route calculation pill — floats above the map, does not block it */}
+        {isLoadingDirections && !isLoadingLocation && (
+          <View style={[styles.routeLoadingPill, { top: insets.top + 70 }]} pointerEvents="none">
+            <ActivityIndicator size="small" color="#fff" />
+            <Text style={styles.routeLoadingPillText}>{t('taxi.calculatingRoute')}</Text>
           </View>
         )}
 
@@ -2638,6 +2840,28 @@ const createStyles = (typography, colors) => StyleSheet.create({
     marginTop: 12,
     ...typography.h2,
     color: colors.foreground,
+  },
+  routeLoadingPill: {
+    position: 'absolute',
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(17,24,39,0.92)',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 5,
+    zIndex: 20,
+  },
+  routeLoadingPillText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+    marginLeft: 8,
   },
   mapControls: {
     position: 'absolute',

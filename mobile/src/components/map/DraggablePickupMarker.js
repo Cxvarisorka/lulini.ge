@@ -1,13 +1,6 @@
-/**
- * DraggablePickupMarker
- *
- * Blue draggable pin for custom pickup location.
- * Only shown when user selects a pickup different from GPS.
- * Uses markerImages.pickup (PNG) on both platforms for consistency.
- */
-import { memo, useCallback } from 'react';
+import { memo, useCallback, useEffect, useState } from 'react';
 import Marker from './MarkerWrapper';
-import { markerImages } from './markerImages';
+import BoltPin from './BoltPin';
 
 const DraggablePickupMarker = memo(({
   coordinate,
@@ -22,19 +15,28 @@ const DraggablePickupMarker = memo(({
     onDragEnd?.({ latitude, longitude });
   }, [onDragEnd]);
 
+  // Capture the JSX bitmap briefly on mount, then stop tracking so map
+  // inertia isn't jittered by per-frame marker re-rasterization.
+  const [tracksView, setTracksView] = useState(true);
+  useEffect(() => {
+    const t = setTimeout(() => setTracksView(false), 400);
+    return () => clearTimeout(t);
+  }, []);
+
   if (!isValid) return null;
 
   return (
     <Marker
       coordinate={{ latitude: lat, longitude: lng }}
-      image={markerImages.pickup}
       anchor={{ x: 0.5, y: 1 }}
       draggable
       onDragEnd={handleDragEnd}
-      tracksViewChanges={false}
+      tracksViewChanges={tracksView}
       zIndex={10}
       stopPropagation
-    />
+    >
+      <BoltPin color="#10B981" caption="Pickup" title="Here" />
+    </Marker>
   );
 });
 

@@ -6,7 +6,7 @@ const OTP = require('../models/otp.model');
 const { generateToken, verifyToken } = require('../utils/jwt.utils');
 const AppError = require('../utils/AppError');
 const catchAsync = require('../utils/catchAsync');
-const { sendVerification } = require('../services/sms.service');
+const { sendVerification, generateOTP } = require('../services/sms.service');
 const { invalidateUser, invalidateDriver } = require('../utils/authCache');
 const analytics = require('../services/analytics.service');
 const crypto = require('crypto');
@@ -196,16 +196,23 @@ const sendPhoneOtp = catchAsync(async (req, res, next) => {
     // Check if user already exists with this phone (either normalized or legacy raw form)
     const existingUser = await User.findOne({ phone: phoneMatchQuery(phone, rawPhone) });
 
-    // Delete any existing OTP for this phone (both forms, to clean up legacy rows)
-    await OTP.deleteMany({ phone: phoneMatchQuery(phone, rawPhone) });
+    // Delete any existing login OTP for this phone (both forms, to clean up legacy rows).
+    // Scoped to 'login' purpose so we don't wipe a pending registration or password-reset OTP.
+    await OTP.deleteMany({ phone: phoneMatchQuery(phone, rawPhone), purpose: 'login' });
 
-    // Send OTP via SMSOffice (or dev fallback)
-    const result = await sendVerification(phone);
-
-    // Store OTP locally (code comes back from sendVerification in all modes)
-    const otpCode = result.devCode || result.code;
+    // Persist the OTP row BEFORE attempting SMS delivery so a hang or failure
+    // in the SMS provider can be rolled back cleanly and the user can retry.
+    const otpCode = generateOTP();
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-    await OTP.create({ phone, code: otpCode, expiresAt });
+    const otpRow = await OTP.create({ phone, code: otpCode, purpose: 'login', expiresAt });
+
+    try {
+        await sendVerification(phone, otpCode);
+    } catch (smsErr) {
+        await OTP.deleteOne({ _id: otpRow._id }).catch(() => {});
+        console.error('sendPhoneOtp: SMS delivery failed', smsErr);
+        return next(new AppError('Unable to send verification code right now. Please try again in a moment.', 503));
+    }
 
     res.status(200).json({
         success: true,
@@ -439,16 +446,22 @@ const sendPhoneUpdateOtp = catchAsync(async (req, res, next) => {
         return next(new AppError('This phone number is already registered to another account', 400));
     }
 
-    // Delete any existing OTP for this phone
-    await OTP.deleteMany({ phone: phoneMatchQuery(phone, rawPhone) });
+    // Delete any existing login OTP for this phone (scoped to avoid wiping other purposes)
+    await OTP.deleteMany({ phone: phoneMatchQuery(phone, rawPhone), purpose: 'login' });
 
-    // Send OTP via SMSOffice (or dev fallback)
-    const result = await sendVerification(phone);
-
-    // Store OTP locally
-    const otpCode = result.devCode || result.code;
+    // Persist the OTP row BEFORE attempting SMS delivery so a hang or failure
+    // in the SMS provider can be rolled back cleanly and the user can retry.
+    const otpCode = generateOTP();
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-    await OTP.create({ phone, code: otpCode, expiresAt });
+    const otpRow = await OTP.create({ phone, code: otpCode, purpose: 'login', expiresAt });
+
+    try {
+        await sendVerification(phone, otpCode);
+    } catch (smsErr) {
+        await OTP.deleteOne({ _id: otpRow._id }).catch(() => {});
+        console.error('sendPhoneUpdateOtp: SMS delivery failed', smsErr);
+        return next(new AppError('Unable to send verification code right now. Please try again in a moment.', 503));
+    }
 
     res.status(200).json({
         success: true,
@@ -471,8 +484,8 @@ const verifyPhoneUpdateOtp = catchAsync(async (req, res, next) => {
         return next(new AppError('Please provide a valid phone number', 400));
     }
 
-    // Verify OTP against local DB
-    const otpRecord = await OTP.findOne({ phone: phoneMatchQuery(phone, rawPhone) });
+    // Verify OTP against local DB (scope to login purpose + unverified)
+    const otpRecord = await OTP.findOne({ phone: phoneMatchQuery(phone, rawPhone), purpose: 'login', verified: false });
 
     if (!otpRecord) {
         return next(new AppError('OTP not found. Please request a new code', 400));
@@ -645,6 +658,316 @@ const verifyEmailCode = catchAsync(async (req, res, next) => {
             },
         },
     });
+});
+
+// @desc    Send email verification code for a brand-new registration
+//         (unauthenticated — called before the user exists in the DB)
+// @route   POST /api/auth/email/send-verification
+const sendEmailVerification = catchAsync(async (req, res, next) => {
+    const { email, language } = req.body;
+
+    if (!email) {
+        return next(new AppError('Email is required', 400));
+    }
+
+    const emailRegex = /^\S+@\S+\.\S+$/;
+    if (!emailRegex.test(email)) {
+        return next(new AppError('Please provide a valid email address', 400));
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // Reject if a local account already exists for this email. OAuth accounts
+    // (google/apple/phone) are allowed to re-verify and link a password later.
+    const existingLocal = await User.findOne({ email: normalizedEmail, provider: 'local' })
+        .select('_id')
+        .lean();
+    if (existingLocal) {
+        return next(new AppError('This email is already registered', 400));
+    }
+
+    // Clear any prior pre-registration OTPs for this email
+    await EmailOTP.deleteMany({ email: normalizedEmail, userId: null, purpose: 'verification' });
+
+    const code = generateEmailCode();
+    await EmailOTP.create({
+        email: normalizedEmail,
+        code,
+        userId: null,
+        purpose: 'verification',
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
+    });
+
+    const lang = (language === 'ka' || language === 'en') ? language : 'en';
+    await emailService.sendVerificationEmail(normalizedEmail, null, code, lang);
+
+    res.status(200).json({
+        success: true,
+        message: 'Verification code sent to your email',
+    });
+});
+
+// @desc    Verify email code for a pending registration. Marks the OTP row
+//          as `verified=true` and keeps it alive for a short grace window so
+//          the subsequent /auth/register call can confirm the email was
+//          verified (without having to re-send a code).
+// @route   POST /api/auth/email/verify-registration
+const verifyEmailForRegistration = catchAsync(async (req, res, next) => {
+    const { email, code } = req.body;
+
+    if (!email || !code) {
+        return next(new AppError('Email and verification code are required', 400));
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    const record = await EmailOTP.findOne({
+        email: normalizedEmail,
+        userId: null,
+        purpose: 'verification',
+    });
+
+    if (!record) {
+        return next(new AppError('Verification code not found. Please request a new one', 400));
+    }
+    if (record.expiresAt < new Date()) {
+        await EmailOTP.deleteOne({ _id: record._id });
+        return next(new AppError('Verification code has expired. Please request a new one', 400));
+    }
+    if (record.attempts >= 5) {
+        await EmailOTP.deleteOne({ _id: record._id });
+        return next(new AppError('Too many failed attempts. Please request a new code', 400));
+    }
+
+    const codeMatches = await record.compareCode(code);
+    if (!codeMatches) {
+        record.attempts += 1;
+        await record.save();
+        return next(new AppError('Invalid verification code', 400));
+    }
+
+    // Mark verified and extend lifetime to 30 minutes so the follow-up
+    // /auth/register call has enough time to complete the form.
+    record.verified = true;
+    record.expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+    await record.save();
+
+    res.status(200).json({
+        success: true,
+        message: 'Email verified successfully',
+    });
+});
+
+// @desc    Send phone OTP for a brand-new registration (unauthenticated).
+//          Separate from /auth/phone/send-otp (which is the passenger login
+//          flow and would create a user on verify) — this one only verifies
+//          ownership of the phone so the subsequent /auth/register call can
+//          create the user atomically with isPhoneVerified=true.
+// @route   POST /api/auth/phone/send-registration-otp
+const sendRegistrationPhoneOtp = catchAsync(async (req, res, next) => {
+    const { phone: rawPhone } = req.body;
+
+    if (!rawPhone) {
+        return next(new AppError('Phone number is required', 400));
+    }
+
+    const phone = normalizePhone(rawPhone);
+    if (!phone) {
+        return next(new AppError('Please provide a valid phone number', 400));
+    }
+
+    // Role-aware duplicate check: reject only if another driver already owns
+    // this phone. A plain passenger with the same phone is allowed (same real
+    // person is signing up for the driver app — see commit 1a176d4).
+    const phoneQuery = phoneMatchQuery(phone, rawPhone);
+    const usersWithPhone = await User.find({ phone: phoneQuery }).select('_id').lean();
+    if (usersWithPhone.length > 0) {
+        const existingDriver = await Driver.findOne({
+            user: { $in: usersWithPhone.map(u => u._id) },
+        }).select('_id').lean();
+        if (existingDriver) {
+            return next(new AppError('This phone number is already registered to another driver', 400));
+        }
+    }
+
+    // Clear any prior pre-registration OTPs for this phone
+    await OTP.deleteMany({ phone: phoneQuery, purpose: 'registration' });
+
+    const otpCode = generateOTP();
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+    const otpRow = await OTP.create({ phone, code: otpCode, purpose: 'registration', expiresAt });
+
+    try {
+        await sendVerification(phone, otpCode);
+    } catch (smsErr) {
+        await OTP.deleteOne({ _id: otpRow._id }).catch(() => {});
+        console.error('sendRegistrationPhoneOtp: SMS delivery failed', smsErr);
+        return next(new AppError('Unable to send verification code right now. Please try again in a moment.', 503));
+    }
+
+    res.status(200).json({
+        success: true,
+        message: 'OTP sent successfully'
+    });
+});
+
+// @desc    Verify phone OTP for a pending registration. Marks the OTP row as
+//          verified and extends its lifetime to 30 minutes so the follow-up
+//          /auth/register call can confirm the phone was verified.
+// @route   POST /api/auth/phone/verify-registration-otp
+const verifyRegistrationPhoneOtp = catchAsync(async (req, res, next) => {
+    const { phone: rawPhone, code } = req.body;
+
+    if (!rawPhone || !code) {
+        return next(new AppError('Phone number and OTP code are required', 400));
+    }
+
+    const phone = normalizePhone(rawPhone);
+    if (!phone) {
+        return next(new AppError('Please provide a valid phone number', 400));
+    }
+
+    const phoneQuery = phoneMatchQuery(phone, rawPhone);
+
+    const otpRecord = await OTP.findOne({
+        phone: phoneQuery,
+        purpose: 'registration',
+        verified: false,
+    });
+
+    if (!otpRecord) {
+        return next(new AppError('OTP not found. Please request a new code', 400));
+    }
+    if (otpRecord.expiresAt < new Date()) {
+        await OTP.deleteOne({ _id: otpRecord._id });
+        return next(new AppError('OTP has expired. Please request a new code', 400));
+    }
+    if (otpRecord.attempts >= 3) {
+        await OTP.deleteOne({ _id: otpRecord._id });
+        return next(new AppError('Too many failed attempts. Please request a new code', 400));
+    }
+
+    const codeMatches = await otpRecord.compareCode(code);
+    if (!codeMatches) {
+        otpRecord.attempts += 1;
+        await otpRecord.save();
+        return next(new AppError('Invalid OTP code', 400));
+    }
+
+    // Mark verified and extend lifetime to 30 minutes so the follow-up
+    // /auth/register call has enough time to complete.
+    otpRecord.verified = true;
+    otpRecord.expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+    await otpRecord.save();
+
+    res.status(200).json({
+        success: true,
+        message: 'Phone verified successfully',
+    });
+});
+
+// @desc    Register a new local (email/password) account. Requires that both
+//          the email and the phone were previously verified via the
+//          /auth/email/verify-registration and /auth/phone/verify-registration-otp
+//          endpoints. The user is only written to the DB after BOTH are
+//          verified, so a failed phone verification leaves no orphan records.
+// @route   POST /api/auth/register
+const register = catchAsync(async (req, res, next) => {
+    const { email, password, firstName, lastName, phone: rawPhone } = req.body;
+
+    if (!email || !password || !firstName || !lastName || !rawPhone) {
+        return next(new AppError('Email, password, first name, last name, and phone are required', 400));
+    }
+
+    const emailRegex = /^\S+@\S+\.\S+$/;
+    if (!emailRegex.test(email)) {
+        return next(new AppError('Please provide a valid email address', 400));
+    }
+    if (password.length < 8) {
+        return next(new AppError('Password must be at least 8 characters', 400));
+    }
+    if (!/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/\d/.test(password)) {
+        return next(new AppError('Password must contain at least one uppercase letter, one lowercase letter, and one number', 400));
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+    const phone = normalizePhone(rawPhone);
+    if (!phone) {
+        return next(new AppError('Please provide a valid phone number', 400));
+    }
+
+    // Require a verified, unexpired pre-registration OTP for this email
+    const otpRecord = await EmailOTP.findOne({
+        email: normalizedEmail,
+        userId: null,
+        purpose: 'verification',
+        verified: true,
+    });
+    if (!otpRecord || otpRecord.expiresAt < new Date()) {
+        if (otpRecord) await EmailOTP.deleteOne({ _id: otpRecord._id });
+        return next(new AppError('Email not verified. Please verify your email before registering', 400));
+    }
+
+    // Race-condition guard: reject if a local account was created in the
+    // interim (e.g. between verification and register).
+    const existingLocal = await User.findOne({ email: normalizedEmail, provider: 'local' })
+        .select('_id')
+        .lean();
+    if (existingLocal) {
+        await EmailOTP.deleteOne({ _id: otpRecord._id });
+        return next(new AppError('This email is already registered', 400));
+    }
+
+    // Require a verified, unexpired pre-registration phone OTP. This is the
+    // atomic guarantee that the phone belongs to the caller — we only write
+    // the user to the DB once BOTH email and phone are proven. A failed phone
+    // verification at the previous step therefore leaves no orphan user.
+    const phoneQuery = phoneMatchQuery(phone, rawPhone);
+    const phoneOtpRecord = await OTP.findOne({
+        phone: phoneQuery,
+        purpose: 'registration',
+        verified: true,
+    });
+    if (!phoneOtpRecord || phoneOtpRecord.expiresAt < new Date()) {
+        if (phoneOtpRecord) await OTP.deleteOne({ _id: phoneOtpRecord._id });
+        return next(new AppError('Phone not verified. Please verify your phone before registering', 400));
+    }
+
+    // Phone duplicate policy: a driver signing up is allowed to reuse a phone
+    // that already belongs to a plain passenger account (same real person who
+    // previously signed up via phone OTP). They must NOT reuse a phone that
+    // already has a Driver profile linked to it — that would let someone take
+    // over another driver's identity. See commit 1a176d4.
+    const usersWithPhone = await User.find({ phone: phoneQuery }).select('_id').lean();
+    if (usersWithPhone.length > 0) {
+        const existingDriver = await Driver.findOne({
+            user: { $in: usersWithPhone.map(u => u._id) },
+        }).select('_id').lean();
+        if (existingDriver) {
+            await EmailOTP.deleteOne({ _id: otpRecord._id });
+            await OTP.deleteOne({ _id: phoneOtpRecord._id });
+            return next(new AppError('This phone number is already registered to another driver', 400));
+        }
+    }
+
+    const user = await User.create({
+        email: normalizedEmail,
+        password,
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        phone,
+        provider: 'local',
+        isVerified: true,        // email verified via OTP
+        isPhoneVerified: true,   // phone verified via OTP in the same flow
+        role: 'user',            // driver role only granted after admin approval
+    });
+
+    await EmailOTP.deleteOne({ _id: otpRecord._id });
+    await OTP.deleteOne({ _id: phoneOtpRecord._id });
+
+    analytics.trackEvent(user._id, analytics.EVENTS.ACCOUNT_LOGGED_IN, { provider: 'local', registered: true });
+
+    sendTokenResponse(user, 201, res, 'Registration successful', true);
 });
 
 // @desc    Schedule account deletion (30-day grace period)
@@ -850,10 +1173,12 @@ const forgotPasswordSendOtp = catchAsync(async (req, res, next) => {
         return next(new AppError('Please provide a valid phone number', 400));
     }
 
-    // Check that a user with this phone exists and has a password (local provider)
-    // Look up both normalized and raw form to handle legacy records.
-    const user = await User.findOne({ phone: phoneMatchQuery(phone, rawPhone) });
-    if (!user || user.provider !== 'local') {
+    // Check that a user with this phone exists and has a password (local provider).
+    // Filter by provider in the query itself — otherwise, if a passenger account
+    // (provider: 'phone') shares the same phone number as a driver (provider:
+    // 'local'), findOne may return the passenger and we silently no-op.
+    const user = await User.findOne({ phone: phoneMatchQuery(phone, rawPhone), provider: 'local' });
+    if (!user) {
         // Don't reveal whether the phone exists — always return success
         return res.status(200).json({
             success: true,
@@ -870,10 +1195,20 @@ const forgotPasswordSendOtp = catchAsync(async (req, res, next) => {
     // Delete any existing password-reset OTP for this phone
     await OTP.deleteMany({ phone: phoneMatchQuery(phone, rawPhone), purpose: 'password_reset' });
 
-    const result = await sendVerification(phone);
-    const otpCode = result.devCode || result.code;
+    // Persist the OTP row BEFORE attempting SMS delivery. If the SMS send hangs,
+    // times out, or fails, we roll back the row so the user can retry cleanly
+    // and never ends up with a stored code they never received.
+    const otpCode = generateOTP();
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-    await OTP.create({ phone, code: otpCode, purpose: 'password_reset', expiresAt });
+    const otpRow = await OTP.create({ phone, code: otpCode, purpose: 'password_reset', expiresAt });
+
+    try {
+        await sendVerification(phone, otpCode);
+    } catch (smsErr) {
+        await OTP.deleteOne({ _id: otpRow._id }).catch(() => {});
+        console.error('forgotPasswordSendOtp: SMS delivery failed', smsErr);
+        return next(new AppError('Unable to send verification code right now. Please try again in a moment.', 503));
+    }
 
     res.status(200).json({
         success: true,
@@ -907,7 +1242,8 @@ const forgotPasswordReset = catchAsync(async (req, res, next) => {
     // Look up user by normalized or legacy raw phone form
     const user = await User.findOne({ phone: phoneQuery, provider: 'local' });
     if (!user) {
-        return next(new AppError('Invalid phone number', 400));
+        // Don't reveal whether the phone exists — use the same generic error
+        return next(new AppError('Invalid OTP or phone number', 400));
     }
 
     if (user.lockUntil && user.lockUntil > new Date()) {
@@ -974,6 +1310,11 @@ module.exports = {
     verifyPhoneUpdateOtp,
     sendEmailCode,
     verifyEmailCode,
+    sendEmailVerification,
+    verifyEmailForRegistration,
+    sendRegistrationPhoneOtp,
+    verifyRegistrationPhoneOtp,
+    register,
     updateProfile,
     deleteAccount,
     cancelAccountDeletion,

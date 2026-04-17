@@ -17,6 +17,10 @@ const BASE_CLUSTER_RADIUS = 0.003;
 const MIN_DRIVERS_TO_CLUSTER = 15;
 const CLUSTER_ZOOM_THRESHOLD = 14;
 
+// Stable anchor ref — prevents new object allocation triggering native marker
+// re-configuration on every parent render cycle.
+const ANCHOR_CENTER = { x: 0.5, y: 0.5 };
+
 function clusterDrivers(drivers, zoomLevel) {
   if (!drivers || drivers.length === 0) return [];
 
@@ -79,7 +83,7 @@ function clusterDrivers(drivers, zoomLevel) {
 const ClusterBubble = memo(({ coordinate, count }) => (
   <Marker
     coordinate={coordinate}
-    anchor={{ x: 0.5, y: 0.5 }}
+    anchor={ANCHOR_CENTER}
     tracksViewChanges={false}
     style={styles.clusterMarkerFixed}
     zIndex={3}
@@ -98,7 +102,7 @@ const StaticCarMarker = memo(({ coordinate }) => (
   <Marker
     coordinate={coordinate}
     image={markerImages.car}
-    anchor={{ x: 0.5, y: 0.5 }}
+    anchor={ANCHOR_CENTER}
     flat={true}
     tracksViewChanges={false}
     zIndex={4}
@@ -112,31 +116,61 @@ const DriverCluster = memo(({ drivers = [], zoomLevel = 15 }) => {
     [drivers, zoomLevel]
   );
 
-  if (items.length === 0) return null;
+  // PERF: Stabilize coordinate objects across renders.
+  // Without this, every re-cluster creates new { latitude, longitude } objects,
+  // causing all memo'd child markers to re-render (reference inequality).
+  const coordCacheRef = React.useRef(new Map());
+  const stableItems = useMemo(() => {
+    const cache = coordCacheRef.current;
+    const nextCache = new Map();
+    const result = [];
+    for (const item of items) {
+      if (!isFinite(item.lat) || !isFinite(item.lng)) continue;
+      const cached = cache.get(item.key);
+      let coordinate;
+      if (cached && cached.latitude === item.lat && cached.longitude === item.lng) {
+        coordinate = cached; // Reuse same object reference
+      } else {
+        coordinate = { latitude: item.lat, longitude: item.lng };
+      }
+      nextCache.set(item.key, coordinate);
+      result.push({ ...item, coordinate });
+    }
+    coordCacheRef.current = nextCache;
+    return result;
+  }, [items]);
+
+  if (stableItems.length === 0) return null;
 
   return (
     <>
-      {items.map(item => {
-        const lat = item.lat;
-        const lng = item.lng;
-        if (!isFinite(lat) || !isFinite(lng)) return null;
-        const coordinate = { latitude: lat, longitude: lng };
-
-        return item.isCluster ? (
+      {stableItems.map(item =>
+        item.isCluster ? (
           <ClusterBubble
             key={item.key}
-            coordinate={coordinate}
+            coordinate={item.coordinate}
             count={item.count}
           />
         ) : (
           <StaticCarMarker
             key={item.key}
-            coordinate={coordinate}
+            coordinate={item.coordinate}
           />
-        );
-      })}
+        )
+      )}
     </>
   );
+}, (prev, next) => {
+  // PERF: Deep-compare drivers by position to avoid re-clustering when
+  // the parent passes a new array reference with identical coordinates.
+  if (prev.zoomLevel !== next.zoomLevel) return false;
+  const a = prev.drivers, b = next.drivers;
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].lat !== b[i].lat || a[i].lng !== b[i].lng) return false;
+  }
+  return true;
 });
 DriverCluster.displayName = 'DriverCluster';
 

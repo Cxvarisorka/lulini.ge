@@ -27,6 +27,8 @@ const CSRF_EXEMPT_PATHS = [
     '/api/auth/google/token',      // Mobile Google Sign-In (no cookie auth)
     '/api/auth/phone/send-otp',    // Phone OTP send (unauthenticated)
     '/api/auth/phone/verify-otp',  // Phone OTP verify (unauthenticated)
+    '/api/auth/phone/send-registration-otp',   // Driver registration phone OTP send
+    '/api/auth/phone/verify-registration-otp', // Driver registration phone OTP verify
     '/api/auth/login',             // Traditional login (unauthenticated)
     '/api/auth/register',          // Registration (unauthenticated)
     '/api/auth/email/send-verification',  // Email verification for registration

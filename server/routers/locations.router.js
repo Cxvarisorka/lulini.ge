@@ -3,29 +3,40 @@ const router = express.Router();
 const { protect } = require('../middlewares/auth.middleware');
 const catchAsync = require('../utils/catchAsync');
 const { getRecentLocations } = require('../services/recentLocations.service');
-const locationService = require('../services/locationService');
-const { isEnabled, getAllFlags } = require('../utils/featureFlags');
+const geocoding = require('../services/geocoding.service');
+const cache = require('../services/cache.service');
+const { getAllFlags } = require('../utils/featureFlags');
 
 // All routes require authentication
 router.use(protect);
 
+// Map unified geocoding result → legacy shape used by existing clients.
+function toLegacy(r) {
+    if (!r) return null;
+    return {
+        displayName: r.address,
+        formattedAddress: r.address,
+        lat: r.coords.lat,
+        lng: r.coords.lng,
+        osmType: r.canonicalId?.startsWith('osm:') ? r.canonicalId.split(':')[1] : null,
+        osmId:   r.canonicalId?.startsWith('osm:') ? r.canonicalId.split(':')[2] : null,
+        googlePlaceId: r.canonicalId?.startsWith('goog:') ? r.canonicalId.slice(5) : null,
+        canonicalId: r.canonicalId,
+        sourceProvider: r.provider,
+        addressComponents: r.components,
+        boundingBox: r.boundingBox || null,
+        confidence: r.confidence ?? 0.5,
+    };
+}
+
 // ── GET /api/locations/recent ──
-// Returns the user's recent location selections (stored in Redis).
 router.get('/recent', catchAsync(async (req, res) => {
     const limit = Math.min(parseInt(req.query.limit, 10) || 10, 20);
     const locations = await getRecentLocations(req.user.id, limit);
-
-    res.json({
-        success: true,
-        count: locations.length,
-        data: { locations },
-    });
+    res.json({ success: true, count: locations.length, data: { locations } });
 }));
 
 // ── GET /api/locations/search ──
-// Server-side geocoding search using the multi-provider location service.
-// Replaces direct Nominatim/Google calls from the client with a cached,
-// rate-limited server-side endpoint.
 router.get('/search', catchAsync(async (req, res) => {
     const { q, countryCode, language, viewbox, limit } = req.query;
 
@@ -33,58 +44,39 @@ router.get('/search', catchAsync(async (req, res) => {
         return res.json({ success: true, count: 0, data: { results: [] } });
     }
 
-    const results = await locationService.search(q, {
+    const { results, provider } = await geocoding.forwardGeocode(q, {
         countryCode: countryCode || 'GE',
         language: language || 'ka,en',
         viewbox: viewbox || null,
         limit: Math.min(parseInt(limit, 10) || 5, 10),
     });
 
-    res.json({
-        success: true,
-        count: results.length,
-        data: { results },
-    });
+    const legacy = results.map(toLegacy);
+    res.json({ success: true, count: legacy.length, data: { results: legacy, provider } });
 }));
 
 // ── GET /api/locations/reverse ──
-// Server-side reverse geocoding with caching.
 router.get('/reverse', catchAsync(async (req, res) => {
     const { lat, lng, language } = req.query;
-
     if (!lat || !lng) {
-        return res.status(400).json({
-            success: false,
-            message: 'lat and lng query parameters are required',
-        });
+        return res.status(400).json({ success: false, message: 'lat and lng query parameters are required' });
     }
 
-    const result = await locationService.reverseGeocode(
+    const result = await geocoding.reverseGeocode(
         parseFloat(lat),
         parseFloat(lng),
         { language: language || 'ka,en' }
     );
-
-    res.json({
-        success: true,
-        data: { result },
-    });
+    res.json({ success: true, data: { result: toLegacy(result) } });
 }));
 
 // ── GET /api/locations/provider-stats ──
-// Admin-only: provider health metrics for monitoring.
 router.get('/provider-stats', catchAsync(async (req, res) => {
     if (req.user.role !== 'admin') {
         return res.status(403).json({ success: false, message: 'Admin only' });
     }
-
-    res.json({
-        success: true,
-        data: {
-            providers: locationService.getProviderStats(),
-            featureFlags: getAllFlags(),
-        },
-    });
+    const providers = await cache.getProviderHealth();
+    res.json({ success: true, data: { providers, featureFlags: getAllFlags() } });
 }));
 
 module.exports = router;

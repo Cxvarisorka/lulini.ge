@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { getDirections, getDistanceMatrix, snapToRoad, geocode } = require('../controllers/maps.controller');
+const { getDirections, getDistanceMatrix, snapToRoad, geocode, autocomplete, placeDetails } = require('../controllers/maps.controller');
 const { protect } = require('../middlewares/auth.middleware');
 
 // ---------------------------------------------------------------------------
@@ -56,5 +56,7 @@ router.get('/directions', getDirections);
 router.get('/distance-matrix', getDistanceMatrix);
 router.get('/snap-to-road', snapToRoad);
 router.get('/geocode', geocode);
+router.get('/autocomplete', autocomplete);
+router.get('/place-details', placeDetails);
 
 module.exports = router;

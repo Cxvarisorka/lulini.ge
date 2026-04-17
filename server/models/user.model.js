@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
+const { normalizePhone } = require('../utils/phone');
 
 const userSchema = new mongoose.Schema({
     fullName: {
@@ -37,8 +38,6 @@ const userSchema = new mongoose.Schema({
     },
     phone: {
         type: String,
-        unique: true,
-        sparse: true,
         match: [/^\+\d{7,15}$/, 'Phone must be in E.164 format (e.g. +995551234567)']
     },
     isPhoneVerified: {
@@ -111,6 +110,15 @@ const userSchema = new mongoose.Schema({
     }
 }, {
     timestamps: true
+});
+
+// Normalize phone to canonical E.164 before saving. This ensures the unique
+// index on `phone` catches duplicates even if callers pass the number in a
+// legacy raw format ("555277335" vs "+995555277335").
+userSchema.pre('save', function() {
+    if (!this.isModified('phone') || !this.phone) return;
+    const normalized = normalizePhone(this.phone);
+    if (normalized) this.phone = normalized;
 });
 
 // Hash password before saving

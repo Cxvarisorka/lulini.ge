@@ -19,6 +19,7 @@ import { useAuth } from '../context/AuthContext';
 import { useDrawer } from '../navigation/AppNavigator';
 import { radius, spacing, useTypography } from '../theme/colors';
 import { useTheme } from '../context/ThemeContext';
+import ActiveRideBanner from '../components/ActiveRideBanner';
 
 // Animated Card Component
 const AnimatedCard = ({ children, style, delay = 0, onPress, accessibilityLabel, accessibilityHint, accessibilityRole }) => {
@@ -251,6 +252,9 @@ export default function HomeScreen({ navigation }) {
             </LinearGradient>
           </AnimatedCard>
         </View>
+
+        {/* Active ride banner — renders only when a ride is in progress */}
+        <ActiveRideBanner navigation={navigation} />
 
         {/* Quick Actions with 3D Cards */}
         <View style={styles.section}>
