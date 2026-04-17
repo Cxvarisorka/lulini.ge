@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { useTypography } from '../../theme/colors';
 import { useTheme } from '../../context/ThemeContext';
-import { searchPlaces } from '../../services/googleMaps';
+import { searchPlaces, resolvePlaceCoords } from '../../services/googleMaps';
 import { taxiAPI, favoritesAPI } from '../../services/api';
 
 const FAVORITE_ICONS = { home: 'home', work: 'briefcase', custom: 'star' };
@@ -38,6 +38,11 @@ export default function LocationSearchSheet({
   const [pickupQuery, setPickupQuery] = useState('');
   const [pickupEdited, setPickupEdited] = useState(false);
   const [suggestions, setSuggestions] = useState([]);
+  // When the user hits Enter on destination, we snapshot the current list into
+  // `frozenSuggestions`. While non-null, the UI renders this snapshot and
+  // ignores `suggestions` — so nothing (late fetches, phantom taps, GPS ticks)
+  // can wipe the list out from under the user. Cleared on re-focus.
+  const [frozenSuggestions, setFrozenSuggestions] = useState(null);
   const [isSearching, setIsSearching] = useState(false);
   // Track which input is active: 'pickup', 'destination', or stop index (0, 1)
   const [activeInput, setActiveInput] = useState('destination');
@@ -47,6 +52,9 @@ export default function LocationSearchSheet({
   const stopInputRefs = useRef({});
   const searchIdRef = useRef(0);
   const pendingStopFocus = useRef(null);
+
+  // What the UI actually renders: the snapshot if frozen, otherwise the live list.
+  const displayedSuggestions = frozenSuggestions ?? suggestions;
 
   // Sync pickup address from GPS when not manually edited
   useEffect(() => {
@@ -77,6 +85,10 @@ export default function LocationSearchSheet({
 
   // Debounce search for active input (L13: request ID prevents out-of-order results)
   useEffect(() => {
+    // After a submit, the UI is showing `frozenSuggestions` and doesn't care
+    // about the live `suggestions` state — skip the fetch entirely.
+    if (frozenSuggestions !== null) return;
+
     if (activeQuery.length < 3) {
       setSuggestions([]);
       return;
@@ -104,7 +116,7 @@ export default function LocationSearchSheet({
     }, 500);
 
     return () => clearTimeout(timer);
-  }, [activeQuery, userLocation]);
+  }, [activeQuery, userLocation, frozenSuggestions]);
 
   // Handle pickup text change
   const handlePickupTextChange = useCallback((text) => {
@@ -152,45 +164,91 @@ export default function LocationSearchSheet({
     // destination is the last input — no auto-advance
   }, [stops.length]);
 
-  // Handle place selection from suggestions
-  const handlePlaceSelect = useCallback((place) => {
+  // Handle place selection from suggestions.
+  // Google POI predictions arrive without coordinates — resolve them via
+  // /maps/place-details before committing, otherwise the map can't draw the pin
+  // or the pickup→drop polyline.
+  const handlePlaceSelect = useCallback(async (place) => {
     setSuggestions([]);
+    setFrozenSuggestions(null);
+
+    let resolved = place;
+    if (!place.coordinates) {
+      setIsSearching(true);
+      try {
+        resolved = await resolvePlaceCoords(place);
+      } catch {
+        resolved = place;
+      } finally {
+        setIsSearching(false);
+      }
+    }
+
+    const coords = resolved?.coordinates || null;
+    const description = resolved?.description || place.description;
 
     if (activeInput === 'pickup') {
-      setPickupQuery(place.description);
+      setPickupQuery(description);
       setPickupEdited(true);
-      if (onPickupSelect && place.coordinates) {
-        onPickupSelect(place.description, place.coordinates);
+      if (onPickupSelect && coords) {
+        onPickupSelect(description, coords);
       }
       focusNextInput('pickup');
     } else if (activeInput === 'destination') {
-      setSearchQuery(place.description);
+      setSearchQuery(description);
       Keyboard.dismiss();
-      if (place.coordinates) {
-        onDestinationSelect(place.description, place.coordinates);
+      if (coords) {
+        onDestinationSelect(description, coords);
       } else {
-        onDestinationChange(place.description);
+        onDestinationChange(description);
       }
       // Don't auto-advance — user stays on destination to review/submit
     } else {
       // Stop selection
       const stopIndex = activeInput;
-      setStopQueries(prev => ({ ...prev, [stopIndex]: place.description }));
+      setStopQueries(prev => ({ ...prev, [stopIndex]: description }));
       if (onStopSelect) {
-        onStopSelect(stopIndex, place.description, place.coordinates || null);
+        onStopSelect(stopIndex, description, coords);
       }
       focusNextInput(stopIndex);
     }
   }, [activeInput, onPickupSelect, onDestinationSelect, onDestinationChange, onStopSelect, focusNextInput]);
 
-  // Handle manual submit
-  const handleSubmit = useCallback(() => {
-    if (activeInput === 'destination' && searchQuery.length > 3) {
-      Keyboard.dismiss();
-      setSuggestions([]);
-      onDestinationChange(searchQuery);
+  // Handle Enter/search key on destination input.
+  // Behavior: dismiss keyboard and keep the current suggestion list visible so
+  // the user can pick one. Tapping the input again re-opens the keyboard.
+  // If the debounced search hasn't fired yet (user typed + hit enter < 500ms),
+  // we kick it off synchronously so the list isn't empty.
+  const handleSubmit = useCallback(async () => {
+    if (activeInput !== 'destination' || searchQuery.length < 3) return;
+
+    Keyboard.dismiss();
+    inputRef.current?.blur();
+
+    // Invalidate any in-flight debounced fetch — its result must never touch
+    // the frozen snapshot we're about to take.
+    searchIdRef.current++;
+
+    let snapshot = suggestions;
+
+    // If the debounce hasn't produced anything yet, run one search now so the
+    // frozen list isn't empty. Awaited BEFORE we snapshot.
+    if (snapshot.length === 0) {
+      setIsSearching(true);
+      try {
+        const results = await searchPlaces(searchQuery, userLocation);
+        snapshot = results || [];
+      } catch {
+        snapshot = [];
+      } finally {
+        setIsSearching(false);
+      }
     }
-  }, [activeInput, searchQuery, onDestinationChange]);
+
+    // Freeze the list. While non-null, the UI renders this snapshot and
+    // ignores the live `suggestions` state entirely.
+    setFrozenSuggestions(snapshot);
+  }, [activeInput, searchQuery, suggestions, userLocation]);
 
   // Handle removing a stop
   const handleRemoveStop = useCallback((index) => {
@@ -288,6 +346,7 @@ export default function LocationSearchSheet({
     setPickupEdited(true);
     setActiveInput('pickup');
     setSuggestions([]);
+    setFrozenSuggestions(null);
     handleInputFocus();
   }, [handleInputFocus]);
 
@@ -302,11 +361,13 @@ export default function LocationSearchSheet({
   const handleStopInputFocus = useCallback((index) => {
     setActiveInput(index);
     setSuggestions([]);
+    setFrozenSuggestions(null);
   }, []);
 
   const handleDestinationFocus = useCallback(() => {
     setActiveInput('destination');
     setSuggestions([]);
+    setFrozenSuggestions(null); // unfreeze → re-enable debounced search
     handleInputFocus();
   }, [handleInputFocus]);
 
@@ -498,7 +559,7 @@ export default function LocationSearchSheet({
         contentContainerStyle={styles.scrollContent}
       >
         {/* Favorite Locations — shown at the top when no suggestions are active */}
-        {suggestions.length === 0 && favorites.length > 0 && (
+        {displayedSuggestions.length === 0 && favorites.length > 0 && (
           <View style={styles.favoritesSection}>
             <View style={styles.sectionHeader}>
               <Ionicons name="bookmark" size={18} color={colors.primary} />
@@ -540,7 +601,7 @@ export default function LocationSearchSheet({
         )}
 
         {/* Cached Last Destination — instant, no API call */}
-        {suggestions.length === 0 && lastDestination?.address && (
+        {displayedSuggestions.length === 0 && lastDestination?.address && (
           <View style={styles.lastDestSection}>
             <View style={styles.sectionHeader}>
               <Ionicons name="bookmark-outline" size={18} color={colors.mutedForeground} />
@@ -570,13 +631,13 @@ export default function LocationSearchSheet({
         )}
 
         {/* Place Suggestions */}
-        {suggestions.length > 0 && (
+        {displayedSuggestions.length > 0 && (
           <View style={styles.suggestionsContainer}>
             <View style={styles.sectionHeader}>
               <Ionicons name="location-outline" size={18} color={colors.mutedForeground} />
               <Text style={styles.sectionTitle}>{t('taxi.suggestions') || 'Suggestions'}</Text>
             </View>
-            {suggestions.map((place, index) => (
+            {displayedSuggestions.map((place, index) => (
               <TouchableOpacity
                 key={place.placeId || index}
                 style={styles.suggestionItem}
@@ -595,7 +656,7 @@ export default function LocationSearchSheet({
         )}
 
         {/* Recent Places Section (show only when no suggestions and there are recent places) */}
-        {suggestions.length === 0 && recentPlaces.length > 0 && (
+        {displayedSuggestions.length === 0 && recentPlaces.length > 0 && (
           <>
             <View style={styles.sectionHeader}>
               <Ionicons name="time-outline" size={18} color={colors.mutedForeground} />
@@ -627,7 +688,7 @@ export default function LocationSearchSheet({
         )}
 
         {/* Recent Rides Section (show only when no suggestions) */}
-        {suggestions.length === 0 && !loadingRides && displayedRides.length > 0 && (
+        {displayedSuggestions.length === 0 && !loadingRides && displayedRides.length > 0 && (
           <View style={styles.recentRidesSection}>
             <View style={styles.sectionHeader}>
               <Ionicons name="time-outline" size={18} color={colors.mutedForeground} />
@@ -681,7 +742,7 @@ export default function LocationSearchSheet({
         )}
 
         {/* OpenStreetMap attribution (required by Nominatim usage policy) */}
-        {suggestions.length > 0 && (
+        {displayedSuggestions.length > 0 && (
           <View style={styles.poweredBy}>
             <Text style={styles.poweredByText}>
               {'Powered by OpenStreetMap'}

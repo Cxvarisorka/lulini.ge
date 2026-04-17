@@ -1,9 +1,14 @@
 import * as SecureStore from 'expo-secure-store';
+import { DeviceEventEmitter } from 'react-native';
 
 const RIDE_STATE_KEY = 'active_ride_state';
 const LAST_DESTINATION_KEY = 'last_destination';
 const MAX_STALE_HOURS = 24;
 const MAX_DEST_STALE_DAYS = 30;
+
+// Broadcast channel for in-process listeners (banners, widgets, etc.)
+// that need to react to ride-state mutations without polling.
+export const RIDE_STATE_EVENT = 'rideStateChanged';
 
 /**
  * Persist minimal ride state to SecureStore (~400 bytes).
@@ -28,6 +33,7 @@ export const persistRideState = async (state) => {
       savedAt: Date.now(),
     };
     await SecureStore.setItemAsync(RIDE_STATE_KEY, JSON.stringify(payload));
+    DeviceEventEmitter.emit(RIDE_STATE_EVENT);
   } catch (e) {
     if (__DEV__) console.warn('[RideStorage] persist failed:', e.message);
   }
@@ -62,6 +68,7 @@ export const loadRideState = async () => {
 export const clearRideState = async () => {
   try {
     await SecureStore.deleteItemAsync(RIDE_STATE_KEY);
+    DeviceEventEmitter.emit(RIDE_STATE_EVENT);
   } catch (e) {
     if (__DEV__) console.warn('[RideStorage] clear failed:', e.message);
   }
