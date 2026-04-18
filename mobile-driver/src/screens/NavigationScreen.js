@@ -20,7 +20,6 @@ import Marker from '../components/map/MarkerWrapper';
 import AnimatedMarker from '../components/map/AnimatedMarkerWrapper';
 import Polyline from '../components/map/PolylineWrapper';
 import { markerImages } from '../components/map/markerImages';
-import { mapStyle } from '../components/map/mapStyle';
 import { useLocation } from '../context/LocationContext';
 import { useSocket } from '../context/SocketContext';
 import { useDriver } from '../context/DriverContext';
@@ -624,7 +623,7 @@ export default function NavigationScreen({ navigation, route: navRoute }) {
       <MapView
         ref={mapRef}
         style={styles.map}
-        customMapStyle={mapStyle}
+        colorScheme="light"
         initialRegion={{
           latitude: driverLocation?.latitude || destination.latitude,
           longitude: driverLocation?.longitude || destination.longitude,

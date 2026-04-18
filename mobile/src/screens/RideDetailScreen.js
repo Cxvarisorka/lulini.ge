@@ -19,7 +19,6 @@ import { shadows, radius, useTypography } from '../theme/colors';
 import { useTheme } from '../context/ThemeContext';
 import { getDirections } from '../services/googleMaps';
 import { safeFitToCoordinates, safePolyline } from '../utils/mapSafety';
-import { mapStyleDark } from '../components/map/mapStyle';
 
 function getStatusColors(colors) {
   return {
@@ -151,7 +150,7 @@ export default function RideDetailScreen({ route, navigation }) {
         <MapView
           ref={mapRef}
           style={styles.map}
-          customMapStyle={isDark ? mapStyleDark : []}
+          colorScheme={isDark ? 'dark' : 'light'}
           initialRegion={initialRegion}
           onMapReady={fitMapToMarkers}
           onLayout={fitMapToMarkers}

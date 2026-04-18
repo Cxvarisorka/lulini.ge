@@ -24,7 +24,6 @@ import Marker from '../components/map/MarkerWrapper';
 import AnimatedMarker from '../components/map/AnimatedMarkerWrapper';
 import Polyline from '../components/map/PolylineWrapper';
 import { markerImages } from '../components/map/markerImages';
-import { mapStyle } from '../components/map/mapStyle';
 import { useDriver } from '../context/DriverContext';
 import { useLocation } from '../context/LocationContext';
 import { useSocket } from '../context/SocketContext';
@@ -608,7 +607,7 @@ export default function HomeScreen({ navigation }) {
       <MapView
         ref={mapRef}
         style={StyleSheet.absoluteFill}
-        customMapStyle={mapStyle}
+        colorScheme="light"
         initialRegion={initialMapRegion}
         onMapReady={() => {
           mapReadyRef.current = true;

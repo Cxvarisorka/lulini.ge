@@ -350,6 +350,115 @@ function generateUserMarker(dirs) {
   }
 }
 
+/**
+ * Cluster bubble background — solid blue circle with white border.
+ * Used by Mapbox SymbolLayer with `iconTextFit: 'both'` so the dynamic
+ * driver-count text overlays the centre. The PNG already includes a
+ * white halo so it reads against any map style.
+ */
+function generateClusterBg(dirs) {
+  for (const scale of [1, 2, 3]) {
+    const suffix = scale === 1 ? '' : `@${scale}x`;
+    const { canvas } = drawCircleMarker({
+      size: 36, bg: '#1A73E8', borderWidth: 2.5, padding: 8, scale,
+    });
+    savePNG(canvas, `marker-cluster-bg${suffix}.png`, dirs);
+  }
+}
+
+/**
+ * BoltPin pill background — rounded rectangle with a small triangular
+ * tail and white-bordered dot beneath. Mapbox SymbolLayer renders the
+ * dynamic ETA/title text on top via `iconTextFit: 'both'`.
+ *
+ * Two colour variants:
+ *   - dark  (#111827) → dropoff / destination bubble
+ *   - green (#10B981) → pickup bubble
+ *
+ * Anchor is `bottom`: the dot sits at the geographic coordinate.
+ */
+function drawBoltPinBg(opts) {
+  const { color, scale } = opts;
+  // Pill geometry — needs to be wide enough that text-fit padding still
+  // keeps a pleasing minimum width when the label is short ("12 min").
+  const pillW = 70;
+  const pillH = 26;
+  const stemH = 10;
+  const dotR = 7;
+  const padding = 6;
+
+  const w = (pillW + padding * 2) * scale;
+  const h = (pillH + stemH + dotR * 2 + padding * 2) * scale;
+  const canvas = createCanvas(w, h);
+  const ctx = canvas.getContext('2d');
+
+  const cx = w / 2;
+  const pillX = (w - pillW * scale) / 2;
+  const pillY = padding * scale;
+  const r = (pillH / 2) * scale;
+
+  // Pill drop shadow
+  ctx.shadowColor = 'rgba(0,0,0,0.25)';
+  ctx.shadowBlur = 4 * scale;
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = 2 * scale;
+
+  // White outer border
+  ctx.fillStyle = '#FFFFFF';
+  roundedRect(ctx, pillX - 2 * scale, pillY - 2 * scale, pillW * scale + 4 * scale, pillH * scale + 4 * scale, r + 2 * scale);
+  ctx.fill();
+
+  // Reset shadow before colored fill (avoid double-shadow look)
+  ctx.shadowColor = 'transparent';
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetY = 0;
+
+  // Coloured pill
+  ctx.fillStyle = color;
+  roundedRect(ctx, pillX, pillY, pillW * scale, pillH * scale, r);
+  ctx.fill();
+
+  // Stem (small vertical line)
+  const stemX = cx - 1 * scale;
+  const stemY1 = pillY + pillH * scale;
+  ctx.fillRect(stemX, stemY1, 2 * scale, stemH * scale);
+
+  // Dot — white outer, coloured inner
+  const dotCy = stemY1 + stemH * scale + dotR * scale;
+  ctx.fillStyle = '#FFFFFF';
+  ctx.beginPath();
+  ctx.arc(cx, dotCy, dotR * scale, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(cx, dotCy, (dotR - 2) * scale, 0, Math.PI * 2);
+  ctx.fill();
+
+  return canvas;
+}
+
+function roundedRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+function generateBoltPinBg(name, color, dirs) {
+  for (const scale of [1, 2, 3]) {
+    const suffix = scale === 1 ? '' : `@${scale}x`;
+    const canvas = drawBoltPinBg({ color, scale });
+    savePNG(canvas, `${name}${suffix}.png`, dirs);
+  }
+}
+
 function generateStopMarker(name, size, fontSize, padding, dirs) {
   for (let num = 1; num <= 9; num++) {
     for (const scale of [1, 2, 3]) {
@@ -400,6 +509,16 @@ function main() {
 
   console.log('  marker-stop-small-1..9 (26px, #f97316)');
   generateStopMarker('marker-stop-small', 26, 12, 10, both);
+
+  // Cluster bubble background — driver count text overlays via Mapbox iconTextFit
+  console.log(`  marker-cluster-bg (36px, ${BLUE_PRIMARY})`);
+  generateClusterBg(both);
+
+  // BoltPin pill backgrounds — dynamic ETA / pickup text overlays via Mapbox iconTextFit
+  console.log('  marker-boltpin-bg-dark (#111827)');
+  generateBoltPinBg('marker-boltpin-bg-dark', '#111827', both);
+  console.log('  marker-boltpin-bg-green (#10B981)');
+  generateBoltPinBg('marker-boltpin-bg-green', '#10B981', both);
 
   const mobileFiles = fs.readdirSync(MOBILE_DIR).filter(f => f.endsWith('.png'));
   const driverFiles = fs.readdirSync(DRIVER_DIR).filter(f => f.endsWith('.png'));

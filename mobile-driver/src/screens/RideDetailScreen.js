@@ -16,7 +16,6 @@ import MapView from '../components/map/MapViewWrapper';
 import Marker from '../components/map/MarkerWrapper';
 import Polyline from '../components/map/PolylineWrapper';
 import { markerImages } from '../components/map/markerImages';
-import { mapStyle } from '../components/map/mapStyle';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
@@ -395,7 +394,7 @@ export default function RideDetailScreen({ navigation, route }) {
           <MapView
             ref={mapRef}
             style={styles.map}
-            customMapStyle={mapStyle}
+            colorScheme="light"
             initialRegion={initialRegion}
             onMapReady={fitMapToMarkers}
             onLayout={fitMapToMarkers}

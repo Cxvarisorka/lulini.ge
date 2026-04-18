@@ -38,14 +38,6 @@ export default {
         UIBackgroundModes: ['location', 'fetch', 'remote-notification'],
         ITSAppUsesNonExemptEncryption: false
       },
-      // Only configure Google Maps SDK on iOS if a valid API key is provided.
-      // An empty key causes the Google Maps iOS SDK to crash during
-      // [GMSServices provideAPIKey:] in AppDelegate.
-      ...(process.env.GOOGLE_MAPS_API_KEY ? {
-        config: {
-          googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY
-        }
-      } : {})
     },
     android: {
       adaptiveIcon: {
@@ -54,11 +46,6 @@ export default {
       },
       edgeToEdgeEnabled: true,
       package: 'com.lulini.driver',
-      config: {
-        googleMaps: {
-          apiKey: process.env.GOOGLE_MAPS_API_KEY || ""
-        }
-      },
       permissions: [
         'ACCESS_COARSE_LOCATION',
         'ACCESS_FINE_LOCATION',
@@ -91,12 +78,19 @@ export default {
         }
       ],
       '@react-native-community/datetimepicker',
+      [
+        '@rnmapbox/maps',
+        {
+          RNMapboxMapsDownloadToken: process.env.RNMAPBOX_MAPS_DOWNLOAD_TOKEN || ''
+        }
+      ],
       ['@sentry/react-native/expo', {
         organization: 'cryptalyst',
         project: 'mobile-driver',
       }],
     ],
     extra: {
+      mapboxToken: process.env.EXPO_PUBLIC_MAPBOX_TOKEN || '',
       eas: {
         projectId: '87195f65-8a3e-4340-8844-5a2d547a66e2'
       }

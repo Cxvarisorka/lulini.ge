@@ -50,8 +50,8 @@ import StopMarker from '../components/map/StopMarker';
 import DraggablePickupMarker from '../components/map/DraggablePickupMarker';
 import Marker from '../components/map/MarkerWrapper';
 import BoltPin from '../components/map/BoltPin';
-const { Circle } = require('react-native-maps');
-import { mapStyleDark, ROUTE_STYLE, ROUTE_STYLE_DARK } from '../components/map/mapStyle';
+import Circle from '../components/map/CircleWrapper';
+import { ROUTE_STYLE, ROUTE_STYLE_DARK } from '../components/map/mapStyle';
 import { haversineKm } from '../utils/distance';
 
 // Safe wrappers for native map calls — prevents iOS crash when map isn't ready
@@ -2623,13 +2623,6 @@ export default function TaxiScreen({ navigation }) {
     }
   ).current;
 
-  // Stable customMapStyle reference — array identity must not change per render
-  // or react-native-maps reapplies the style on the native map mid-gesture.
-  const customMapStyle = useMemo(
-    () => (isDark ? mapStyleDark : EMPTY_MAP_STYLE),
-    [isDark]
-  );
-
   // Stable onMapReady — inline arrows allocate fresh closures every render,
   // which some rn-maps versions treat as prop change and re-bind on native.
   const handleMapReady = useCallback(() => {
@@ -2680,7 +2673,7 @@ export default function TaxiScreen({ navigation }) {
         <MapView
           ref={mapRef}
           style={styles.map}
-          customMapStyle={customMapStyle}
+          colorScheme={isDark ? 'dark' : 'light'}
           initialRegion={initialRegion}
           onMapReady={handleMapReady}
           onPress={isSelectingOnMap != null ? handleMapPress : undefined}

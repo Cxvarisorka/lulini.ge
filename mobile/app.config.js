@@ -19,9 +19,6 @@ export default {
     ios: {
       supportsTablet: true,
       bundleIdentifier: "com.lulini.mobile",
-      config: {
-        googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY || ""
-      },
       infoPlist: {
         NSLocationWhenInUseUsageDescription: "We need your location to show your position on the map and find nearby drivers.",
         ITSAppUsesNonExemptEncryption: false
@@ -34,11 +31,6 @@ export default {
       },
       edgeToEdgeEnabled: true,
       package: "com.lulini.mobile",
-      config: {
-        googleMaps: {
-          apiKey: process.env.GOOGLE_MAPS_API_KEY || ""
-        }
-      },
       permissions: [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
@@ -72,13 +64,19 @@ export default {
           color: "#171717"
         }
       ],
+      [
+        "@rnmapbox/maps",
+        {
+          RNMapboxMapsDownloadToken: process.env.RNMAPBOX_MAPS_DOWNLOAD_TOKEN || ""
+        }
+      ],
       ['@sentry/react-native/expo', {
         organization: 'cryptalyst',
         project: 'mobile-client',
       }],
     ],
     extra: {
-      googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY || "",
+      mapboxToken: process.env.EXPO_PUBLIC_MAPBOX_TOKEN || "",
       eas: {
         projectId: "6a0101ac-1b4b-48f4-914b-6e467f03f395"
       }
