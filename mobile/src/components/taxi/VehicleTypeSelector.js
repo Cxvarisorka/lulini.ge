@@ -1,28 +1,32 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { radius, shadows, useTypography } from '../../theme/colors';
 import { useTheme } from '../../context/ThemeContext';
 
+const CAR_IMAGES = {
+  economy: require('../../../assets/cars/economy.png'),
+  comfort: require('../../../assets/cars/comfort.png'),
+  business: require('../../../assets/cars/business.png'),
+  van: require('../../../assets/cars/xl.png'),
+};
+
 const VEHICLE_TYPES = [
-  { id: 'economy', icon: 'car-outline', priceMultiplier: 1, passengers: 4 },
-  { id: 'comfort', icon: 'car', priceMultiplier: 1.5, passengers: 4 },
-  { id: 'business', icon: 'car-sport', priceMultiplier: 2, passengers: 3 },
-  { id: 'van', icon: 'bus-outline', priceMultiplier: 1.5, passengers: 7 },
+  { id: 'economy', priceMultiplier: 1, passengers: 4 },
+  { id: 'comfort', priceMultiplier: 1.5, passengers: 4 },
+  { id: 'business', priceMultiplier: 2, passengers: 3 },
+  { id: 'van', priceMultiplier: 1.5, passengers: 7 },
 ];
 
-function CarIcon({ type, size = 36, color }) {
-  const iconMap = {
-    economy: 'car-outline',
-    comfort: 'car',
-    business: 'car-sport',
-    van: 'bus-outline',
-  };
+function CarIcon({ type, size = 44 }) {
   return (
-    <View style={carIconStyles.wrapper}>
-      <Ionicons name={iconMap[type]} size={size} color={color} />
-      <View style={[carIconStyles.shadow, { backgroundColor: color + '18' }]} />
+    <View style={[carIconStyles.wrapper, { width: size + 12, height: size + 8 }]}>
+      <Image
+        source={CAR_IMAGES[type]}
+        style={{ width: size, height: size }}
+        resizeMode="contain"
+      />
     </View>
   );
 }
@@ -31,14 +35,6 @@ const carIconStyles = StyleSheet.create({
   wrapper: {
     alignItems: 'center',
     justifyContent: 'center',
-    width: 52,
-    height: 48,
-  },
-  shadow: {
-    width: 36,
-    height: 6,
-    borderRadius: 12,
-    marginTop: -2,
   },
 });
 
@@ -64,7 +60,6 @@ export default function VehicleTypeSelector({ selectedVehicle, onSelect, pricing
       {VEHICLE_TYPES.map((vehicle) => {
         const isSelected = selectedVehicle === vehicle.id;
         const price = getPrice(vehicle.id);
-        const iconColor = isSelected ? colors.primary : colors.mutedForeground;
         return (
           <TouchableOpacity
             key={vehicle.id}
@@ -75,7 +70,7 @@ export default function VehicleTypeSelector({ selectedVehicle, onSelect, pricing
             accessibilityLabel={`${getLabel(vehicle.id)}${price ? `, ${price} ₾` : ''}, ${vehicle.passengers} ${t('taxi.passengers', { defaultValue: 'passengers' })}`}
             accessibilityState={{ checked: isSelected }}
           >
-            <CarIcon type={vehicle.id} size={36} color={iconColor} />
+            <CarIcon type={vehicle.id} size={68} />
 
             <View style={styles.infoSection}>
               <Text

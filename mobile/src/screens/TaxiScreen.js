@@ -31,28 +31,30 @@ import {
 import { getDirections, getDirectionsOSRM, reverseGeocode } from '../services/googleMaps';
 import { shadows, radius, useTypography } from '../theme/colors';
 import { useTheme } from '../context/ThemeContext';
-import { notificationSuccess, notificationWarning, notificationError, mediumImpact } from '../utils/haptics';
+import { notificationSuccess, notificationWarning, notificationError, mediumImpact, lightImpact } from '../utils/haptics';
 import { rideAccepted, rideArrived, rideCompleted, rideCancelled, stopAllSounds } from '../utils/sounds';
 import { maybePromptReview } from '../utils/reviewPrompt';
 import CancelRideModal from '../components/CancelRideModal';
 import RideReviewModal from '../components/RideReviewModal';
 import LocationSearchSheet from '../components/taxi/LocationSearchSheet';
 import RideOptionsSheet from '../components/taxi/RideOptionsSheet';
+import AdjustPinSheet from '../components/taxi/AdjustPinSheet';
 import RideStatusSheet from '../components/taxi/RideStatusSheet';
 import DraggableBottomSheet from '../components/taxi/DraggableBottomSheet';
 import PaymentMethodModal from '../components/taxi/PaymentMethodModal';
 import { VEHICLE_TYPES } from '../components/taxi/VehicleTypeSelector';
-// Using native showsUserLocation instead of PulsingUserMarker
+import PulsingUserMarker from '../components/map/PulsingUserMarker';
 import DestinationMarker from '../components/map/DestinationMarker';
 import AnimatedCarMarker from '../components/map/AnimatedCarMarker';
 import DriverCluster from '../components/map/DriverCluster';
 import StopMarker from '../components/map/StopMarker';
 import DraggablePickupMarker from '../components/map/DraggablePickupMarker';
-import Marker from '../components/map/MarkerWrapper';
 import BoltPin from '../components/map/BoltPin';
 import Circle from '../components/map/CircleWrapper';
 import { ROUTE_STYLE, ROUTE_STYLE_DARK } from '../components/map/mapStyle';
 import { haversineKm } from '../utils/distance';
+import useRideQuote from '../hooks/useRideQuote';
+import Mapbox from '@rnmapbox/maps';
 
 // Safe wrappers for native map calls — prevents iOS crash when map isn't ready
 // (e.g. returning from background, screen lock, or during rapid state batches).
@@ -197,9 +199,13 @@ const fetchRouteOSRM = async (from, to, waypoints = []) => {
     clearTimeout(timeoutId);
     const data = await res.json();
     if (data.code === 'Ok' && data.routes?.[0]) {
-      const result = data.routes[0].geometry.coordinates.map(([lng, lat]) => ({
+      const route = data.routes[0];
+      const result = route.geometry.coordinates.map(([lng, lat]) => ({
         latitude: lat, longitude: lng,
       }));
+      // Attach OSRM-reported duration (seconds) so callers can surface an
+      // accurate ETA without recomputing from straight-line distance.
+      result.durationSec = typeof route.duration === 'number' ? route.duration : null;
       // Evict oldest if at capacity
       if (_routeCache.size >= ROUTE_CACHE_MAX) {
         const firstKey = _routeCache.keys().next().value;
@@ -241,6 +247,7 @@ export default function TaxiScreen({ navigation }) {
 
   // Location states
   const [location, setLocation] = useState(null);          // True GPS position (blue dot)
+  const [userHeading, setUserHeading] = useState(null);    // Compass heading in degrees (0=N)
   const [customPickup, setCustomPickup] = useState(null);  // Manual pickup override coords
   const [locationAddress, setLocationAddress] = useState('');
   const [destination, setDestination] = useState('');
@@ -292,6 +299,7 @@ export default function TaxiScreen({ navigation }) {
   const currentRideRef = useRef(null);
   const tRef = useRef(t);
   const locationWatchRef = useRef(null); // GPS watch subscription during active rides
+  const headingWatchRef = useRef(null);  // Compass heading subscription
 
   // M10: Prevent concurrent reconciliation calls
   const isReconcilingRef = useRef(false);
@@ -314,6 +322,11 @@ export default function TaxiScreen({ navigation }) {
   // Track whether "driver is close" notification was already sent for current ride
   const driverCloseNotifiedRef = useRef(false);
 
+  // When the OSRM driver→pickup/dest route returns an accurate duration, it
+  // becomes the source of truth for driverETA. Straight-line ETA from GPS
+  // throttled updates is suppressed until the next reset.
+  const osrmEtaPriorityRef = useRef(false);
+
   // Chat — unread message counter (reset on opening chat screen)
   const [unreadChatCount, setUnreadChatCount] = useState(0);
 
@@ -335,6 +348,10 @@ export default function TaxiScreen({ navigation }) {
   // Map selection mode — stores which input triggered it: 'pickup', 'destination', or stop index (number)
   const [isSelectingOnMap, setIsSelectingOnMap] = useState(null);
 
+  // When user taps a location overlay box from RIDE_OPTIONS, we return to
+  // LOCATION_SEARCH and auto-focus the matching input ('pickup' or 'destination').
+  const [editFocusTarget, setEditFocusTarget] = useState(null);
+
   // Track bottom sheet snap index for fullscreen mode
   const [sheetSnapIndex, setSheetSnapIndex] = useState(1);
 
@@ -355,6 +372,35 @@ export default function TaxiScreen({ navigation }) {
   // Cached last destination for instant re-selection
   const [lastDestination, setLastDestination] = useState(null);
 
+  // ── Pin-adjust mode ──────────────────────────────────────────────────────
+  // When the user taps a location pill in RIDE_OPTIONS we drop into a
+  // pan-to-adjust mode: map fills the screen, a fixed pin sits at screen
+  // center, and the user pans the map to aim. `adjustingPin` stores which
+  // pin is being edited (null when inactive). `adjustCenterCoord` tracks
+  // the live map center; `adjustAddress` is the debounced reverse-geocoded
+  // label shown on the confirm sheet.
+  const [adjustingPin, setAdjustingPin] = useState(null); // null | 'pickup' | 'destination'
+  const [adjustCenterCoord, setAdjustCenterCoord] = useState(null);
+  const [adjustAddress, setAdjustAddress] = useState('');
+  const [adjustGeocoding, setAdjustGeocoding] = useState(false);
+  const adjustOriginalCoordRef = useRef(null);
+  const adjustGeocodeTimerRef = useRef(null);
+  // Mirror of adjustCenterCoord for comparison inside onRegionChangeComplete —
+  // avoids putting the coord itself in the callback's deps (which would
+  // recreate the callback on every pan frame).
+  const adjustCenterCoordRef = useRef(null);
+
+  // Server-composed quote for the confirmation screen: driver availability in
+  // the selected class, driver ETA to pickup, trip ETA, and estimated price.
+  // Only active on RIDE_OPTIONS so we don't burn requests while the user is
+  // still typing a destination.
+  const { data: rideQuote, loading: rideQuoteLoading } = useRideQuote({
+    pickup: customPickup || location,
+    dropoff: destinationCoords,
+    vehicleType: selectedVehicle,
+    enabled: bookingStep === BOOKING_STEPS.RIDE_OPTIONS,
+  });
+
   // Debounce zoom level updates to avoid re-renders during pinch/pan
   const zoomDebounceRef = useRef(null);
   // Track whether DriverCluster is visible — avoids wasted setMapZoomLevel
@@ -366,11 +412,12 @@ export default function TaxiScreen({ navigation }) {
 
   // Dynamic snap points based on booking step (max 70% to keep map visible)
   const snapPoints = useMemo(() => {
+    if (adjustingPin) return ['22%', '22%']; // compact fixed sheet during pan-to-adjust
     switch (bookingStep) {
       case BOOKING_STEPS.LOCATION_SEARCH:
         return ['25%', '50%', '100%'];
       case BOOKING_STEPS.RIDE_OPTIONS:
-        return ['25%', '50%', '100%'];
+        return ['44%', '60%'];
       case BOOKING_STEPS.SEARCHING:
       case BOOKING_STEPS.DRIVER_FOUND:
       case BOOKING_STEPS.DRIVER_ARRIVED:
@@ -378,6 +425,13 @@ export default function TaxiScreen({ navigation }) {
         return ['30%', '50%', '70%'];
       default:
         return ['35%', '55%', '70%'];
+    }
+  }, [bookingStep, adjustingPin]);
+
+  // Bolt-style: land on compact snap whenever we enter car selection
+  useEffect(() => {
+    if (bookingStep === BOOKING_STEPS.RIDE_OPTIONS) {
+      bottomSheetRef.current?.snapToIndex(0);
     }
   }, [bookingStep]);
 
@@ -401,8 +455,39 @@ export default function TaxiScreen({ navigation }) {
       // Prevent leaked timers when TaxiScreen unmounts
       if (timeoutTimerRef.current) clearTimeout(timeoutTimerRef.current);
       if (zoomDebounceRef.current) clearTimeout(zoomDebounceRef.current);
+      if (adjustGeocodeTimerRef.current) clearTimeout(adjustGeocodeTimerRef.current);
       if (locationWatchRef.current) locationWatchRef.current.remove();
+      if (headingWatchRef.current) headingWatchRef.current.remove();
       shownAlertsRef.current.clear();
+    };
+  }, []);
+
+  // Continuous compass heading — drives the user marker's directional arrow.
+  // Uses magnetic heading from the device magnetometer so the arrow works even
+  // when the user is standing still (GPS-derived heading only works when moving).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { status } = await Location.getForegroundPermissionsAsync();
+        if (status !== 'granted' || cancelled) return;
+        const sub = await Location.watchHeadingAsync((h) => {
+          // trueHeading is compass-corrected; fall back to magHeading otherwise.
+          const deg = h.trueHeading >= 0 ? h.trueHeading : h.magHeading;
+          if (typeof deg === 'number' && isFinite(deg) && deg >= 0) setUserHeading(deg);
+        });
+        if (cancelled) sub.remove();
+        else headingWatchRef.current = sub;
+      } catch {
+        // Compass unavailable — marker simply won't rotate.
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (headingWatchRef.current) {
+        headingWatchRef.current.remove();
+        headingWatchRef.current = null;
+      }
     };
   }, []);
 
@@ -901,14 +986,25 @@ export default function TaxiScreen({ navigation }) {
       const dLoc = driverLocationRef.current;
       if (!dLoc) return;
 
+      const applyRoute = (coords) => {
+        setDriverRoute(coords);
+        if (coords?.durationSec != null) {
+          // Prefer OSRM-reported driving duration over straight-line estimate.
+          // Clamp to >=1 min so the UI never shows "0 min" while the driver is
+          // still measurable distance away.
+          setDriverETA(Math.max(1, Math.round(coords.durationSec / 60)));
+          osrmEtaPriorityRef.current = true;
+        }
+      };
+
       if (bookingStep === BOOKING_STEPS.DRIVER_FOUND) {
         const pickup = customPickup || locationRef.current;
         if (!pickup) return;
-        fetchRouteOSRM(dLoc, pickup).then(setDriverRoute);
+        fetchRouteOSRM(dLoc, pickup).then(applyRoute);
       } else {
         const dest = savedDestinationCoordsRef.current || destinationCoords;
         if (!dest) return;
-        fetchRouteOSRM(dLoc, dest).then(setDriverRoute);
+        fetchRouteOSRM(dLoc, dest).then(applyRoute);
       }
     };
 
@@ -968,7 +1064,10 @@ export default function TaxiScreen({ navigation }) {
     pendingDriverLocRef.current = null;
     setDriverLocation(pending.loc);
     if (pending.distance != null) setDriverDistance(pending.distance);
-    if (pending.eta != null) setDriverETA(pending.eta);
+    // Only surface the straight-line ETA while the accurate OSRM duration
+    // hasn't arrived yet — otherwise we'd overwrite a good value with a
+    // cruder one every ~2s.
+    if (pending.eta != null && !osrmEtaPriorityRef.current) setDriverETA(pending.eta);
   }, []);
 
   // Socket event listeners - only re-register when socket instance changes
@@ -1539,6 +1638,7 @@ export default function TaxiScreen({ navigation }) {
     routeDistanceRef.current = null;
     driverLocationRef.current = null;
     driverCloseNotifiedRef.current = false;
+    osrmEtaPriorityRef.current = false;
     pendingDriverLocRef.current = null;
     driverLocLastFlushRef.current = 0;
     if (driverLocTrailingRef.current) {
@@ -1667,10 +1767,12 @@ export default function TaxiScreen({ navigation }) {
     return fare.toFixed(2);
   }, [pricingConfig]);
 
-  // Fetch directions and update map with route polyline
+  // Fetch directions and update map with route polyline.
   // Reads location from ref to avoid recreating this callback on every GPS tick.
-  const fetchDirectionsAndUpdate = useCallback(async (destCoords) => {
-    const pickup = customPickup || locationRef.current;
+  // `pickupOverride` lets callers pass a fresh pickup coord synchronously —
+  // used by drag-end handlers where `setCustomPickup` hasn't flushed yet.
+  const fetchDirectionsAndUpdate = useCallback(async (destCoords, pickupOverride = null) => {
+    const pickup = pickupOverride || customPickup || locationRef.current;
     if (!pickup || !destCoords) return;
 
     setIsLoadingDirections(true);
@@ -2169,6 +2271,7 @@ export default function TaxiScreen({ navigation }) {
     setRoutePolyline(null);
     setStops([]);
     setCustomPickup(null);
+    setEditFocusTarget(null);
     setBookingStep(BOOKING_STEPS.LOCATION_SEARCH);
     // Refresh pickup address from GPS — don't re-request permission
     refreshLocation();
@@ -2179,31 +2282,144 @@ export default function TaxiScreen({ navigation }) {
     setCustomPickup(coords);
   }, []);
 
-  // Handle draggable pickup pin drop — reverse geocode to get address
-  const handlePickupDragEnd = useCallback(async (coords) => {
-    setCustomPickup(coords);
-    try {
-      const result = await reverseGeocode(coords.latitude, coords.longitude);
-      if (result) {
-        setLocationAddress(result.mainText || result.address);
-      }
-    } catch (e) {
-      if (__DEV__) console.warn('[TaxiScreen] Reverse geocode on drag error:', e.message);
-    }
+  // Jump back to LOCATION_SEARCH with the tapped field pre-focused — preserves
+  // pickup/destination/stops so the user edits one field without losing the rest.
+  const handleEditLocations = useCallback((target) => {
+    if (target !== 'pickup' && target !== 'destination') return;
+    setEditFocusTarget(target);
+    setBookingStep(BOOKING_STEPS.LOCATION_SEARCH);
+    // Defer snap so it runs after snapPoints re-memoizes for LOCATION_SEARCH.
+    setTimeout(() => bottomSheetRef.current?.snapToIndex(2), 0);
   }, []);
 
-  // Handle draggable dropoff pin drop — update destinationCoords + reverse geocode address
+  // Tapping a pickup/dropoff marker on the map enters pan-to-adjust mode.
+  // Snapshots the original coord so Cancel can restore it, centers the map on
+  // the pin being edited, and seeds the address from current state so the
+  // sheet doesn't flash empty while the first reverse-geocode runs.
+  const handleAdjustMarker = useCallback((target) => {
+    if (target !== 'pickup' && target !== 'destination') return;
+    const originalCoord = target === 'pickup'
+      ? (customPickup || locationRef.current)
+      : destinationCoords;
+    if (!originalCoord) return;
+
+    adjustOriginalCoordRef.current = originalCoord;
+    adjustCenterCoordRef.current = originalCoord;
+    setAdjustingPin(target);
+    setAdjustCenterCoord(originalCoord);
+    setAdjustAddress(target === 'pickup' ? (locationAddress || '') : (destination || ''));
+    setAdjustGeocoding(false);
+
+    bottomSheetRef.current?.snapToIndex(0);
+
+    setTimeout(() => {
+      if (mapRef.current) {
+        safeAnimate(mapRef, {
+          latitude: originalCoord.latitude,
+          longitude: originalCoord.longitude,
+          latitudeDelta: 0.008,
+          longitudeDelta: 0.008,
+        }, 400);
+      }
+    }, 80);
+  }, [customPickup, destinationCoords, locationAddress, destination]);
+
+  // Confirm: commit the dragged center to the appropriate coord, refetch
+  // route + price, and exit adjust mode. Route refetch runs in the
+  // background; the sheet returns to RIDE_OPTIONS immediately so the user
+  // sees the update without waiting on directions.
+  const handleAdjustConfirm = useCallback(() => {
+    if (!adjustingPin || !adjustCenterCoord) return;
+    const target = adjustingPin;
+    const coord = adjustCenterCoord;
+    const address = adjustAddress;
+
+    if (adjustGeocodeTimerRef.current) {
+      clearTimeout(adjustGeocodeTimerRef.current);
+      adjustGeocodeTimerRef.current = null;
+    }
+
+    setAdjustingPin(null);
+    setAdjustCenterCoord(null);
+    setAdjustAddress('');
+    setAdjustGeocoding(false);
+    adjustOriginalCoordRef.current = null;
+    adjustCenterCoordRef.current = null;
+
+    if (target === 'pickup') {
+      setCustomPickup(coord);
+      if (address) setLocationAddress(address);
+      if (destinationCoords) fetchDirectionsAndUpdate(destinationCoords, coord);
+    } else {
+      setDestinationCoords(coord);
+      if (address) setDestination(address);
+      fetchDirectionsAndUpdate(coord);
+    }
+
+    notificationSuccess().catch(() => {});
+  }, [
+    adjustingPin, adjustCenterCoord, adjustAddress,
+    destinationCoords, fetchDirectionsAndUpdate,
+  ]);
+
+  // Cancel: restore the original coord visually, skip any refetch. Leaves
+  // pickup/destination state untouched — only the map camera is nudged
+  // back so the user sees their pin snap home.
+  const handleAdjustCancel = useCallback(() => {
+    if (!adjustingPin) return;
+    const original = adjustOriginalCoordRef.current;
+
+    if (adjustGeocodeTimerRef.current) {
+      clearTimeout(adjustGeocodeTimerRef.current);
+      adjustGeocodeTimerRef.current = null;
+    }
+
+    setAdjustingPin(null);
+    setAdjustCenterCoord(null);
+    setAdjustAddress('');
+    setAdjustGeocoding(false);
+    adjustOriginalCoordRef.current = null;
+    adjustCenterCoordRef.current = null;
+
+    if (original && mapRef.current) {
+      safeAnimate(mapRef, {
+        latitude: original.latitude,
+        longitude: original.longitude,
+        latitudeDelta: 0.02,
+        longitudeDelta: 0.02,
+      }, 300);
+    }
+  }, [adjustingPin]);
+
+  // Handle draggable pickup pin drop — update address input + refetch route.
+  // fetchDirectionsAndUpdate is called with the fresh pickup coord so it
+  // doesn't read a stale `customPickup` value before setState flushes.
+  const handlePickupDragEnd = useCallback(async (coords) => {
+    setCustomPickup(coords);
+    reverseGeocode(coords.latitude, coords.longitude)
+      .then((result) => {
+        if (result) setLocationAddress(result.mainText || result.address);
+      })
+      .catch((e) => {
+        if (__DEV__) console.warn('[TaxiScreen] Reverse geocode on drag error:', e.message);
+      });
+    if (destinationCoords) {
+      fetchDirectionsAndUpdate(destinationCoords, coords);
+    }
+  }, [destinationCoords, fetchDirectionsAndUpdate]);
+
+  // Handle draggable dropoff pin drop — update address input + refetch route.
   const handleDropoffDragEnd = useCallback(async (coords) => {
     setDestinationCoords(coords);
-    try {
-      const result = await reverseGeocode(coords.latitude, coords.longitude);
-      if (result) {
-        setDestination(result.mainText || result.address);
-      }
-    } catch (e) {
-      if (__DEV__) console.warn('[TaxiScreen] Reverse geocode on dropoff drag error:', e.message);
-    }
-  }, []);
+    reverseGeocode(coords.latitude, coords.longitude)
+      .then((result) => {
+        if (result) setDestination(result.mainText || result.address);
+      })
+      .catch((e) => {
+        if (__DEV__) console.warn('[TaxiScreen] Reverse geocode on dropoff drag error:', e.message);
+      });
+    fetchDirectionsAndUpdate(coords);
+  }, [fetchDirectionsAndUpdate]);
 
   const handleAddStop = useCallback(() => {
     setStops(prev => {
@@ -2293,6 +2509,40 @@ export default function TaxiScreen({ navigation }) {
     _lastMapRegion = region;
     isPanningRef.current = false;
 
+    // ── Pan-to-adjust mode ────────────────────────────────────────────────
+    // The pin is fixed at screen center — map center == pin coord. Update
+    // the live coord immediately (for Confirm), fire a subtle haptic on
+    // settle (Bolt/Uber parity), and debounce the reverse-geocode so rapid
+    // panning doesn't hammer the geocoding API.
+    if (adjustingPin) {
+      const newCenter = { latitude: region.latitude, longitude: region.longitude };
+
+      // Skip the settle callback from the enter-animation (map snaps to
+      // the original coord, which matches adjustCenterCoord — no real
+      // movement to react to). Threshold ~5 m.
+      const prev = adjustCenterCoordRef.current;
+      const movedMeters = prev
+        ? haversineKm(prev.latitude, prev.longitude, newCenter.latitude, newCenter.longitude) * 1000
+        : Infinity;
+      if (movedMeters < 5) return;
+
+      adjustCenterCoordRef.current = newCenter;
+      setAdjustCenterCoord(newCenter);
+      lightImpact().catch(() => {});
+      setAdjustGeocoding(true);
+
+      if (adjustGeocodeTimerRef.current) clearTimeout(adjustGeocodeTimerRef.current);
+      adjustGeocodeTimerRef.current = setTimeout(() => {
+        reverseGeocode(newCenter.latitude, newCenter.longitude)
+          .then((res) => {
+            if (res) setAdjustAddress(res.mainText || res.address || '');
+          })
+          .catch(() => {})
+          .finally(() => setAdjustGeocoding(false));
+      }, 400);
+      return;
+    }
+
     // Only track zoom when DriverCluster is rendered (RIDE_OPTIONS / SEARCHING)
     if (!driversVisibleRef.current) return;
     if (zoomDebounceRef.current) clearTimeout(zoomDebounceRef.current);
@@ -2304,7 +2554,7 @@ export default function TaxiScreen({ navigation }) {
         setMapZoomLevel(prev => prev === zoom ? prev : zoom);
       }
     }, 600);
-  }, []);
+  }, [adjustingPin]);
 
   const handleMapPress = useCallback(async (event) => {
     if (isSelectingOnMap == null) return;
@@ -2389,6 +2639,20 @@ export default function TaxiScreen({ navigation }) {
   // Memoized sheet content — only re-creates when booking step or its dependencies change,
   // avoiding unnecessary React element allocation on unrelated re-renders.
   const sheetContent = useMemo(() => {
+    // Pin-adjust takes priority — we replace the whole sheet with a compact
+    // address + confirm card while the user is aiming.
+    if (adjustingPin) {
+      return (
+        <AdjustPinSheet
+          target={adjustingPin}
+          address={adjustAddress}
+          geocoding={adjustGeocoding}
+          onConfirm={handleAdjustConfirm}
+          disabled={!adjustCenterCoord}
+        />
+      );
+    }
+
     const rideStatus = getRideStatus();
 
     if (rideStatus) {
@@ -2414,6 +2678,9 @@ export default function TaxiScreen({ navigation }) {
     if (bookingStep === BOOKING_STEPS.RIDE_OPTIONS) {
       return (
         <RideOptionsSheet
+          snapIndex={sheetSnapIndex}
+          onExpand={() => bottomSheetRef.current?.snapToIndex(1)}
+          onCollapse={() => bottomSheetRef.current?.snapToIndex(0)}
           selectedVehicle={selectedVehicle}
           estimatedPrice={estimatedPrice}
           estimatedDuration={estimatedDuration}
@@ -2424,6 +2691,8 @@ export default function TaxiScreen({ navigation }) {
           isRequesting={isRequesting}
           pricingConfig={pricingConfig}
           routeDistance={totalDistance || routeDistanceRef.current}
+          driverEtaSeconds={rideQuote?.driverEtaSeconds ?? null}
+          quoteLoading={rideQuoteLoading}
         />
       );
     }
@@ -2444,6 +2713,8 @@ export default function TaxiScreen({ navigation }) {
         onRemoveStop={handleRemoveStop}
         onStopSelect={handleStopSelect}
         lastDestination={lastDestination}
+        initialFocus={editFocusTarget}
+        onInitialFocusConsumed={() => setEditFocusTarget(null)}
       />
     );
   }, [
@@ -2452,7 +2723,11 @@ export default function TaxiScreen({ navigation }) {
     unreadChatCount,
     selectedVehicle, isRequesting, pricingConfig,
     locationAddress, destination, isLoadingLocation, isLoadingDirections,
-    stops, lastDestination,
+    stops, lastDestination, editFocusTarget,
+    rideQuote, rideQuoteLoading,
+    sheetSnapIndex,
+    adjustingPin, adjustAddress, adjustGeocoding, adjustCenterCoord,
+    handleAdjustConfirm,
   ]);
 
   // Memoized map markers — only re-render when marker-relevant state changes.
@@ -2468,8 +2743,10 @@ export default function TaxiScreen({ navigation }) {
     const isDriverEnRoute = bookingStep === BOOKING_STEPS.DRIVER_FOUND || bookingStep === BOOKING_STEPS.DRIVER_ARRIVED;
     const isInProgress = bookingStep === BOOKING_STEPS.IN_PROGRESS;
 
-    // Pickup is meaningful until the ride actually starts — then it's the past.
-    const showPickup = !isInProgress;
+    // Pickup pin shows once the user has explicitly chosen one (tap / input /
+    // drag — `customPickup` set) or once a dropoff exists (the route needs an
+    // origin anchor). Otherwise the pulsing blue dot is enough.
+    const showPickup = !isInProgress && (!!customPickup || !!destinationCoords);
     // Dropoff is shown for route planning and the trip itself, hidden while
     // driver is en-route to pickup (keeps the map focused on the pickup zone).
     const showDropoff = !isDriverEnRoute;
@@ -2477,13 +2754,62 @@ export default function TaxiScreen({ navigation }) {
     // Effective pickup — user override takes priority, otherwise GPS.
     const effectivePickup = customPickup || location;
 
+    // User marker coordinate merges GPS position with compass heading.
+    const userCoord = location
+      ? { latitude: location.latitude, longitude: location.longitude, heading: userHeading }
+      : null;
+
+    // Hide the user marker between "destination chosen" and "request submitted"
+    // — the dropoff/route pins own the canvas there. Also hidden IN_PROGRESS
+    // (user is inside the car, blue dot would overlap the vehicle).
+    const showUser =
+      userCoord &&
+      bookingStep !== BOOKING_STEPS.RIDE_OPTIONS &&
+      !isInProgress;
+
     // Suggested pickup/dropoff zone radius (meters). Mirrors Bolt/Yandex.
     const ZONE_RADIUS = 40;
     const PICKUP_COLOR = '#10B981';
     const DROPOFF_COLOR = '#111827';
 
+    // ── Pan-to-adjust mode ────────────────────────────────────────────────
+    // Strip the canvas to a reference-only view: user blue dot + the pin
+    // NOT being edited (as a static landmark). The edited pin itself lives
+    // as a screen-centered overlay outside this memo. Circles, stops,
+    // route, and the second draggable pin are all hidden to reduce noise
+    // while the user aims.
+    if (adjustingPin) {
+      return (
+        <>
+          {userCoord && <PulsingUserMarker coordinate={userCoord} />}
+          {adjustingPin === 'pickup' && destinationCoords && (
+            <DestinationMarker
+              coordinate={destinationCoords}
+              etaMinutes={null}
+              draggable={false}
+            />
+          )}
+          {adjustingPin === 'destination' && effectivePickup && (
+            <Mapbox.MarkerView
+              coordinate={[effectivePickup.longitude, effectivePickup.latitude]}
+              anchor={ANCHOR_BOTTOM}
+              allowOverlap
+            >
+              <BoltPin color={PICKUP_COLOR} caption="Pickup" title="Here" />
+            </Mapbox.MarkerView>
+          )}
+        </>
+      );
+    }
+
     return (
       <>
+        {/* User blue dot with pulsing ring + heading arrow. Hidden during
+            ride-options (dropoff pins own the canvas) and in-progress. */}
+        {showUser && (
+          <PulsingUserMarker coordinate={userCoord} />
+        )}
+
         {/* Suggested pickup zone circle */}
         {showPickup && effectivePickup && (
           <Circle
@@ -2508,32 +2834,46 @@ export default function TaxiScreen({ navigation }) {
           />
         )}
 
-        {/* Pickup pin — draggable during search/ride-options, static during active ride */}
+        {/* Pickup pin — draggable during search/ride-options, static during active ride.
+            Tapping opens pan-to-adjust mode (Bolt-style). */}
         {showPickup && effectivePickup && isSearchPhase && (
           <DraggablePickupMarker
             coordinate={effectivePickup}
             onDragEnd={handlePickupDragEnd}
+            onPress={() => handleAdjustMarker('pickup')}
           />
         )}
 
         {showPickup && effectivePickup && !isSearchPhase && (
-          <Marker
-            coordinate={effectivePickup}
+          // MarkerView (not PointAnnotation) so the BoltPin child re-renders
+          // when driverETA ticks — PointAnnotation rasterises children on
+          // iOS and drops subsequent updates.
+          <Mapbox.MarkerView
+            coordinate={[effectivePickup.longitude, effectivePickup.latitude]}
             anchor={ANCHOR_BOTTOM}
-            tracksViewChanges={false}
-            zIndex={6}
+            allowOverlap
           >
-            <BoltPin color={PICKUP_COLOR} caption="Pickup" title="Here" />
-          </Marker>
+            <BoltPin
+              color={PICKUP_COLOR}
+              caption="Pickup"
+              title={
+                isDriverEnRoute && driverETA != null
+                  ? `${driverETA} min`
+                  : 'Here'
+              }
+            />
+          </Mapbox.MarkerView>
         )}
 
-        {/* Destination marker — Bolt-style pill with ETA, draggable during search phase */}
+        {/* Destination marker — Bolt-style pill with ETA, draggable during search phase.
+            Tapping during search phase opens pan-to-adjust mode. */}
         {showDropoff && destinationCoords && (
           <DestinationMarker
             coordinate={destinationCoords}
             etaMinutes={estimatedDuration}
             draggable={isSearchPhase}
             onDragEnd={handleDropoffDragEnd}
+            onPress={isSearchPhase ? () => handleAdjustMarker('destination') : undefined}
           />
         )}
 
@@ -2548,8 +2888,9 @@ export default function TaxiScreen({ navigation }) {
       </>
     );
   }, [
-    bookingStep, customPickup, location, destinationCoords, stops,
-    estimatedDuration, handlePickupDragEnd, handleDropoffDragEnd,
+    bookingStep, customPickup, location, userHeading, destinationCoords, stops,
+    estimatedDuration, driverETA, handlePickupDragEnd, handleDropoffDragEnd,
+    handleAdjustMarker, adjustingPin,
   ]);
 
   // PERF: Driver marker isolated from mapChildren. driverLocation updates
@@ -2564,6 +2905,9 @@ export default function TaxiScreen({ navigation }) {
   // rebuild the marker subtree. Only the polyline native component updates.
   const routeElement = useMemo(() => {
     const routeStyle = isDark ? ROUTE_STYLE_DARK : ROUTE_STYLE;
+
+    // Hide the route while the user is aiming a pin — returns on Confirm.
+    if (adjustingPin) return null;
 
     // DRIVER_ARRIVED: driver at pickup, no line.
     if (bookingStep === BOOKING_STEPS.DRIVER_ARRIVED) return null;
@@ -2595,21 +2939,15 @@ export default function TaxiScreen({ navigation }) {
       return <Polyline id="route-main" coordinates={routePolyline} {...routeStyle} />;
     }
     return null;
-  }, [isDark, bookingStep, driverRoute, driverLocation, customPickup, location, destinationCoords, routePolyline]);
+  }, [isDark, bookingStep, driverRoute, driverLocation, customPickup, location, destinationCoords, routePolyline, adjustingPin]);
 
   // PERF: Isolated DriverCluster memo — zoom and nearbyDrivers changes only
   // rebuild cluster markers, never touching pickup/destination/stop/polyline nodes.
   const driverClusterElement = useMemo(() => {
+    if (adjustingPin) return null;
     if (nearbyDrivers.length === 0) return null;
     return <DriverCluster drivers={nearbyDrivers} zoomLevel={mapZoomLevel} />;
-  }, [nearbyDrivers, mapZoomLevel]);
-
-  // Memoize showsUserLocation — avoids native map reconfiguration on unrelated re-renders.
-  // Only actually changes when entering/leaving IN_PROGRESS.
-  const showsUserLocation = useMemo(
-    () => bookingStep !== BOOKING_STEPS.IN_PROGRESS,
-    [bookingStep]
-  );
+  }, [nearbyDrivers, mapZoomLevel, adjustingPin]);
 
   // Stable ref — initialRegion is only read on mount, must not change per-render.
   // Uses _lastMapRegion (module-level) so remount starts where user left off,
@@ -2677,12 +3015,12 @@ export default function TaxiScreen({ navigation }) {
           initialRegion={initialRegion}
           onMapReady={handleMapReady}
           onPress={isSelectingOnMap != null ? handleMapPress : undefined}
-          showsUserLocation={showsUserLocation}
           showsMyLocationButton={false}
           toolbarEnabled={false}
           showsCompass={false}
           moveOnMarkerPress={false}
           rotateEnabled={false}
+          pitchEnabled={false}
           onPanDrag={handlePanDrag}
           onRegionChangeComplete={handleRegionChangeComplete}
         >
@@ -2690,7 +3028,9 @@ export default function TaxiScreen({ navigation }) {
           {mapChildren}
           {/* PERF: Driver marker isolated — 2s position updates don't rebuild other markers */}
           {driverMarkerElement}
-          {/* PERF: Route polyline isolated — 10-15s refresh doesn't rebuild markers */}
+          {/* Route polyline — LineLayer is pinned `aboveLayerID="road-label"`
+              inside PolylineWrapper so it sits below marker SymbolLayers
+              regardless of JSX mount order. */}
           {routeElement}
           {/* PERF: Cluster rendered separately so zoom changes don't rebuild markers */}
           {driverClusterElement}
@@ -2721,6 +3061,72 @@ export default function TaxiScreen({ navigation }) {
             <Ionicons name="arrow-back" size={24} color={colors.foreground} />
           </TouchableOpacity>
         </View>
+
+        {/* Editable pickup/destination overlay — only during RIDE_OPTIONS.
+            Tap a row to reopen LocationSearchSheet with that input focused
+            without losing the other field, stops, or the computed route. */}
+        {bookingStep === BOOKING_STEPS.RIDE_OPTIONS && isSelectingOnMap == null && adjustingPin == null && (
+          <View style={[styles.locationEditOverlay, { top: insets.top + 10, left: 72 }]}>
+            <TouchableOpacity
+              style={styles.locationEditRow}
+              activeOpacity={0.8}
+              onPress={() => handleEditLocations('pickup')}
+              accessibilityRole="button"
+              accessibilityLabel={`${t('taxi.pickup')}: ${locationAddress || ''}`}
+            >
+              <View style={[styles.locationEditDot, { backgroundColor: '#10B981' }]} />
+              <Text style={styles.locationEditText} numberOfLines={1}>
+                {locationAddress || t('taxi.currentLocation')}
+              </Text>
+              <Ionicons name="pencil" size={16} color={colors.mutedForeground} />
+            </TouchableOpacity>
+            <View style={styles.locationEditDivider} />
+            <TouchableOpacity
+              style={styles.locationEditRow}
+              activeOpacity={0.8}
+              onPress={() => handleEditLocations('destination')}
+              accessibilityRole="button"
+              accessibilityLabel={`${t('taxi.dropoff')}: ${destination || ''}`}
+            >
+              <View style={[styles.locationEditSquare, { backgroundColor: '#111827' }]} />
+              <Text style={styles.locationEditText} numberOfLines={1}>
+                {destination || t('taxi.whereTo')}
+              </Text>
+              <Ionicons name="pencil" size={16} color={colors.mutedForeground} />
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Pan-to-adjust mode — fixed center pin + top bar */}
+        {adjustingPin != null && (
+          <>
+            <View pointerEvents="none" style={styles.adjustCenterPin}>
+              <BoltPin
+                color={adjustingPin === 'pickup' ? '#10B981' : '#111827'}
+                caption={adjustingPin === 'pickup' ? 'Pickup' : 'Drop off'}
+                title={t('taxi.hereLabel', { defaultValue: 'Here' })}
+              />
+            </View>
+
+            <View style={[styles.adjustTopBar, { top: insets.top + 8 }]}>
+              <TouchableOpacity
+                style={styles.adjustTopBarButton}
+                onPress={handleAdjustCancel}
+                accessibilityRole="button"
+                accessibilityLabel={t('common.cancel', { defaultValue: 'Cancel' })}
+                hitSlop={HIT_SLOP}
+              >
+                <Ionicons name="arrow-back" size={22} color={colors.foreground} />
+              </TouchableOpacity>
+              <Text style={styles.adjustTopBarTitle} numberOfLines={1}>
+                {adjustingPin === 'pickup'
+                  ? t('taxi.setPickupLocation', { defaultValue: 'Set pickup location' })
+                  : t('taxi.setDropoffLocation', { defaultValue: 'Set destination' })}
+              </Text>
+              <View style={styles.adjustTopBarButton} />
+            </View>
+          </>
+        )}
 
         {/* Map Selection Mode Overlay */}
         {isSelectingOnMap != null && (
@@ -2769,7 +3175,7 @@ export default function TaxiScreen({ navigation }) {
         snapPoints={snapPoints}
         initialSnapIndex={1}
         onChange={setSheetSnapIndex}
-        isFullscreen={sheetSnapIndex === snapPoints.length - 1 && (bookingStep === BOOKING_STEPS.LOCATION_SEARCH || bookingStep === BOOKING_STEPS.RIDE_OPTIONS)}
+        isFullscreen={sheetSnapIndex === snapPoints.length - 1 && bookingStep === BOOKING_STEPS.LOCATION_SEARCH}
         floatingButton={
           sheetSnapIndex === snapPoints.length - 1 && bookingStep === BOOKING_STEPS.LOCATION_SEARCH
             ? null
@@ -2960,5 +3366,81 @@ const createStyles = (typography, colors) => StyleSheet.create({
   },
   mapSelectionCancel: {
     padding: 4,
+  },
+  adjustCenterPin: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    // BoltPin is 128 wide × 68 tall. Dot tip sits at the bottom of the
+    // wrapper, so translate up by full height so the tip aligns with the
+    // map's geometric center (= region.latitude/longitude).
+    marginLeft: -64,
+    marginTop: -68,
+    zIndex: 21,
+  },
+  adjustTopBar: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.background,
+    borderRadius: radius.lg,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    zIndex: 22,
+    ...shadows.md,
+  },
+  adjustTopBarTitle: {
+    ...typography.bodyMedium,
+    color: colors.foreground,
+    fontWeight: '700',
+    flex: 1,
+    textAlign: 'center',
+  },
+  adjustTopBarButton: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  locationEditOverlay: {
+    position: 'absolute',
+    right: 16,
+    backgroundColor: colors.background,
+    borderRadius: radius.lg,
+    paddingVertical: 4,
+    paddingHorizontal: 12,
+    zIndex: 15,
+    ...shadows.lg,
+  },
+  locationEditRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+  },
+  locationEditDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginRight: 10,
+  },
+  locationEditSquare: {
+    width: 10,
+    height: 10,
+    borderRadius: 2,
+    marginRight: 10,
+  },
+  locationEditText: {
+    flex: 1,
+    ...typography.body,
+    color: colors.foreground,
+    marginRight: 8,
+  },
+  locationEditDivider: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginLeft: 20,
   },
 });

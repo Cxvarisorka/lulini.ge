@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   ActivityIndicator,
   View,
@@ -19,6 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import { DrawerContext } from './DrawerContext';
 
 // Auth Screens
 import WelcomeScreen from '../screens/WelcomeScreen';
@@ -58,11 +59,6 @@ import DrawerContent from '../components/DrawerContent';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
-
-// Custom Drawer Context
-const DrawerContext = createContext();
-
-export const useDrawer = () => useContext(DrawerContext);
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const DRAWER_WIDTH = Math.min(SCREEN_WIDTH * 0.8, 320);

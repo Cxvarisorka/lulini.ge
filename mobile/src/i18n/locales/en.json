@@ -5,6 +5,7 @@
     "success": "Success",
     "cancel": "Cancel",
     "confirm": "Confirm",
+    "submit": "Submit",
     "save": "Save",
     "delete": "Delete",
     "edit": "Edit",
@@ -227,7 +228,10 @@
     "approachingDropoff": "You will arrive at your destination in about {{minutes}} min.",
     "passengers": "passengers",
     "cancelAfterArrivalWarning": "Cancelling after your driver has arrived may result in a cancellation fee.",
-    "callDriver": "Call Driver"
+    "callDriver": "Call Driver",
+    "chooseYourRide": "Choose your ride",
+    "changeVehicle": "Change vehicle class",
+    "orderVehicle": "Order {{type}}"
   },
   "connection": {
     "noInternet": "No Internet Connection",

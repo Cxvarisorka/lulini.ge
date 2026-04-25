@@ -5,6 +5,7 @@
     "success": "წარმატებით",
     "cancel": "გაუქმება",
     "confirm": "დადასტურება",
+    "submit": "დადასტურება",
     "save": "შენახვა",
     "delete": "წაშლა",
     "edit": "რედაქტირება",
@@ -228,7 +229,10 @@
     "approachingDropoff": "დანიშნულების ადგილამდე დაახლოებით {{minutes}} წუთი დარჩა.",
     "passengers": "მგზავრი",
     "cancelAfterArrivalWarning": "მძღოლის ჩამოსვლის შემდეგ გაუქმება შეიძლება გამოიწვიოს გაუქმების საფასური.",
-    "callDriver": "მძღოლის დარეკვა"
+    "callDriver": "მძღოლის დარეკვა",
+    "chooseYourRide": "აირჩიეთ მანქანა",
+    "changeVehicle": "მანქანის კლასის შეცვლა",
+    "orderVehicle": "{{type}}-ის შეკვეთა"
   },
   "connection": {
     "noInternet": "ინტერნეტი არ არის",

@@ -149,6 +149,14 @@ export const taxiAPI = {
 
   getScheduledRides: () =>
     api.get('/rides/scheduled'),
+
+  // Server-composed quote: driver availability in class, driver ETA, trip ETA, price.
+  // `dropoffLat`/`dropoffLng` are optional — omit to quote without a destination.
+  getQuote: ({ pickupLat, pickupLng, dropoffLat, dropoffLng, vehicleType }, config = {}) =>
+    api.get('/rides/quote', {
+      ...config,
+      params: { pickupLat, pickupLng, dropoffLat, dropoffLng, vehicleType },
+    }),
 };
 
 // Safety API

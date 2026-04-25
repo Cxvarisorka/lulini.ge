@@ -11,7 +11,86 @@
  * Conceptually this is maps.client.js.
  */
 
+import * as Crypto from 'expo-crypto';
 import api from './api';
+
+// ── Phase 4.1: client-side prefix LRU ──────────────────────────────────────
+// Bounded Map of normalized-query → predictions. Two optimizations:
+//   1. Exact hit → skip the round-trip entirely.
+//   2. Prefix hit → if "tbilisi pla" is cached and user types "tbilisi plaz",
+//      filter the cached list locally; only round-trip when fewer than
+//      MIN_PREFIX_RESULTS predictions remain.
+// Invalidated on app foreground after AUTOCOMPLETE_TTL_MS.
+const AUTOCOMPLETE_LRU_MAX = 30;
+const AUTOCOMPLETE_TTL_MS = 30 * 60 * 1000; // 30 min
+const MIN_PREFIX_RESULTS = 3;
+const autocompleteLRU = new Map(); // Map preserves insertion order → cheap LRU
+
+function normalizeQuery(q) {
+  if (!q) return '';
+  // Match server-side normalization: trim + NFC + lowercase.
+  return q.trim().normalize('NFC').toLowerCase();
+}
+
+function lruGet(key) {
+  const entry = autocompleteLRU.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.t > AUTOCOMPLETE_TTL_MS) {
+    autocompleteLRU.delete(key);
+    return null;
+  }
+  // Bump recency
+  autocompleteLRU.delete(key);
+  autocompleteLRU.set(key, entry);
+  return entry.v;
+}
+
+function lruSet(key, value) {
+  if (autocompleteLRU.has(key)) autocompleteLRU.delete(key);
+  autocompleteLRU.set(key, { v: value, t: Date.now() });
+  while (autocompleteLRU.size > AUTOCOMPLETE_LRU_MAX) {
+    const oldest = autocompleteLRU.keys().next().value;
+    autocompleteLRU.delete(oldest);
+  }
+}
+
+// Find the longest cached prefix of `key`. Returns the cached list (so the
+// caller can locally filter) or null.
+function lruPrefixHit(key) {
+  let best = null;
+  let bestLen = 0;
+  for (const [k, entry] of autocompleteLRU) {
+    if (Date.now() - entry.t > AUTOCOMPLETE_TTL_MS) continue;
+    if (k.length < key.length && key.startsWith(k) && k.length > bestLen) {
+      best = entry.v;
+      bestLen = k.length;
+    }
+  }
+  return best;
+}
+
+function localFilter(list, key) {
+  if (!Array.isArray(list)) return [];
+  return list.filter(p => {
+    const main = (p?.mainText || '').toLowerCase();
+    const desc = (p?.description || '').toLowerCase();
+    return main.includes(key) || desc.includes(key);
+  });
+}
+
+export function clearAutocompleteCache() {
+  autocompleteLRU.clear();
+}
+
+// Session token for Google Places autocomplete billing.
+// One token covers the full "type → pick" flow; rotated via newSessionToken()
+// after each successful place resolution. Reduces per-selection cost from
+// (N keystrokes × autocomplete + 1 details) → (1 session billed once + 1 details).
+export function newSessionToken() {
+  if (typeof Crypto.randomUUID === 'function') return Crypto.randomUUID();
+  // Fallback: time-prefixed random hex (Google accepts any opaque string).
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
 
 // ── Shape adapters ──────────────────────────────────────────────────────────
 
@@ -98,17 +177,37 @@ export async function getDirections(origin, destination) {
 // Back-compat alias — server owns OSRM→Google fallback; no distinct client path.
 export const getDirectionsOSRM = getDirections;
 
-export async function searchPlaces(query, location = null) {
+export async function searchPlaces(query, location = null, sessionToken = null) {
   if (!query || query.length < 2) return [];
+
+  const key = normalizeQuery(query);
+
+  // Exact hit — no network.
+  const exact = lruGet(key);
+  if (exact) return exact;
+
+  // Prefix hit — locally filter; only round-trip if the filtered list is too thin.
+  const prefix = lruPrefixHit(key);
+  if (prefix) {
+    const filtered = localFilter(prefix, key);
+    if (filtered.length >= MIN_PREFIX_RESULTS) {
+      lruSet(key, filtered);
+      return filtered;
+    }
+  }
+
   try {
     const params = { input: query };
     if (location?.latitude && location?.longitude) {
       params.lat = location.latitude;
       params.lng = location.longitude;
     }
+    if (sessionToken) params.sessionToken = sessionToken;
     const res = await api.get('/maps/autocomplete', { params });
     if (!res.data?.success) return [];
-    return (res.data.data?.predictions || []).map(toPlace).filter(Boolean);
+    const predictions = (res.data.data?.predictions || []).map(toPlace).filter(Boolean);
+    lruSet(key, predictions);
+    return predictions;
   } catch {
     return [];
   }
@@ -118,13 +217,15 @@ export async function searchPlaces(query, location = null) {
 export const searchPlacesNominatim = searchPlaces;
 export const searchPlacesGoogle = searchPlaces;
 
-export async function getPlaceDetails(placeId, existingCoords = null) {
+export async function getPlaceDetails(placeId, existingCoords = null, sessionToken = null) {
   if (existingCoords) {
     return { name: '', address: '', coordinates: existingCoords };
   }
   if (!placeId) return null;
   try {
-    const res = await api.get('/maps/place-details', { params: { placeId } });
+    const params = { placeId };
+    if (sessionToken) params.sessionToken = sessionToken;
+    const res = await api.get('/maps/place-details', { params });
     const r = res.data?.data?.result;
     if (!r) return null;
     return {
@@ -144,17 +245,35 @@ export async function getPlaceDetails(placeId, existingCoords = null) {
  * Returns a new place object `{ ...place, coordinates }` or the original if
  * resolution failed (caller should treat that as a soft failure).
  */
-export async function resolvePlaceCoords(place) {
+export async function resolvePlaceCoords(place, sessionToken = null) {
   if (!place) return null;
   if (place.coordinates) return place;
   if (!place.placeId) return place;
-  const details = await getPlaceDetails(place.placeId);
+  const details = await getPlaceDetails(place.placeId, null, sessionToken);
   if (!details?.coordinates) return place;
   return {
     ...place,
     coordinates: details.coordinates,
     description: place.description || details.address,
   };
+}
+
+/**
+ * Geo-sorted popular places near the user. Free (Mongo-only) — useful as the
+ * empty-state of the search sheet so the most common "where to today" taps
+ * never trigger an autocomplete call.
+ */
+export async function getNearbyPopular(location, limit = 5) {
+  if (!location?.latitude || !location?.longitude) return [];
+  try {
+    const res = await api.get('/locations/nearby-popular', {
+      params: { lat: location.latitude, lng: location.longitude, limit },
+    });
+    if (!res.data?.success) return [];
+    return (res.data.data?.results || []).map(toPlace).filter(Boolean);
+  } catch {
+    return [];
+  }
 }
 
 export async function reverseGeocode(latitude, longitude) {
@@ -191,10 +310,10 @@ export function decodePolyline(encoded) {
   return poly;
 }
 
-// ── Deprecated stubs (server owns caches now) ───────────────────────────────
+// ── Deprecated stubs (server owns most caches now) ──────────────────────────
 export function clearDirectionsCache() {}
-export function clearSearchCache() {}
-export function clearAllCaches() {}
+export function clearSearchCache() { clearAutocompleteCache(); }
+export function clearAllCaches() { clearAutocompleteCache(); }
 export function isGoogleMapsConfigured() { return true; }
 
 export default {
@@ -212,4 +331,6 @@ export default {
   clearSearchCache,
   clearAllCaches,
   isGoogleMapsConfigured,
+  newSessionToken,
+  getNearbyPopular,
 };

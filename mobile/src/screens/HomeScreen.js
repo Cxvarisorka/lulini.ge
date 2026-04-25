@@ -16,7 +16,7 @@ import { useTranslation } from 'react-i18next';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { useAuth } from '../context/AuthContext';
-import { useDrawer } from '../navigation/AppNavigator';
+import { useDrawer } from '../navigation/DrawerContext';
 import { radius, spacing, useTypography } from '../theme/colors';
 import { useTheme } from '../context/ThemeContext';
 import ActiveRideBanner from '../components/ActiveRideBanner';

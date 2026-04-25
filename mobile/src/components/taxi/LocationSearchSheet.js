@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { useTypography } from '../../theme/colors';
 import { useTheme } from '../../context/ThemeContext';
-import { searchPlaces, resolvePlaceCoords } from '../../services/googleMaps';
+import { searchPlaces, resolvePlaceCoords, newSessionToken } from '../../services/googleMaps';
 import { taxiAPI, favoritesAPI } from '../../services/api';
 
 const FAVORITE_ICONS = { home: 'home', work: 'briefcase', custom: 'star' };
@@ -29,6 +29,8 @@ export default function LocationSearchSheet({
   onStopSelect,
   onSelectOnMap,
   lastDestination,
+  initialFocus,
+  onInitialFocusConsumed,
 }) {
   const typography = useTypography();
   const { colors } = useTheme();
@@ -49,9 +51,15 @@ export default function LocationSearchSheet({
   const [stopQueries, setStopQueries] = useState({});
   const scrollViewRef = useRef(null);
   const inputRef = useRef(null);
+  const pickupInputRef = useRef(null);
   const stopInputRefs = useRef({});
   const searchIdRef = useRef(0);
   const pendingStopFocus = useRef(null);
+  // Google Places session token — covers one full type→pick flow per Google
+  // billing rules. Rotated after each successful resolvePlaceCoords (one
+  // selection = one session). All autocomplete + place-details calls during
+  // a session share the same token so Google bills the session once.
+  const sessionTokenRef = useRef(newSessionToken());
 
   // What the UI actually renders: the snapshot if frozen, otherwise the live list.
   const displayedSuggestions = frozenSuggestions ?? suggestions;
@@ -74,6 +82,34 @@ export default function LocationSearchSheet({
       }, 100);
     }
   }, [stops.length]);
+
+  // When the parent signals a field should be focused (user tapped the map
+  // overlay to edit pickup/destination), jump the active input and focus it.
+  // The existing value is cleared so the passenger can type a fresh address;
+  // if they blur without picking anything, the onBlur handlers restore the
+  // prior value from props. Delay allows the sheet animation to finish before
+  // the keyboard opens.
+  useEffect(() => {
+    if (!initialFocus) return;
+    setActiveInput(initialFocus);
+    setSuggestions([]);
+    setFrozenSuggestions(null);
+    if (initialFocus === 'pickup') {
+      setPickupQuery('');
+      setPickupEdited(true);
+    } else if (initialFocus === 'destination') {
+      setSearchQuery('');
+    } else if (typeof initialFocus === 'number') {
+      setStopQueries((prev) => ({ ...prev, [initialFocus]: '' }));
+    }
+    const timer = setTimeout(() => {
+      if (initialFocus === 'pickup') pickupInputRef.current?.focus();
+      else if (initialFocus === 'destination') inputRef.current?.focus();
+      else if (typeof initialFocus === 'number') stopInputRefs.current[initialFocus]?.focus();
+      onInitialFocusConsumed?.();
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [initialFocus, onInitialFocusConsumed]);
 
   // Get the active search query based on which input is focused
   const getActiveQuery = () => {
@@ -99,7 +135,7 @@ export default function LocationSearchSheet({
     const timer = setTimeout(async () => {
       setIsSearching(true);
       try {
-        const results = await searchPlaces(activeQuery, userLocation);
+        const results = await searchPlaces(activeQuery, userLocation, sessionTokenRef.current);
         // Only update if this is still the latest search
         if (currentSearchId === searchIdRef.current) {
           setSuggestions(results);
@@ -176,13 +212,18 @@ export default function LocationSearchSheet({
     if (!place.coordinates) {
       setIsSearching(true);
       try {
-        resolved = await resolvePlaceCoords(place);
+        resolved = await resolvePlaceCoords(place, sessionTokenRef.current);
       } catch {
         resolved = place;
       } finally {
         setIsSearching(false);
       }
     }
+
+    // Rotate the session token: one Google billing session per selection.
+    // The current session has done its job (autocomplete keystrokes + 1 details).
+    // Future keystrokes start fresh so Google can group them into a new session.
+    sessionTokenRef.current = newSessionToken();
 
     const coords = resolved?.coordinates || null;
     const description = resolved?.description || place.description;
@@ -236,7 +277,7 @@ export default function LocationSearchSheet({
     if (snapshot.length === 0) {
       setIsSearching(true);
       try {
-        const results = await searchPlaces(searchQuery, userLocation);
+        const results = await searchPlaces(searchQuery, userLocation, sessionTokenRef.current);
         snapshot = results || [];
       } catch {
         snapshot = [];
@@ -371,6 +412,22 @@ export default function LocationSearchSheet({
     handleInputFocus();
   }, [handleInputFocus]);
 
+  // If the passenger blurred the destination without picking anything, restore
+  // the prior destination so the map overlay still reflects the saved route.
+  const handleDestinationBlur = useCallback(() => {
+    if (!searchQuery.trim()) {
+      setSearchQuery(destination || '');
+    }
+  }, [searchQuery, destination]);
+
+  // Same restore behaviour for stop inputs.
+  const handleStopInputBlur = useCallback((index) => {
+    const current = stopQueries[index];
+    if (current !== undefined && !current.trim()) {
+      setStopQueries((prev) => ({ ...prev, [index]: stops[index]?.address || '' }));
+    }
+  }, [stopQueries, stops]);
+
   return (
     <View style={styles.container}>
       {/* Location Input Section — sticky at top */}
@@ -398,6 +455,7 @@ export default function LocationSearchSheet({
               <Text style={styles.locationLabel}>{t('taxi.pickup')}</Text>
               <View style={styles.inputRow}>
                 <TextInput
+                  ref={pickupInputRef}
                   style={styles.destinationInput}
                   placeholder={isLoadingLocation ? t('taxi.gettingLocation') : t('taxi.currentLocation')}
                   placeholderTextColor={colors.mutedForeground}
@@ -454,6 +512,7 @@ export default function LocationSearchSheet({
                       value={stopQueries[index] !== undefined ? stopQueries[index] : stop.address}
                       onChangeText={(text) => handleStopTextChange(index, text)}
                       onFocus={() => handleStopInputFocus(index)}
+                      onBlur={() => handleStopInputBlur(index)}
                       autoCorrect={false}
                       autoCapitalize="words"
                       returnKeyType="search"
@@ -503,6 +562,7 @@ export default function LocationSearchSheet({
                   value={searchQuery}
                   onChangeText={handleTextChange}
                   onFocus={handleDestinationFocus}
+                  onBlur={handleDestinationBlur}
                   selectTextOnFocus={false}
                   autoCorrect={false}
                   autoCapitalize="words"
