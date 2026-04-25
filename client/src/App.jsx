@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { Analytics } from '@vercel/analytics/react';
 
 import { Home } from './pages/Home';
 import { Contact } from './pages/Contact';
@@ -70,6 +71,8 @@ function AppContent() {
         </BrowserRouter>
           {/* Tawk.to Live Chat Widget */}
           <TawkTo />
+          {/* Vercel Web Analytics */}
+          <Analytics />
         </AdminProvider>
       </SocketProvider>
     </UserProvider>
