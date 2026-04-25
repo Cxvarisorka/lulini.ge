@@ -133,7 +133,11 @@ app.use(cors({
     exposedHeaders: ['set-cookie']
 }));
 
-// NOTE: Global rate limiter temporarily disabled.
+// Global rate limiter — per-IP cap that applies to every request that isn't
+// already covered by a stricter per-route limiter. Driver location endpoints
+// are exempted inside the limiter itself because they have their own limiter.
+const { globalLimiter } = require('./middlewares/rateLimiter');
+app.use(globalLimiter);
 
 // Body parsing with size limits (prevents payload bombs)
 app.use(express.json({ limit: '16kb' }));

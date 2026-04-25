@@ -437,23 +437,30 @@ const sendPhoneUpdateOtp = catchAsync(async (req, res, next) => {
         return next(new AppError('Please provide a valid phone number', 400));
     }
 
-    // Check if phone is already used by another user (either normalized or legacy raw form)
+    // Check if phone is already used by another user (either normalized or legacy raw form).
+    // Privacy: return a generic OTP-sent response instead of a specific error so this
+    // endpoint can't be used to enumerate whether a phone belongs to another account.
     const existingUser = await User.findOne({
         phone: phoneMatchQuery(phone, rawPhone),
         _id: { $ne: userId }
     });
     if (existingUser) {
-        return next(new AppError('This phone number is already registered to another account', 400));
+        return res.status(200).json({
+            success: true,
+            message: 'If the number is eligible, an OTP has been sent'
+        });
     }
 
-    // Delete any existing login OTP for this phone (scoped to avoid wiping other purposes)
-    await OTP.deleteMany({ phone: phoneMatchQuery(phone, rawPhone), purpose: 'login' });
+    // Delete any existing phone-update OTP for this phone. Scoped to its own
+    // purpose so that a login-OTP flood on this phone cannot wipe a legitimate
+    // update attempt (or vice-versa).
+    await OTP.deleteMany({ phone: phoneMatchQuery(phone, rawPhone), purpose: 'phone_update' });
 
     // Persist the OTP row BEFORE attempting SMS delivery so a hang or failure
     // in the SMS provider can be rolled back cleanly and the user can retry.
     const otpCode = generateOTP();
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-    const otpRow = await OTP.create({ phone, code: otpCode, purpose: 'login', expiresAt });
+    const otpRow = await OTP.create({ phone, code: otpCode, purpose: 'phone_update', expiresAt });
 
     try {
         await sendVerification(phone, otpCode);
@@ -465,7 +472,7 @@ const sendPhoneUpdateOtp = catchAsync(async (req, res, next) => {
 
     res.status(200).json({
         success: true,
-        message: 'OTP sent successfully'
+        message: 'If the number is eligible, an OTP has been sent'
     });
 });
 
@@ -484,8 +491,8 @@ const verifyPhoneUpdateOtp = catchAsync(async (req, res, next) => {
         return next(new AppError('Please provide a valid phone number', 400));
     }
 
-    // Verify OTP against local DB (scope to login purpose + unverified)
-    const otpRecord = await OTP.findOne({ phone: phoneMatchQuery(phone, rawPhone), purpose: 'login', verified: false });
+    // Verify OTP against local DB (scope to phone_update purpose + unverified)
+    const otpRecord = await OTP.findOne({ phone: phoneMatchQuery(phone, rawPhone), purpose: 'phone_update', verified: false });
 
     if (!otpRecord) {
         return next(new AppError('OTP not found. Please request a new code', 400));
@@ -779,15 +786,27 @@ const sendRegistrationPhoneOtp = catchAsync(async (req, res, next) => {
     // Role-aware duplicate check: reject only if another driver already owns
     // this phone. A plain passenger with the same phone is allowed (same real
     // person is signing up for the driver app — see commit 1a176d4).
+    //
+    // Privacy: when we reject, we return a generic OTP-sent response instead
+    // of "already registered to another driver". Revealing the phone→driver
+    // mapping would let an attacker enumerate the driver fleet via this
+    // endpoint. The downstream /register call still rejects the duplicate
+    // phone, so UX is preserved for legitimate users who don't try to reuse
+    // someone else's number.
     const phoneQuery = phoneMatchQuery(phone, rawPhone);
     const usersWithPhone = await User.find({ phone: phoneQuery }).select('_id').lean();
+    let phoneAlreadyOwnedByDriver = false;
     if (usersWithPhone.length > 0) {
         const existingDriver = await Driver.findOne({
             user: { $in: usersWithPhone.map(u => u._id) },
         }).select('_id').lean();
-        if (existingDriver) {
-            return next(new AppError('This phone number is already registered to another driver', 400));
-        }
+        phoneAlreadyOwnedByDriver = !!existingDriver;
+    }
+    if (phoneAlreadyOwnedByDriver) {
+        return res.status(200).json({
+            success: true,
+            message: 'If the number is eligible, an OTP has been sent'
+        });
     }
 
     // Clear any prior pre-registration OTPs for this phone
@@ -807,7 +826,7 @@ const sendRegistrationPhoneOtp = catchAsync(async (req, res, next) => {
 
     res.status(200).json({
         success: true,
-        message: 'OTP sent successfully'
+        message: 'If the number is eligible, an OTP has been sent'
     });
 });
 
@@ -1121,6 +1140,7 @@ const deleteAccount = catchAsync(async (req, res, next) => {
 // only when deletionScheduledAt is still in the future.
 const cancelAccountDeletion = catchAsync(async (req, res, next) => {
     const userId = req.user.id;
+    const { password } = req.body;
 
     // protect middleware already rejects isDeleted users, but we look up the raw
     // document here in case someone bypasses cache (belt-and-suspenders).
@@ -1135,6 +1155,19 @@ const cancelAccountDeletion = catchAsync(async (req, res, next) => {
 
     if (user.deletionScheduledAt <= new Date()) {
         return next(new AppError('The deletion grace period has expired. This account can no longer be recovered.', 410));
+    }
+
+    // Symmetry with deleteAccount: local-auth accounts require password to
+    // un-delete. Without this check, a stolen JWT issued before the deletion
+    // request could quietly revert a legitimate deletion.
+    if (user.provider === 'local') {
+        if (!password) {
+            return next(new AppError('Password confirmation is required to cancel deletion', 400));
+        }
+        const isMatch = await user.comparePassword(password);
+        if (!isMatch) {
+            return next(new AppError('Incorrect password', 401));
+        }
     }
 
     // Restore the account

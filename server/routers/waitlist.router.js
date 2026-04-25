@@ -2,16 +2,15 @@ const express = require('express');
 const Waitlist = require('../models/waitlist.model');
 const AppError = require('../utils/AppError');
 const catchAsync = require('../utils/catchAsync');
+const { publicFormLimiter } = require('../middlewares/rateLimiter');
 
 const router = express.Router();
-
-// NOTE: Rate limiter temporarily removed.
 
 // Email format validation
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
 // POST /api/waitlist - Join the waiting list
-router.post('/', catchAsync(async (req, res, next) => {
+router.post('/', publicFormLimiter, catchAsync(async (req, res, next) => {
     const { email, name } = req.body;
 
     if (!email) {

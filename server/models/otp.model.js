@@ -13,7 +13,9 @@ const otpSchema = new mongoose.Schema({
     },
     purpose: {
         type: String,
-        enum: ['registration', 'login', 'password_reset'],
+        // phone_update is scoped separately from login so sending a login OTP
+        // for the same phone cannot wipe a pending update OTP (and vice-versa).
+        enum: ['registration', 'login', 'password_reset', 'phone_update'],
         default: 'login'
     },
     verified: {

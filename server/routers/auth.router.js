@@ -25,8 +25,12 @@ const {
 } = require('../controllers/auth.controller');
 const { protect } = require('../middlewares/auth.middleware');
 const { validateLogin, validateSendPhoneOtp } = require('../middlewares/validators');
-
-// NOTE: Rate limiters temporarily removed.
+const {
+    authLimiter,
+    otpSendLimiter,
+    otpSendPhoneLimiter,
+    otpVerifyLimiter,
+} = require('../middlewares/rateLimiter');
 
 // Health check / test route
 router.get('/test', (req, res) => {
@@ -34,7 +38,7 @@ router.get('/test', (req, res) => {
 });
 
 // Core auth routes
-router.post('/login', validateLogin, login);
+router.post('/login', authLimiter, validateLogin, login);
 router.post('/logout', logout);
 router.get('/me', protect, getMe);
 
@@ -42,19 +46,19 @@ router.get('/me', protect, getMe);
 // Requires a prior /email/send-verification + /email/verify-registration pair
 // AND a /phone/send-registration-otp + /phone/verify-registration-otp pair, so
 // the user is only written to the DB after both email and phone are proven.
-router.post('/register', register);
-router.post('/email/send-verification', sendEmailVerification);
-router.post('/email/verify-registration', verifyEmailForRegistration);
-router.post('/phone/send-registration-otp', validateSendPhoneOtp, sendRegistrationPhoneOtp);
-router.post('/phone/verify-registration-otp', verifyRegistrationPhoneOtp);
+router.post('/register', authLimiter, register);
+router.post('/email/send-verification', otpSendLimiter, sendEmailVerification);
+router.post('/email/verify-registration', otpVerifyLimiter, verifyEmailForRegistration);
+router.post('/phone/send-registration-otp', otpSendPhoneLimiter, validateSendPhoneOtp, sendRegistrationPhoneOtp);
+router.post('/phone/verify-registration-otp', otpVerifyLimiter, verifyRegistrationPhoneOtp);
 
 // Phone OTP authentication routes
-router.post('/phone/send-otp', validateSendPhoneOtp, sendPhoneOtp);
-router.post('/phone/verify-otp', verifyPhoneOtp);
+router.post('/phone/send-otp', otpSendPhoneLimiter, validateSendPhoneOtp, sendPhoneOtp);
+router.post('/phone/verify-otp', otpVerifyLimiter, verifyPhoneOtp);
 
 // Phone update routes (authenticated)
-router.post('/phone/update-send-otp', protect, validateSendPhoneOtp, sendPhoneUpdateOtp);
-router.post('/phone/update-verify-otp', protect, verifyPhoneUpdateOtp);
+router.post('/phone/update-send-otp', protect, otpSendPhoneLimiter, validateSendPhoneOtp, sendPhoneUpdateOtp);
+router.post('/phone/update-verify-otp', protect, otpVerifyLimiter, verifyPhoneUpdateOtp);
 
 // Complete onboarding
 router.post('/complete-onboarding', protect, completeOnboarding);
@@ -63,12 +67,12 @@ router.post('/complete-onboarding', protect, completeOnboarding);
 router.patch('/profile', protect, updateProfile);
 
 // Email verification (authenticated — add/update email)
-router.post('/email/send-code', protect, sendEmailCode);
-router.post('/email/verify-code', protect, verifyEmailCode);
+router.post('/email/send-code', protect, otpSendLimiter, sendEmailCode);
+router.post('/email/verify-code', protect, otpVerifyLimiter, verifyEmailCode);
 
 // Forgot password (phone OTP verification)
-router.post('/forgot-password/send-otp', validateSendPhoneOtp, forgotPasswordSendOtp);
-router.post('/forgot-password/reset', forgotPasswordReset);
+router.post('/forgot-password/send-otp', otpSendPhoneLimiter, validateSendPhoneOtp, forgotPasswordSendOtp);
+router.post('/forgot-password/reset', otpVerifyLimiter, forgotPasswordReset);
 
 // Account deletion (Apple App Store requirement)
 // DELETE /account        - schedule deletion (30-day grace period)

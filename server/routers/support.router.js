@@ -2,16 +2,15 @@ const express = require('express');
 const SupportTicket = require('../models/supportTicket.model');
 const AppError = require('../utils/AppError');
 const catchAsync = require('../utils/catchAsync');
+const { publicFormLimiter } = require('../middlewares/rateLimiter');
 
 const router = express.Router();
-
-// NOTE: Rate limiter temporarily removed.
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const VALID_CATEGORIES = ['ride_issue', 'payment', 'account', 'driver_feedback', 'app_bug', 'suggestion', 'other'];
 
 // POST /api/support - Submit a support ticket
-router.post('/', catchAsync(async (req, res, next) => {
+router.post('/', publicFormLimiter, catchAsync(async (req, res, next) => {
     const { name, email, category, subject, message } = req.body;
 
     if (!name || !email || !category || !subject || !message) {

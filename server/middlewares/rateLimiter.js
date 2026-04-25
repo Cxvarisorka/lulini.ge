@@ -121,6 +121,18 @@ const chatMessageLimiter = rateLimit({
     message: { success: false, message: 'Too many messages, please slow down' }
 });
 
+// Unauthenticated public forms (support ticket, waitlist signup): 5 per hour per IP.
+// Tight cap because these write to DB + may fan out to email and there's no
+// user identity to attribute the abuse to.
+const publicFormLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    store: makeStore('public_form'),
+    message: { success: false, message: 'Too many submissions, please try again later' }
+});
+
 // Ride state transitions (accept / decline / arrive / start / complete / cancel).
 // Generous cap — a legitimate driver will hit ~6 transitions per ride, so 60/min
 // leaves plenty of headroom while still stopping a runaway retry loop or a
@@ -152,5 +164,6 @@ module.exports = {
     rideCreateLimiter,
     rideActionLimiter,
     driverLocationLimiter,
-    chatMessageLimiter
+    chatMessageLimiter,
+    publicFormLimiter
 };

@@ -16,23 +16,29 @@ const AppError = require('../utils/AppError');
 
 const STATE_CHANGING_METHODS = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
 
-// Paths exempt from CSRF checks (public callbacks, OAuth redirects)
+// Paths exempt from CSRF checks (public callbacks, OAuth redirects).
+//
+// Use EXACT match for single endpoints and explicit `prefix: true` for the
+// few routes that are actually sub-trees (payment redirect URLs built by the
+// provider). A naive startsWith match on all entries silently exempts any
+// future route that shares a prefix with an entry here — e.g. an accidental
+// `/api/auth/login-v2` would inherit exemption.
 const CSRF_EXEMPT_PATHS = [
-    '/api/payments/callback',      // BOG payment callback (signature-verified separately)
-    '/api/payments/redirect/',     // BOG redirect endpoints (GET-like)
-    '/api/auth/google/callback',   // OAuth callback
-    '/api/auth/google/mobile/callback',
-    '/api/auth/failure',
-    '/api/auth/apple/token',       // Mobile Apple Sign-In (no cookie auth)
-    '/api/auth/google/token',      // Mobile Google Sign-In (no cookie auth)
-    '/api/auth/phone/send-otp',    // Phone OTP send (unauthenticated)
-    '/api/auth/phone/verify-otp',  // Phone OTP verify (unauthenticated)
-    '/api/auth/phone/send-registration-otp',   // Driver registration phone OTP send
-    '/api/auth/phone/verify-registration-otp', // Driver registration phone OTP verify
-    '/api/auth/login',             // Traditional login (unauthenticated)
-    '/api/auth/register',          // Registration (unauthenticated)
-    '/api/auth/email/send-verification',  // Email verification for registration
-    '/api/auth/email/verify-registration', // Email verification for registration
+    { path: '/api/payments/callback', prefix: false }, // BOG callback (signature-verified separately)
+    { path: '/api/payments/redirect/', prefix: true }, // BOG redirect endpoints (provider appends token)
+    { path: '/api/auth/google/callback', prefix: false },
+    { path: '/api/auth/google/mobile/callback', prefix: false },
+    { path: '/api/auth/failure', prefix: false },
+    { path: '/api/auth/apple/token', prefix: false },       // Mobile Apple Sign-In (no cookie auth)
+    { path: '/api/auth/google/token', prefix: false },      // Mobile Google Sign-In (no cookie auth)
+    { path: '/api/auth/phone/send-otp', prefix: false },    // Phone OTP send (unauthenticated)
+    { path: '/api/auth/phone/verify-otp', prefix: false },  // Phone OTP verify (unauthenticated)
+    { path: '/api/auth/phone/send-registration-otp', prefix: false },
+    { path: '/api/auth/phone/verify-registration-otp', prefix: false },
+    { path: '/api/auth/login', prefix: false },             // Traditional login (unauthenticated)
+    { path: '/api/auth/register', prefix: false },          // Registration (unauthenticated)
+    { path: '/api/auth/email/send-verification', prefix: false },
+    { path: '/api/auth/email/verify-registration', prefix: false },
 ];
 
 const allowedOrigins = process.env.NODE_ENV === 'production'
@@ -45,8 +51,12 @@ function csrfProtection(req, res, next) {
         return next();
     }
 
-    // Skip exempt paths (payment callbacks, OAuth redirects)
-    if (CSRF_EXEMPT_PATHS.some(path => req.path.startsWith(path))) {
+    // Skip exempt paths (payment callbacks, OAuth redirects). Exact match by
+    // default; prefix match only when explicitly flagged.
+    const isExempt = CSRF_EXEMPT_PATHS.some(entry =>
+        entry.prefix ? req.path.startsWith(entry.path) : req.path === entry.path
+    );
+    if (isExempt) {
         return next();
     }
 

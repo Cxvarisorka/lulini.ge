@@ -108,6 +108,13 @@ const sendVerification = async (phone, providedCode) => {
     const code = providedCode || generateOTP();
 
     if (!apiKey) {
+        // Never silently drop SMS in production — validateEnv already requires
+        // SMS_API in prod, but this is belt-and-suspenders: if someone bypasses
+        // that check or runs with an empty key, fail loudly rather than log the
+        // OTP and return a fake success.
+        if (process.env.NODE_ENV === 'production') {
+            throw new Error('SMS_API is not configured — cannot send verification code in production');
+        }
         console.warn('SMS_API not configured. OTP code:', code);
         return { devCode: code };
     }
