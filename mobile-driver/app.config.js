@@ -78,12 +78,7 @@ export default {
         }
       ],
       '@react-native-community/datetimepicker',
-      [
-        '@rnmapbox/maps',
-        {
-          RNMapboxMapsDownloadToken: process.env.RNMAPBOX_MAPS_DOWNLOAD_TOKEN || ''
-        }
-      ],
+      '@rnmapbox/maps',
       ['@sentry/react-native/expo', {
         organization: 'cryptalyst',
         project: 'mobile-driver',

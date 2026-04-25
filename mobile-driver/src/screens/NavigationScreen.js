@@ -641,7 +641,7 @@ export default function NavigationScreen({ navigation, route: navRoute }) {
         {polylineCoords.length > 0 && (
           <Polyline
             coordinates={polylineCoords}
-            strokeColor={colors.primary}
+            strokeColor="#10B981"
             strokeWidth={5}
             lineCap="round"
             lineJoin="round"

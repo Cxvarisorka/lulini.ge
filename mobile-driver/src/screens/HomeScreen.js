@@ -691,11 +691,13 @@ export default function HomeScreen({ navigation }) {
             anchor={{ x: 0.5, y: 1 }}
           />
         ) : null}
-        {/* Route polyline for built-in navigation */}
+        {/* Route polyline — LineLayer is pinned `aboveLayerID="road-label"`
+            inside PolylineWrapper so it sits below the marker SymbolLayers
+            regardless of JSX order here. */}
         {routePolyline.length > 1 && (
           <Polyline
             coordinates={routePolyline}
-            strokeColor={colors.primary}
+            strokeColor="#10B981"
             strokeWidth={5}
             lineCap="round"
             lineJoin="round"

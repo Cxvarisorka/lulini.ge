@@ -40,18 +40,24 @@ export const markerImages = {
  * via `<Mapbox.Images images={...}>`. Because every consumer passes the
  * markerImages.X reference (not a string), the wrapper does this lookup.
  *
+ * IDs are prefixed with `lulini_` so they don't collide with images already
+ * baked into the active Mapbox style (e.g. `streets-v12` ships its own `car`
+ * icon — without the namespace prefix, Mapbox warns and the style image wins).
+ *
  * Synthesised lazily so adding a key to `markerImages` above is enough.
  */
+const ID_PREFIX = 'lulini_';
+
 let _idLookup = null;
 function buildLookup() {
   const map = new Map();
   for (const [key, value] of Object.entries(markerImages)) {
     if (Array.isArray(value)) {
       for (let i = 0; i < value.length; i++) {
-        if (value[i]) map.set(value[i], `${key}_${i}`);
+        if (value[i]) map.set(value[i], `${ID_PREFIX}${key}_${i}`);
       }
     } else if (value) {
-      map.set(value, key);
+      map.set(value, `${ID_PREFIX}${key}`);
     }
   }
   return map;
@@ -72,10 +78,10 @@ export function buildMapboxImageMap() {
   for (const [key, value] of Object.entries(markerImages)) {
     if (Array.isArray(value)) {
       for (let i = 0; i < value.length; i++) {
-        if (value[i]) out[`${key}_${i}`] = value[i];
+        if (value[i]) out[`${ID_PREFIX}${key}_${i}`] = value[i];
       }
     } else if (value) {
-      out[key] = value;
+      out[`${ID_PREFIX}${key}`] = value;
     }
   }
   return out;

@@ -13,7 +13,7 @@
  *   - `lineDashPattern` mirrors react-native-maps semantics if the consumer
  *     passes one (e.g. driver-route style).
  */
-import { memo, useId, useMemo, useRef } from 'react';
+import { memo, useMemo, useRef } from 'react';
 import Mapbox from '@rnmapbox/maps';
 
 import { lineFeature } from './mapboxGeo';
@@ -21,6 +21,12 @@ import { simplifyPolyline } from '../../utils/polylineSimplify';
 
 const DEFAULT_TOLERANCE = 0.00005; // ≈ 5 m at equator
 const SIMPLIFY_THRESHOLD = 80;
+
+// Module-level counter for stable, side-effect-free Mapbox source/layer IDs.
+// `useId()` returns React-internal strings like `«r4»` that Mapbox treats as
+// invalid style identifiers, causing "Layer ... is not in style" errors on
+// updates. Plain alphanumeric IDs avoid that.
+let __idSeed = 0;
 
 function coordsEqual(a, b) {
   if (a === b) return true;
@@ -34,6 +40,15 @@ function coordsEqual(a, b) {
   return true;
 }
 
+// Anchor the polyline to a base layer from the active Mapbox style. Without
+// this, a route polyline that mounts *after* markers (the common case — markers
+// render immediately, the OSRM route arrives seconds later) is appended to the
+// top of the style and ends up drawn OVER the markers. Pinning the LineLayer
+// above "road-label" (present in both streets-v12 and dark-v11) forces it
+// into a slot below everything added dynamically afterwards, so markers
+// consistently sit on top regardless of mount timing.
+const DEFAULT_ABOVE_LAYER_ID = 'road-label';
+
 function PolylineWrapper({
   coordinates,
   simplify = true,
@@ -42,15 +57,18 @@ function PolylineWrapper({
   strokeWidth = 4,
   lineCap = 'round',
   lineJoin = 'round',
+  aboveLayerID = DEFAULT_ABOVE_LAYER_ID,
+  belowLayerID,
   lineDashPattern,
   /* eslint-disable no-unused-vars */
   geodesic, // Mapbox no-op
   zIndex,   // Mapbox uses layer ordering, not zIndex; ignored
   /* eslint-enable no-unused-vars */
 }) {
-  const reactId = useId();
-  const sourceId = useMemo(() => `pwrap-src-${reactId}`, [reactId]);
-  const layerId = useMemo(() => `pwrap-lyr-${reactId}`, [reactId]);
+  const ids = useMemo(() => {
+    const n = ++__idSeed;
+    return { sourceId: `pwrap-src-${n}`, layerId: `pwrap-lyr-${n}` };
+  }, []);
 
   const prevCoordsRef = useRef(null);
   const prevSimplifiedRef = useRef(null);
@@ -75,9 +93,11 @@ function PolylineWrapper({
   if (!shape) return null;
 
   return (
-    <Mapbox.ShapeSource id={sourceId} shape={shape} lineMetrics>
+    <Mapbox.ShapeSource id={ids.sourceId} shape={shape} lineMetrics>
       <Mapbox.LineLayer
-        id={layerId}
+        id={ids.layerId}
+        aboveLayerID={belowLayerID ? undefined : aboveLayerID}
+        belowLayerID={belowLayerID}
         style={{
           lineColor: strokeColor,
           lineWidth: strokeWidth,

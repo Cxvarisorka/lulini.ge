@@ -447,11 +447,14 @@ export default function RideDetailScreen({ navigation, route }) {
                 zIndex={10}
               />
             )}
+            {/* Route polyline — LineLayer is pinned `aboveLayerID="road-label"`
+                inside PolylineWrapper so it sits below the marker SymbolLayers
+                regardless of JSX order here. */}
             {polylineCoords.length > 1 && (
               <Polyline
                 id="ride-route"
                 coordinates={polylineCoords}
-                strokeColor={colors.primary}
+                strokeColor="#10B981"
                 strokeWidth={4}
               />
             )}
