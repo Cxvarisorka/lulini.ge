@@ -36,5 +36,10 @@ docs/
 *REPORT*.md
 PRE_LAUNCH_AUDIT.md
 
+# Internal planning / experiments — kept local only
+spike/
+docker-compose.nominatim.yml
+MAPS_API_OPTIMIZATION_PLAN.md
+
 # IDE
 .idea/
