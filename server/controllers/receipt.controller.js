@@ -12,6 +12,7 @@ const Ride = require('../models/ride.model');
 const Driver = require('../models/driver.model');
 const AppError = require('../utils/AppError');
 const catchAsync = require('../utils/catchAsync');
+const { maskPhone } = require('../utils/phoneMask');
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -129,7 +130,10 @@ const getReceipt = catchAsync(async (req, res, next) => {
 
         driver: ride.driver ? {
             name: `${ride.driver.user?.firstName || ''} ${ride.driver.user?.lastName || ''}`.trim(),
-            phone: ride.driver.user?.phone ?? null,
+            // Admins see full phone for dispute resolution; passenger + driver see masked.
+            phone: isAdmin
+                ? (ride.driver.user?.phone ?? null)
+                : maskPhone(ride.driver.user?.phone ?? null),
             profileImage: ride.driver.user?.profileImage ?? null,
             vehicle: ride.driver.vehicle
                 ? {
@@ -146,7 +150,11 @@ const getReceipt = catchAsync(async (req, res, next) => {
 
         passenger: {
             name: ride.passengerName,
-            phone: ride.passengerPhone || null
+            // Admins see full phone; the driver who ran the ride sees masked;
+            // the passenger themselves can see their own phone unmasked.
+            phone: (isAdmin || isPassenger)
+                ? (ride.passengerPhone || null)
+                : maskPhone(ride.passengerPhone || null)
         },
 
         fare: {

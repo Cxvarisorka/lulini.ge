@@ -19,13 +19,33 @@ const { isEnabled } = require('../utils/featureFlags');
 const { findDriversByETA } = require('../services/etaDispatch.service');
 const { snapRidePickup } = require('../services/roadSnap.service');
 const { recordRecentLocation } = require('../services/recentLocations.service');
+const placesService = require('../services/places.service');
 const logger = require('../utils/logger');
 const { createOffer, sendOfferToDriver, OFFER_TIMEOUT_MS, getEligibleDriverTypes } = require('../services/driverDispatch.service');
 const { withLock } = require('../utils/distributedLock');
 const { notifyRideResponse, waitForRideResponse } = require('../services/rideDispatchPubsub');
+const routing = require('../services/routing.service');
+const driverLocService = require('../services/driverLocation.service');
 
 // Proximity threshold: driver must be within this distance to confirm arrival/completion
 const ARRIVAL_PROXIMITY_KM = 0.5; // 500 meters
+
+/**
+ * Fire-and-forget Place upsert for a ride leg. Builds canonical IDs from
+ * coords (manual provider) when none is attached. Used to seed the popular-
+ * destinations cache so future autocomplete queries can hit Mongo instead of
+ * paying Google. Never blocks the ride-create critical path — silent on error.
+ */
+function upsertRidePlace(loc) {
+    if (!loc?.address || !Number.isFinite(loc?.lat) || !Number.isFinite(loc?.lng)) return;
+    const canonicalId = `manual:${parseFloat(loc.lat).toFixed(4)},${parseFloat(loc.lng).toFixed(4)}`;
+    placesService.upsertPlace({
+        canonicalId,
+        provider: 'manual',
+        address: loc.address,
+        coords: { lat: loc.lat, lng: loc.lng },
+    }).catch(() => {});
+}
 
 // Inverse: which ride types can a driver of a given type accept?
 function getEligibleRideTypes(driverVehicleType) {
@@ -236,6 +256,13 @@ const createRide = catchAsync(async (req, res, next) => {
 
     // ── Phase 5: Record dropoff as recent location for user ──
     recordRecentLocation(req.user.id, dropoff).catch(() => {});
+
+    // ── Maps Phase 3.2: write-through to Place collection (fire-and-forget) ──
+    // Seeds the popular-destinations cache so future autocomplete queries can
+    // hit Mongo instead of paying Google for the same recurring trips.
+    upsertRidePlace(pickup);
+    upsertRidePlace(dropoff);
+    if (Array.isArray(validStops)) validStops.forEach(upsertRidePlace);
 
     // Build enriched ride data with commission info for driver display
     const rideData = ride.toObject();
@@ -2272,6 +2299,124 @@ const broadcastScheduledRides = async (io) => {
     }
 };
 
+// @desc    Server-composed quote for the pickup screen: driver availability
+//          (filtered by class), driver ETA to pickup, trip ETA pickup→dropoff,
+//          and estimated price. Hides OSRM/Google selection and price math
+//          from the client.
+// @route   GET /api/rides/quote
+// @access  Private
+const getRideQuote = catchAsync(async (req, res, next) => {
+    const { pickupLat, pickupLng, dropoffLat, dropoffLng, vehicleType } = req.query;
+
+    if (!pickupLat || !pickupLng) {
+        return next(new AppError('pickupLat and pickupLng are required', 400));
+    }
+    if (!vehicleType) {
+        return next(new AppError('vehicleType is required', 400));
+    }
+
+    const pLat = parseFloat(pickupLat);
+    const pLng = parseFloat(pickupLng);
+    const dLat = dropoffLat != null ? parseFloat(dropoffLat) : NaN;
+    const dLng = dropoffLng != null ? parseFloat(dropoffLng) : NaN;
+    const hasDropoff = Number.isFinite(dLat) && Number.isFinite(dLng);
+
+    if (!Number.isFinite(pLat) || !Number.isFinite(pLng)) {
+        return next(new AppError('Invalid pickup coordinates', 400));
+    }
+
+    // ── Find nearest driver in the requested class ──
+    // Redis GEOSEARCH returns results sorted by distance; MongoDB $near does too.
+    let nearestDriver = null;
+    let driverCount = 0;
+    let redisHandled = false;
+
+    if (isEnabled('REDIS_NEARBY_QUERY')) {
+        const redisResults = await driverLocService.findNearbyDrivers(
+            pLat, pLng, 10, [vehicleType], 50
+        );
+        if (redisResults !== null) {
+            redisHandled = true;
+            driverCount = redisResults.length;
+            if (driverCount > 0) {
+                const r = redisResults[0];
+                nearestDriver = {
+                    lat: r.coordinates?.latitude ?? pLat,
+                    lng: r.coordinates?.longitude ?? pLng,
+                };
+            }
+        }
+    }
+
+    if (!redisHandled) {
+        const drivers = await Driver.find({
+            status: 'online',
+            isActive: true,
+            isApproved: true,
+            'vehicle.type': vehicleType,
+            location: {
+                $near: {
+                    $geometry: { type: 'Point', coordinates: [pLng, pLat] },
+                    $maxDistance: 10000,
+                },
+            },
+        }).select('location').limit(50).lean().read('secondaryPreferred');
+
+        const locs = drivers
+            .filter(d => d.location && d.location.coordinates)
+            .map(d => ({ lat: d.location.coordinates[1], lng: d.location.coordinates[0] }));
+        driverCount = locs.length;
+        if (driverCount > 0) nearestDriver = locs[0];
+    }
+
+    const driverAvailable = driverCount > 0;
+
+    // ── Parallel route fetch: driver→pickup and pickup→dropoff ──
+    // Failures degrade gracefully to null rather than failing the whole quote.
+    const [driverRoute, tripRoute] = await Promise.all([
+        driverAvailable
+            ? routing.getRoute(nearestDriver, { lat: pLat, lng: pLng }).catch(err => {
+                logger.warn('Quote driver route failed: ' + err.message, 'ride.quote');
+                return null;
+            })
+            : Promise.resolve(null),
+        hasDropoff
+            ? routing.getRoute({ lat: pLat, lng: pLng }, { lat: dLat, lng: dLng }).catch(err => {
+                logger.warn('Quote trip route failed: ' + err.message, 'ride.quote');
+                return null;
+            })
+            : Promise.resolve(null),
+    ]);
+
+    const driverEtaSeconds = driverRoute ? Math.round(driverRoute.durationSeconds) : null;
+    const tripEtaSeconds = tripRoute ? Math.round(tripRoute.durationSeconds) : null;
+    const tripDistanceMeters = tripRoute ? tripRoute.distanceMeters : null;
+
+    // ── Estimated price — matches client formula in VehicleTypeSelector.getPrice ──
+    let estimatedPrice = null;
+    if (tripDistanceMeters != null) {
+        const pricingConfig = await Settings.getPricing().catch(() => null);
+        const cat = pricingConfig?.categories?.[vehicleType] ?? pricingConfig?.categories?.economy;
+        if (cat) {
+            const km = tripDistanceMeters / 1000;
+            estimatedPrice = Math.round((cat.basePrice + km * cat.kmPrice) * 10) / 10;
+        }
+    }
+
+    res.json({
+        success: true,
+        data: {
+            driverAvailable,
+            driverCount,
+            driverEtaSeconds,
+            tripEtaSeconds,
+            tripDistanceMeters,
+            estimatedPrice,
+            vehicleType,
+        },
+    });
+});
+
 module.exports = {
     createRide,
     adminCreateRide,
@@ -2289,6 +2434,7 @@ module.exports = {
     reviewDriver,
     reviewPassenger,
     getScheduledRides,
+    getRideQuote,
     receiveLocationBatch,
     expireOldRides,
     expireWaitingRides,

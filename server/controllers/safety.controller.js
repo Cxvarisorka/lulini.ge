@@ -419,28 +419,26 @@ const getRideShareStatus = catchAsync(async (req, res, next) => {
 
 /**
  * GET /api/safety/rides/track/:rideId
- * Public endpoint — resolve a rideId to its share token and redirect.
- * Used for legacy /track/:rideId links.
+ * Public endpoint — resolve a rideId to its existing share token.
+ *
+ * This endpoint MUST NOT create a share. The authenticated
+ * `POST /api/safety/rides/:rideId/share` endpoint is the only way to create
+ * a share, and it verifies the caller owns the ride. Auto-creating shares
+ * here turned a rideId into a public tracking oracle — anyone who could
+ * guess or harvest a rideId (predictable ObjectIds, leaked logs, URLs)
+ * could start live-tracking the passenger's pickup/dropoff/driver location.
+ *
+ * Returns 404 for unknown rideIds AND for rideIds that exist but have
+ * never been shared by the owner — don't let callers distinguish the two,
+ * otherwise the endpoint leaks ride existence.
  */
 const resolveTrackLink = catchAsync(async (req, res, next) => {
     const { rideId } = req.params;
 
-    // Try to find an existing share
-    let share = await RideShare.findOne({ ride: rideId }).select('shareToken').lean();
+    const share = await RideShare.findOne({ ride: rideId }).select('shareToken').lean();
 
-    // If no share exists, create one (legacy links were shared without calling the API)
     if (!share) {
-        const ride = await Ride.findById(rideId).select('_id user').lean();
-        if (!ride) {
-            return next(new AppError('Ride not found', 404));
-        }
-
-        const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
-        share = await RideShare.create({
-            ride: rideId,
-            sharedBy: ride.user,
-            expiresAt
-        });
+        return next(new AppError('Shared ride not found', 404));
     }
 
     res.json({
