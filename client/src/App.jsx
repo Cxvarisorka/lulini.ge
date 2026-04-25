@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Analytics } from '@vercel/analytics/react';
+import { SpeedInsights } from '@vercel/speed-insights/react';
 
 import { Home } from './pages/Home';
 import { Contact } from './pages/Contact';
@@ -73,6 +74,8 @@ function AppContent() {
           <TawkTo />
           {/* Vercel Web Analytics */}
           <Analytics />
+          {/* Vercel Speed Insights */}
+          <SpeedInsights />
         </AdminProvider>
       </SocketProvider>
     </UserProvider>
