@@ -5,6 +5,8 @@ const catchAsync = require('../utils/catchAsync');
 const { getRecentLocations } = require('../services/recentLocations.service');
 const geocoding = require('../services/geocoding.service');
 const cache = require('../services/cache.service');
+const metrics = require('../services/metrics.service');
+const places = require('../services/places.service');
 const { getAllFlags } = require('../utils/featureFlags');
 
 // All routes require authentication
@@ -77,6 +79,34 @@ router.get('/provider-stats', catchAsync(async (req, res) => {
     }
     const providers = await cache.getProviderHealth();
     res.json({ success: true, data: { providers, featureFlags: getAllFlags() } });
+}));
+
+// ── GET /api/locations/nearby-popular ──
+// Geo-sorted popular places — used by the search-sheet empty state. Zero API cost.
+router.get('/nearby-popular', catchAsync(async (req, res) => {
+    const lat = parseFloat(req.query.lat);
+    const lng = parseFloat(req.query.lng);
+    const limit = Math.min(parseInt(req.query.limit, 10) || 5, 10);
+    const maxDistanceMeters = Math.min(parseInt(req.query.radius, 10) || 5000, 25000);
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return res.status(400).json({ success: false, message: 'lat and lng are required' });
+    }
+
+    const docs = await places.nearbyPopular({ lat, lng, limit, maxDistanceMeters });
+    const results = docs.map(places.toPrediction).filter(Boolean);
+    res.json({ success: true, count: results.length, data: { results } });
+}));
+
+// ── GET /api/locations/cost-metrics ──
+// Last N days (default 7) of provider call counts + cache hit ratios.
+router.get('/cost-metrics', catchAsync(async (req, res) => {
+    if (req.user.role !== 'admin') {
+        return res.status(403).json({ success: false, message: 'Admin only' });
+    }
+    const days = Math.min(Math.max(parseInt(req.query.days, 10) || 7, 1), 14);
+    const data = await metrics.getMetrics(days);
+    res.json({ success: true, data });
 }));
 
 module.exports = router;

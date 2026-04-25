@@ -17,17 +17,30 @@
  */
 
 const logger = require('../utils/logger');
+const metrics = require('../services/metrics.service');
 
 const NOMINATIM_BASE = process.env.NOMINATIM_URL || 'https://nominatim.openstreetmap.org';
 const USER_AGENT    = process.env.NOMINATIM_USER_AGENT || 'Lulini/1.0 (ride-hailing; contact@lulini.ge)';
 const MIN_INTERVAL_MS = 1100;
 const FETCH_TIMEOUT_MS = 8000;
 
-// ── Global request serializer: 1 req/sec ──
+// Phase 4.2: when running against a self-hosted Nominatim, bypass the global
+// 1 rps serializer — it exists solely to honour the public OSM usage policy.
+// Triggered by NOMINATIM_BYPASS_RATELIMIT=1 (or implicitly via a non-OSM URL).
+const PUBLIC_NOMINATIM = /nominatim\.openstreetmap\.org/i;
+const BYPASS_RATE_LIMIT =
+    process.env.NOMINATIM_BYPASS_RATELIMIT === '1' ||
+    !PUBLIC_NOMINATIM.test(NOMINATIM_BASE);
+
+// ── Global request serializer: 1 req/sec (skipped when self-hosted) ──
 let lastRequestTime = 0;
 let requestQueue = Promise.resolve();
 
 function enqueue(fn) {
+    if (BYPASS_RATE_LIMIT) {
+        // Self-hosted: just run, parallelism is fine.
+        return Promise.resolve().then(fn);
+    }
     requestQueue = requestQueue.then(async () => {
         const wait = MIN_INTERVAL_MS - (Date.now() - lastRequestTime);
         if (wait > 0) await new Promise(r => setTimeout(r, wait));
@@ -72,6 +85,7 @@ async function forwardGeocode(query, { countryCode = 'GE', language = 'ka,en', v
             params.set('bounded', '0');
         }
 
+        metrics.apiCall.nominatim();
         const res = await fetch(`${NOMINATIM_BASE}/search?${params}`, {
             headers: { 'User-Agent': USER_AGENT },
             signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
@@ -93,6 +107,7 @@ async function reverseGeocode(lat, lng, { language = 'ka,en' } = {}) {
             'accept-language': language,
         });
 
+        metrics.apiCall.nominatim();
         const res = await fetch(`${NOMINATIM_BASE}/reverse?${params}`, {
             headers: { 'User-Agent': USER_AGENT },
             signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),

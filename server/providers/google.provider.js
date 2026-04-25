@@ -21,6 +21,7 @@
  */
 
 const logger = require('../utils/logger');
+const metrics = require('../services/metrics.service');
 
 const API_KEY   = process.env.GOOGLE_MAPS_API_KEY;
 const MAPS_BASE = 'https://maps.googleapis.com/maps/api';
@@ -62,6 +63,7 @@ async function getRoute({ origin, destination }) {
         `origin=${origin.lat},${origin.lng}` +
         `&destination=${destination.lat},${destination.lng}` +
         `&mode=driving&departure_time=now&key=${API_KEY}`;
+    metrics.apiCall.googleDirections();
     const data = await fetchJson(url);
     if (data.status !== 'OK' || !data.routes?.[0]) {
         throw new Error(`Google Directions status=${data.status}`);
@@ -92,6 +94,7 @@ async function getMatrix({ origins, destinations }) {
     const url = `${MAPS_BASE}/distancematrix/json?` +
         `origins=${encodeURIComponent(o)}&destinations=${encodeURIComponent(d)}` +
         `&mode=driving&key=${API_KEY}`;
+    metrics.apiCall.googleMatrix();
     const data = await fetchJson(url);
     if (data.status !== 'OK') throw new Error(`Google Matrix status=${data.status}`);
 
@@ -139,6 +142,7 @@ async function forwardGeocode(query, { countryCode = 'GE', language = 'ka' } = {
         address: query, key: API_KEY, language,
         components: `country:${countryCode}`,
     });
+    metrics.apiCall.googleGeocode();
     const data = await fetchJson(`${MAPS_BASE}/geocode/json?${params}`);
     if (data.status !== 'OK') {
         if (data.status !== 'ZERO_RESULTS') {
@@ -154,6 +158,7 @@ async function reverseGeocode(lat, lng, { language = 'ka' } = {}) {
     const params = new URLSearchParams({
         latlng: `${lat},${lng}`, key: API_KEY, language,
     });
+    metrics.apiCall.googleGeocode();
     const data = await fetchJson(`${MAPS_BASE}/geocode/json?${params}`);
     if (data.status !== 'OK' || !data.results?.[0]) return null;
     return normalizeGeocode(data.results[0]);
@@ -175,6 +180,7 @@ async function autocomplete(input, { language = 'ka', countryCode = 'GE', locati
     }
     if (sessionToken) params.set('sessiontoken', sessionToken);
 
+    metrics.apiCall.googleAutocomplete();
     const data = await fetchJson(`${MAPS_BASE}/place/autocomplete/json?${params}`);
     if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') {
         throw new Error(`Google Places status=${data.status}`);
@@ -197,6 +203,7 @@ async function placeDetails(placeId, { language = 'ka', sessionToken } = {}) {
     });
     if (sessionToken) params.set('sessiontoken', sessionToken);
 
+    metrics.apiCall.googleDetails();
     const data = await fetchJson(`${MAPS_BASE}/place/details/json?${params}`);
     if (data.status !== 'OK' || !data.result) return null;
     const r = data.result;

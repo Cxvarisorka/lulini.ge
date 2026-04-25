@@ -19,12 +19,14 @@ const logger = require('../utils/logger');
 
 // ── TTL policy (seconds) ──
 const TTL = Object.freeze({
-    ROUTE:        300,    // 5 min
-    MATRIX:       120,    // 2 min — freshness matters for dispatch
-    GEO_FWD:      86400,  // 24h
-    GEO_REV:      86400,  // 24h
-    AUTOCOMPLETE: 600,    // 10 min
-    SNAP:         3600,   // 1h
+    ROUTE:           300,        // 5 min
+    MATRIX:          120,        // 2 min — freshness matters for dispatch
+    GEO_FWD:         86400,      // 24h
+    GEO_REV:         86400,      // 24h
+    AUTOCOMPLETE:    86400,      // 24h — predictions are stable (Phase 2.4 bumped from 10 min)
+    AUTOCOMPLETE_NEG: 300,       // 5 min — negative results: short TTL to recover fast
+    PLACE_DETAILS:   86400 * 30, // 30d — Google place details rarely change
+    SNAP:            3600,       // 1h
 });
 
 const COORD_PRECISION = 4; // ~11m
@@ -35,6 +37,14 @@ function roundCoord(n) {
 
 function hash(input) {
     return crypto.createHash('sha256').update(input).digest('hex').slice(0, 16);
+}
+
+// Phase 2.5: Unicode NFC normalization collapses duplicate cache entries from
+// differently-composed Georgian (and other) characters. Trim + lowercase to
+// match server-side casing rules.
+function normalizeQuery(s) {
+    if (!s) return '';
+    return s.trim().normalize('NFC').toLowerCase();
 }
 
 // ── Key builders ──
@@ -48,14 +58,17 @@ const keys = {
         return `matrix:${profile}:${hash(`${o}>${d}`)}`;
     },
 
-    geoFwd: (provider, query, countryCode = 'GE') =>
-        `geo:fwd:${provider}:${hash(`${query.trim().toLowerCase()}|${countryCode.toUpperCase()}`)}`,
+    geoFwd: (provider, query, countryCode = 'GE', language = 'ka') =>
+        `geo:fwd:${provider}:${hash(`${normalizeQuery(query)}|${countryCode.toUpperCase()}|${language}`)}`,
 
-    geoRev: (provider, lat, lng) =>
-        `geo:rev:${provider}:${roundCoord(lat)},${roundCoord(lng)}`,
+    geoRev: (provider, lat, lng, language = 'ka') =>
+        `geo:rev:${provider}:${roundCoord(lat)},${roundCoord(lng)}:${language}`,
 
-    autocomplete: (provider, query, biasKey = '') =>
-        `autocomplete:${provider}:${hash(`${query.trim().toLowerCase()}|${biasKey}`)}`,
+    autocomplete: (provider, query, biasKey = '', language = 'ka') =>
+        `autocomplete:${provider}:${hash(`${normalizeQuery(query)}|${biasKey}|${language}`)}`,
+
+    placeDetails: (placeId, language = 'ka') =>
+        `placeDetails:${hash(`${placeId}|${language}`)}`,
 
     snap: (points) =>
         `snap:${hash(points.map(p => `${roundCoord(p.lat)},${roundCoord(p.lng)}`).join('|'))}`,

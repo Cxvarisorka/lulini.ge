@@ -38,9 +38,10 @@ async function forwardGeocode(query, opts = {}) {
     if (!query || query.trim().length < 2) return { results: [], provider: null, cached: false };
 
     const countryCode = (opts.countryCode || 'GE').toUpperCase();
+    const language = opts.language || 'ka';
 
     // Primary cache (Nominatim)
-    const nomKey = cache.keys.geoFwd('nominatim', query, countryCode);
+    const nomKey = cache.keys.geoFwd('nominatim', query, countryCode, language);
     const nomCached = await cache.get(nomKey);
     if (nomCached && nomCached.length > 0) {
         return { results: nomCached, provider: 'nominatim', cached: true };
@@ -57,7 +58,7 @@ async function forwardGeocode(query, opts = {}) {
     }
 
     // Fallback: Google
-    const gKey = cache.keys.geoFwd('google', query, countryCode);
+    const gKey = cache.keys.geoFwd('google', query, countryCode, language);
     const gCached = await cache.get(gKey);
     if (gCached && gCached.length > 0) {
         return { results: gCached, provider: 'google', cached: true };
@@ -83,7 +84,8 @@ async function reverseGeocode(lat, lng, opts = {}) {
         throw new Error('lat and lng must be numbers');
     }
 
-    const nomKey = cache.keys.geoRev('nominatim', lat, lng);
+    const language = opts.language || 'ka';
+    const nomKey = cache.keys.geoRev('nominatim', lat, lng, language);
     const nomCached = await cache.get(nomKey);
     if (nomCached) return { ...nomCached, cached: true };
 
@@ -97,7 +99,7 @@ async function reverseGeocode(lat, lng, opts = {}) {
         logger.warn(`Nominatim rev failed, trying Google: ${err.message}`, 'geocoding.service');
     }
 
-    const gKey = cache.keys.geoRev('google', lat, lng);
+    const gKey = cache.keys.geoRev('google', lat, lng, language);
     const gCached = await cache.get(gKey);
     if (gCached) return { ...gCached, cached: true };
 
