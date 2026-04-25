@@ -1,80 +1,93 @@
 /**
  * DestinationMarker
  *
- * Black "Drop off" pill with optional ETA text overlay (e.g. "12 min").
- * Mapbox SymbolLayer with `iconTextFit: 'both'` stretches the boltpin
- * background PNG around the dynamic text — pixel-equivalent to the prior
- * BoltPin JSX at a fraction of the cost.
- *
- * Anchor is `bottom`: the dot at the base of the pill sits exactly on the
- * geographic coordinate.
- *
- * Note: the previous implementation supported `draggable`; that was unused at
- * call sites (only `DraggablePickupMarker` is dragged in production). If a
- * dropoff ever needs drag, switch this back to a `<MarkerWrapper>` with JSX
- * children (the slow but flexible PointAnnotation path).
+ * Dark pill pin for the dropoff. Same split as DraggablePickupMarker:
+ *   - `Mapbox.MarkerView` hosts the JSX `BoltPin`, wrapped in a
+ *     `Pressable` so tapping triggers the pan-to-adjust flow via
+ *     `onPress`.
+ *   - Transparent `Mapbox.PointAnnotation` drag hitbox, mounted only
+ *     when `draggable` is true. Live onDrag updates a local coord so
+ *     the MarkerView follows the finger at native frame rate.
  */
-import { memo, useMemo } from 'react';
+import { memo, useCallback, useEffect, useState } from 'react';
+import { View, Pressable } from 'react-native';
 import Mapbox from '@rnmapbox/maps';
 
-import { imageIdFor, markerImages } from './markerImages';
+import BoltPin from './BoltPin';
+import { fromLngLat } from './mapboxGeo';
 
-let __idSeed = 0;
+const DROPOFF_COLOR = '#111827';
+const ANCHOR_BOTTOM = { x: 0.5, y: 1 };
 
-const DestinationMarker = memo(({ coordinate, etaMinutes }) => {
-  const lat = coordinate?.latitude;
-  const lng = coordinate?.longitude;
-  const isValid = isFinite(lat) && isFinite(lng);
+const HITBOX_SIZE = 56;
+const hitboxStyle = {
+  width: HITBOX_SIZE,
+  height: HITBOX_SIZE,
+  backgroundColor: 'transparent',
+};
 
-  const ids = useMemo(() => {
-    const n = ++__idSeed;
-    return { sourceId: `dest-src-${n}`, layerId: `dest-lyr-${n}` };
+const DestinationMarker = memo(({ coordinate, etaMinutes, draggable, onDragEnd, onPress }) => {
+  const parentLat = coordinate?.latitude;
+  const parentLng = coordinate?.longitude;
+  const isValid = isFinite(parentLat) && isFinite(parentLng);
+
+  const [dragCoord, setDragCoord] = useState(null);
+
+  useEffect(() => {
+    setDragCoord(null);
+  }, [parentLat, parentLng]);
+
+  const handleDragStart = useCallback((e) => {
+    const point = fromLngLat(e?.geometry?.coordinates);
+    if (point) setDragCoord(point);
   }, []);
 
-  const label = etaMinutes != null ? `${etaMinutes} min` : 'Drop off';
+  const handleDrag = useCallback((e) => {
+    const point = fromLngLat(e?.geometry?.coordinates);
+    if (point) setDragCoord(point);
+  }, []);
 
-  const shape = useMemo(() => {
-    if (!isValid) return null;
-    return {
-      type: 'Feature',
-      geometry: { type: 'Point', coordinates: [lng, lat] },
-      properties: { label },
-    };
-  }, [lat, lng, label, isValid]);
+  const handleDragEnd = useCallback(
+    (e) => {
+      const point = fromLngLat(e?.geometry?.coordinates);
+      if (point && onDragEnd) onDragEnd(point);
+    },
+    [onDragEnd]
+  );
 
-  if (!shape) return null;
+  if (!isValid) return null;
 
-  const bgImageId = imageIdFor(markerImages.boltpinBgDark);
-  if (!bgImageId) return null;
+  const displayLat = dragCoord?.latitude ?? parentLat;
+  const displayLng = dragCoord?.longitude ?? parentLng;
+  const title = etaMinutes != null ? `${etaMinutes} min` : 'Here';
 
   return (
-    <Mapbox.ShapeSource id={ids.sourceId} shape={shape}>
-      <Mapbox.SymbolLayer
-        id={ids.layerId}
-        style={{
-          iconImage: bgImageId,
-          iconAnchor: 'bottom',
-          iconAllowOverlap: true,
-          iconIgnorePlacement: true,
-          // Pill stretches around the text; padding keeps a little white space.
-          iconTextFit: 'both',
-          iconTextFitPadding: [4, 10, 4, 10],
-          textField: ['get', 'label'],
-          textColor: '#FFFFFF',
-          textSize: 13,
-          textFont: ['Open Sans Bold', 'Arial Unicode MS Bold'],
-          textAnchor: 'bottom',
-          // Offset the text up so it sits inside the pill, not over the tail.
-          textOffset: [0, -1.6],
-          textIgnorePlacement: true,
-          textAllowOverlap: true,
-          symbolSortKey: 10,
-        }}
-      />
-    </Mapbox.ShapeSource>
+    <>
+      <Mapbox.MarkerView
+        coordinate={[displayLng, displayLat]}
+        anchor={ANCHOR_BOTTOM}
+        allowOverlap
+      >
+        <Pressable onPress={onPress} hitSlop={8}>
+          <BoltPin color={DROPOFF_COLOR} caption="Drop off" title={title} />
+        </Pressable>
+      </Mapbox.MarkerView>
+      {draggable && (
+        <Mapbox.PointAnnotation
+          id="dropoff-drag-hitbox"
+          coordinate={[parentLng, parentLat]}
+          anchor={ANCHOR_BOTTOM}
+          draggable
+          onDragStart={handleDragStart}
+          onDrag={handleDrag}
+          onDragEnd={handleDragEnd}
+        >
+          <View style={hitboxStyle} collapsable={false} />
+        </Mapbox.PointAnnotation>
+      )}
+    </>
   );
 });
 
 DestinationMarker.displayName = 'DestinationMarker';
-
 export default DestinationMarker;

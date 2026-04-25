@@ -16,11 +16,16 @@
  * silently — matches the previous behaviour and prevents native bridge
  * crashes on iOS / Android.
  */
-import { forwardRef, useCallback, useId, useMemo } from 'react';
+import { forwardRef, useCallback, useMemo } from 'react';
 import Mapbox from '@rnmapbox/maps';
 
 import { anchorToIconAnchor, fromLngLat, pointFeature } from './mapboxGeo';
 import { imageIdFor } from './markerImages';
+
+// Module-level counter for stable Mapbox source/layer IDs. `useId()` returns
+// React-internal strings like `«r4»` that Mapbox treats as invalid style
+// identifiers, causing "Layer ... is not in style" errors on updates.
+let __idSeed = 0;
 
 function isValidCoord(coord) {
   if (!coord) return false;
@@ -55,11 +60,15 @@ function MarkerWrapper(
   },
   ref
 ) {
-  const reactId = useId();
-  // Stable IDs for the source / layer pair.
-  const sourceId = useMemo(() => `mwrap-src-${reactId}`, [reactId]);
-  const layerId = useMemo(() => `mwrap-lyr-${reactId}`, [reactId]);
-  const annotationId = useMemo(() => `mwrap-ann-${reactId}`, [reactId]);
+  // Stable IDs for the source / layer / annotation triple.
+  const ids = useMemo(() => {
+    const n = ++__idSeed;
+    return {
+      sourceId: `mwrap-src-${n}`,
+      layerId: `mwrap-lyr-${n}`,
+      annotationId: `mwrap-ann-${n}`,
+    };
+  }, []);
 
   // Build the GeoJSON feature for the SymbolLayer path. Recomputed only when
   // coordinate or rotation actually changes — preserves shallow identity so
@@ -96,9 +105,9 @@ function MarkerWrapper(
     }
     const iconAnchor = anchorToIconAnchor(anchor);
     return (
-      <Mapbox.ShapeSource id={sourceId} ref={ref} shape={shape} onPress={onPress}>
+      <Mapbox.ShapeSource id={ids.sourceId} ref={ref} shape={shape} onPress={onPress}>
         <Mapbox.SymbolLayer
-          id={layerId}
+          id={ids.layerId}
           style={{
             iconImage: iconImageId,
             iconAnchor,
@@ -121,7 +130,7 @@ function MarkerWrapper(
   return (
     <Mapbox.PointAnnotation
       ref={ref}
-      id={annotationId}
+      id={ids.annotationId}
       coordinate={[lng, lat]}
       anchor={anchor ? { x: anchor.x ?? 0.5, y: anchor.y ?? 0.5 } : undefined}
       draggable={!!draggable}

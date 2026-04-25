@@ -66,9 +66,13 @@ export const mapStyle = [
   { featureType: 'administrative.locality', elementType: 'labels.text.stroke', stylers: [{ color: '#ffffff' }, { weight: 4 }] },
 ];
 
-// Route polyline style — dark with rounded caps, Uber-like
+// Route polyline color — Bolt-like green, theme-independent so it stays
+// visible on both light and dark map styles.
+export const ROUTE_COLOR = '#10B981';
+
+// Route polyline style — green with rounded caps.
 export const ROUTE_STYLE = {
-  strokeColor: '#1a1a2e',
+  strokeColor: ROUTE_COLOR,
   strokeWidth: 5,
   lineCap: 'round',
   lineJoin: 'round',
@@ -84,7 +88,7 @@ export const ROUTE_SHADOW_STYLE = {
 
 // Driver-to-pickup route style — slightly thinner
 export const DRIVER_ROUTE_STYLE = {
-  strokeColor: '#1a1a2e',
+  strokeColor: ROUTE_COLOR,
   strokeWidth: 4,
   lineCap: 'round',
   lineJoin: 'round',
@@ -134,23 +138,24 @@ export const mapStyleDark = [
   { featureType: 'administrative.locality', elementType: 'labels.text.fill', stylers: [{ color: '#d59563' }] },
 ];
 
-// Dark mode route styles — brighter colors for visibility on dark map
+// Dark mode route styles — same green as light mode for consistent, always-
+// visible route lines across theme switches.
 export const ROUTE_STYLE_DARK = {
-  strokeColor: '#6c9cff',
+  strokeColor: ROUTE_COLOR,
   strokeWidth: 5,
   lineCap: 'round',
   lineJoin: 'round',
 };
 
 export const ROUTE_SHADOW_STYLE_DARK = {
-  strokeColor: '#3366cc40',
+  strokeColor: '#00000040',
   strokeWidth: 8,
   lineCap: 'round',
   lineJoin: 'round',
 };
 
 export const DRIVER_ROUTE_STYLE_DARK = {
-  strokeColor: '#6c9cff',
+  strokeColor: ROUTE_COLOR,
   strokeWidth: 4,
   lineCap: 'round',
   lineJoin: 'round',

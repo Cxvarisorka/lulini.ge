@@ -15,7 +15,7 @@
  * the standard Mapbox light/dark presets. The legacy `customMapStyle` (Google
  * Maps JSON) prop is silently dropped — Mapbox uses GL-style URLs instead.
  */
-import { forwardRef, memo, useCallback, useImperativeHandle, useMemo, useRef } from 'react';
+import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import Mapbox from '@rnmapbox/maps';
 
 import {
@@ -93,6 +93,61 @@ function MapViewWrapper(
     () => resolveStyleURL({ styleURL, colorScheme }),
     [styleURL, colorScheme]
   );
+
+  // Style-swap state machine.
+  //
+  // Problem: on theme toggle, rnmapbox processes `styleURL` updates and child
+  // layer removes on the same native tick. The style swap often wins, leaving
+  // child layers orphaned in the new style — they fail to re-insert (polyline
+  // anchored `aboveLayerID="road-label"` → `unmetPositionDependency`), then
+  // their unmount logs `Layer X does not exist`.
+  //
+  // Fix: split the transition into three distinct React commits, each a pure
+  // operation for Mapbox:
+  //   ready      → children mounted, MapView.styleURL = appliedStyle
+  //   unmounting → children null, MapView.styleURL = old applied (unchanged)
+  //                → a single commit that ONLY removes child layers; no style
+  //                  swap in flight, so removes always succeed.
+  //   loading    → children null, MapView.styleURL = new applied
+  //                → a single commit that ONLY swaps the style; no children
+  //                  to orphan. Waits for `onDidFinishLoadingStyle`.
+  //
+  // Each transition is driven by an effect so the previous commit's native
+  // work has flushed before the next begins.
+  const [phase, setPhase] = useState('ready');
+  const [appliedStyle, setAppliedStyle] = useState(resolvedStyle);
+
+  // ready → unmounting: the parent is requesting a different style.
+  useEffect(() => {
+    if (phase === 'ready' && appliedStyle !== resolvedStyle) {
+      setPhase('unmounting');
+    }
+  }, [phase, appliedStyle, resolvedStyle]);
+
+  // unmounting → loading: children have unmounted in the previous commit, now
+  // swap the style in isolation.
+  useEffect(() => {
+    if (phase === 'unmounting') {
+      setAppliedStyle(resolvedStyle);
+      setPhase('loading');
+    }
+  }, [phase, resolvedStyle]);
+
+  // loading → ready: new style finished loading; safe to remount children.
+  const handleDidFinishLoadingStyle = useCallback(() => {
+    setPhase((p) => (p === 'loading' ? 'ready' : p));
+  }, []);
+
+  // Safety fallback — don't hang children forever if the load event misses.
+  useEffect(() => {
+    if (phase !== 'loading') return;
+    const timer = setTimeout(() => {
+      setPhase((p) => (p === 'loading' ? 'ready' : p));
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [phase]);
+
+  const childrenMounted = phase === 'ready';
 
   // Default camera settings — applied once on first mount, ignored on prop change.
   const defaultCamera = useMemo(() => {
@@ -210,7 +265,7 @@ function MapViewWrapper(
     <Mapbox.MapView
       ref={mapRef}
       style={style}
-      styleURL={resolvedStyle}
+      styleURL={appliedStyle}
       pitchEnabled={pitchEnabled}
       rotateEnabled={rotateEnabled}
       scrollEnabled={scrollEnabled}
@@ -218,16 +273,18 @@ function MapViewWrapper(
       compassEnabled={showsCompass}
       attributionEnabled={false}
       logoEnabled={false}
+      scaleBarEnabled={false}
       onPress={onPress ? handlePress : undefined}
       onLongPress={onLongPress ? handleLongPress : undefined}
       onCameraChanged={handleCameraChanged}
       onDidFinishLoadingMap={onMapReady}
+      onDidFinishLoadingStyle={handleDidFinishLoadingStyle}
       {...rest}
     >
       <Mapbox.Camera ref={cameraRef} defaultSettings={defaultCamera} animationMode="none" />
       <Mapbox.Images images={IMAGE_MAP} />
       {showsUserLocation ? <Mapbox.UserLocation visible={true} animated={true} /> : null}
-      {children}
+      {childrenMounted ? children : null}
     </Mapbox.MapView>
   );
 }

@@ -14,8 +14,13 @@
  *   <Circle center={{latitude, longitude}} radius={40}
  *           strokeColor strokeWidth fillColor zIndex />
  */
-import { memo, useId, useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import Mapbox from '@rnmapbox/maps';
+
+// Module-level counter for stable Mapbox source/layer IDs (see notes in
+// PolylineWrapper / MarkerWrapper — `useId()` produces strings Mapbox can't
+// look up by name on style updates).
+let __idSeed = 0;
 
 const EARTH_R_M = 6378137;
 const SEGMENTS = 64;
@@ -49,10 +54,10 @@ function CircleWrapper({
   zIndex,
   /* eslint-enable no-unused-vars */
 }) {
-  const reactId = useId();
-  const sourceId = useMemo(() => `circle-src-${reactId}`, [reactId]);
-  const fillId = useMemo(() => `circle-fill-${reactId}`, [reactId]);
-  const lineId = useMemo(() => `circle-line-${reactId}`, [reactId]);
+  const ids = useMemo(() => {
+    const n = ++__idSeed;
+    return { sourceId: `circle-src-${n}`, fillId: `circle-fill-${n}`, lineId: `circle-line-${n}` };
+  }, []);
 
   const lat = center?.latitude;
   const lng = center?.longitude;
@@ -66,10 +71,10 @@ function CircleWrapper({
   if (!shape) return null;
 
   return (
-    <Mapbox.ShapeSource id={sourceId} shape={shape}>
-      <Mapbox.FillLayer id={fillId} style={{ fillColor }} />
+    <Mapbox.ShapeSource id={ids.sourceId} shape={shape}>
+      <Mapbox.FillLayer id={ids.fillId} style={{ fillColor }} />
       <Mapbox.LineLayer
-        id={lineId}
+        id={ids.lineId}
         style={{
           lineColor: strokeColor,
           lineWidth: strokeWidth,

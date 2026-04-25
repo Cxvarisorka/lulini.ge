@@ -2,9 +2,15 @@ import { memo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
+// Fixed wrapper frame — gives iOS @rnmapbox MarkerView a deterministic size
+// to lay out before first paint. Without this, Text inside the annotation
+// can snapshot with zero-measured frames and render invisibly.
+const WRAPPER_WIDTH = 128;
+const WRAPPER_HEIGHT = 68;
+
 function BoltPin({ color, title, caption, icon }) {
   return (
-    <View style={styles.wrapper}>
+    <View style={styles.wrapper} collapsable={false}>
       <View style={[styles.bubble, { backgroundColor: color }]}>
         {caption ? <Text style={styles.caption}>{caption}</Text> : null}
         <View style={styles.titleRow}>
@@ -31,7 +37,10 @@ function BoltPin({ color, title, caption, icon }) {
 
 const styles = StyleSheet.create({
   wrapper: {
+    width: WRAPPER_WIDTH,
+    height: WRAPPER_HEIGHT,
     alignItems: 'center',
+    justifyContent: 'flex-start',
   },
   bubble: {
     paddingHorizontal: 12,
@@ -42,17 +51,17 @@ const styles = StyleSheet.create({
     borderColor: '#fff',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.18,
-    shadowRadius: 4,
+    // Android retains its raised look via elevation. iOS layer-shadow is
+    // intentionally omitted — it triggered a CALayer z-order bug inside
+    // @rnmapbox annotation views that hid the Text children. The white
+    // border already provides enough separation from the map.
     elevation: 4,
   },
   caption: {
     fontSize: 9,
     fontWeight: '700',
     letterSpacing: 0.6,
-    color: 'rgba(255,255,255,0.8)',
+    color: 'rgba(255,255,255,0.85)',
     textTransform: 'uppercase',
   },
   titleRow: {
