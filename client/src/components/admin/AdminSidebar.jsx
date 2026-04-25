@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, ArrowLeft, Menu, X, Users, Navigation, DollarSign, PhoneCall } from 'lucide-react';
+import { LayoutDashboard, ArrowLeft, Menu, X, Users, Navigation, DollarSign, PhoneCall, Activity } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
 export function AdminSidebar() {
@@ -13,6 +13,7 @@ export function AdminSidebar() {
     { path: '/admin/rides', icon: Navigation, label: 'Taxi Rides' },
     { path: '/admin/drivers', icon: Users, label: 'Drivers' },
     { path: '/admin/pricing', icon: DollarSign, label: 'Pricing' },
+    { path: '/admin/cost-metrics', icon: Activity, label: 'Maps Cost' },
   ];
 
   const isActive = (path) => {

@@ -22,6 +22,7 @@ import AdminDrivers from './pages/admin/AdminDrivers';
 import AdminDriverInfo from './pages/admin/AdminDriverInfo';
 import { AdminPricing } from './pages/admin/AdminPricing';
 import { AdminCreateRide } from './pages/admin/AdminCreateRide';
+import { AdminCostMetrics } from './pages/admin/AdminCostMetrics';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { TawkTo } from './components/TawkTo';
 import './i18n';
@@ -63,6 +64,7 @@ function AppContent() {
               <Route path="drivers/:id" element={<AdminDriverInfo />} />
               <Route path="pricing" element={<AdminPricing />} />
               <Route path="create-ride" element={<AdminCreateRide />} />
+              <Route path="cost-metrics" element={<AdminCostMetrics />} />
             </Route>
           </Routes>
         </BrowserRouter>
